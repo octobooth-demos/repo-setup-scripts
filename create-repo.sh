@@ -1,15 +1,14 @@
 #!/bin/bash
 
 # Consolidated script to create GitHub repos from various templates
-# with different workflows based on the selected template
+# with different workflows based on the selected template.
+#
+# All repo/org metadata lives in config.json next to this script.
 
-set -e  # Exit on any error
+set -e
 
-# Resolve path to resource files (relative to this script)
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-
-# Default codespace machine type (omit --machine flag to use the smallest available)
-CODESPACE_MACHINE="standardLinux32gb"
+CONFIG_FILE="$SCRIPT_DIR/config.json"
 
 # --- Helper functions ---
 
@@ -25,6 +24,18 @@ cleanup_temp() {
 
 trap cleanup_temp EXIT
 
+# Read a value from config.json. Empty string if missing/null.
+# Usage: cfg <jq filter>
+cfg() {
+    jq -r "$1 // empty" "$CONFIG_FILE"
+}
+
+# Read a per-repo value from the selected entry by index.
+# Usage: repo_cfg <jq filter against the repo object>
+repo_cfg() {
+    jq -r ".repos[$SELECTED_INDEX] | $1 // empty" "$CONFIG_FILE"
+}
+
 clone_to_temp() {
     TEMP_DIR=$(mktemp -d)
     cd "$TEMP_DIR"
@@ -32,7 +43,7 @@ clone_to_temp() {
     cd "$REPO_NAME"
 }
 
-# Start a codespace for the current repo
+# Start a codespace for the current repo.
 # Usage: start_codespace [branch]
 start_codespace() {
     local branch="$1"
@@ -53,19 +64,28 @@ start_codespace() {
     echo "✅ Codespace created successfully!"
 }
 
-# Create a PR branch from local resource files
-# Usage: create_pr_from_resources <branch_name> <resource_subdir> <commit_msg> <pr_title>
+# Create a PR branch from a local resource directory.
+# Usage: create_pr_from_resources <branch> <resource_dir> <body_file> <commit_msg> <pr_title>
+#   resource_dir and body_file are paths relative to SCRIPT_DIR.
+#   body_file must live inside resource_dir; it is removed from the working
+#   tree after copy so it isn't committed into the demo branch.
 create_pr_from_resources() {
     local branch_name="$1"
-    local resource_subdir="$2"
-    local commit_msg="$3"
-    local pr_title="$4"
-    local body_file="$SCRIPT_DIR/resources/security-octo-supply/$resource_subdir/pr-body.md"
+    local resource_dir="$2"
+    local body_file="$3"
+    local commit_msg="$4"
+    local pr_title="$5"
+
+    local abs_resource_dir="$SCRIPT_DIR/$resource_dir"
+    local abs_body_file="$SCRIPT_DIR/$body_file"
+    local body_basename
+    body_basename=$(basename "$body_file")
 
     echo "📝 Creating PR: $pr_title..."
     git checkout -b "$branch_name" "$DEFAULT_BRANCH"
-    cp -R "$SCRIPT_DIR/resources/security-octo-supply/$resource_subdir/" .
-    rm -f pr-body.md  # Don't include the PR body file in the commit
+    cp -R "$abs_resource_dir"/ .
+    # Preserve previous behavior: don't commit the PR body file.
+    rm -f "$body_basename"
     git add -A
     git commit -m "$commit_msg" --quiet
     git push -u origin "$branch_name" --quiet 2>/dev/null
@@ -75,9 +95,88 @@ create_pr_from_resources() {
         --head "$branch_name" \
         --base "$DEFAULT_BRANCH" \
         --title "$pr_title" \
-        --body-file "$body_file"
+        --body-file "$abs_body_file"
 
     echo "✅ PR created: $pr_title"
+}
+
+# Validate required fields and referenced files for the selected workflow.
+# Fails before any remote side effect so a config typo cannot strand a
+# half-created repo on GitHub.
+validate_selected_repo() {
+    local missing=()
+
+    [ -z "$TEMPLATE_REPO" ] && missing+=("template")
+    [ -z "$REPO_BASE_NAME" ] && missing+=("repo_base_name")
+    [ -z "$REPO_DESCRIPTION" ] && missing+=("repo_description")
+    [ -z "$WORKFLOW" ] && missing+=("workflow")
+
+    case "$WORKFLOW" in
+        repo_only)
+            ;;
+        branch_and_codespace)
+            local branch
+            branch=$(repo_cfg '.branch_name')
+            [ -z "$branch" ] && missing+=("branch_name")
+            ;;
+        issue_and_codespace)
+            local title body assignee
+            title=$(repo_cfg '.issue.title')
+            body=$(repo_cfg '.issue.body_file')
+            assignee=$(repo_cfg '.issue.assignee')
+            [ -z "$title" ] && missing+=("issue.title")
+            [ -z "$body" ] && missing+=("issue.body_file")
+            [ -z "$assignee" ] && missing+=("issue.assignee")
+            if [ -n "$body" ] && [ ! -f "$SCRIPT_DIR/$body" ]; then
+                echo "❌ issue.body_file not found: $SCRIPT_DIR/$body"
+                exit 1
+            fi
+            ;;
+        security_prs)
+            local pr_count
+            pr_count=$(jq ".repos[$SELECTED_INDEX].prs | length // 0" "$CONFIG_FILE")
+            if [ "$pr_count" -eq 0 ]; then
+                missing+=("prs[]")
+            else
+                local i=0
+                while [ "$i" -lt "$pr_count" ]; do
+                    local branch resource_dir body commit title
+                    branch=$(jq -r ".repos[$SELECTED_INDEX].prs[$i].branch // empty" "$CONFIG_FILE")
+                    resource_dir=$(jq -r ".repos[$SELECTED_INDEX].prs[$i].resource_dir // empty" "$CONFIG_FILE")
+                    body=$(jq -r ".repos[$SELECTED_INDEX].prs[$i].body_file // empty" "$CONFIG_FILE")
+                    commit=$(jq -r ".repos[$SELECTED_INDEX].prs[$i].commit_message // empty" "$CONFIG_FILE")
+                    title=$(jq -r ".repos[$SELECTED_INDEX].prs[$i].title // empty" "$CONFIG_FILE")
+                    [ -z "$branch" ] && missing+=("prs[$i].branch")
+                    [ -z "$resource_dir" ] && missing+=("prs[$i].resource_dir")
+                    [ -z "$body" ] && missing+=("prs[$i].body_file")
+                    [ -z "$commit" ] && missing+=("prs[$i].commit_message")
+                    [ -z "$title" ] && missing+=("prs[$i].title")
+                    if [ -n "$resource_dir" ] && [ ! -d "$SCRIPT_DIR/$resource_dir" ]; then
+                        echo "❌ prs[$i].resource_dir not found: $SCRIPT_DIR/$resource_dir"
+                        exit 1
+                    fi
+                    if [ -n "$body" ] && [ ! -f "$SCRIPT_DIR/$body" ]; then
+                        echo "❌ prs[$i].body_file not found: $SCRIPT_DIR/$body"
+                        exit 1
+                    fi
+                    i=$((i + 1))
+                done
+            fi
+            ;;
+        *)
+            echo "❌ Unknown workflow: $WORKFLOW"
+            exit 1
+            ;;
+    esac
+
+    if [ "${#missing[@]}" -gt 0 ]; then
+        echo "❌ Selected repo '$REPO_KEY' is missing required config field(s):"
+        local field
+        for field in "${missing[@]}"; do
+            echo "   - $field"
+        done
+        exit 1
+    fi
 }
 
 # --- Preflight checks ---
@@ -85,14 +184,28 @@ create_pr_from_resources() {
 echo "🚀 GitHub demo repository creation tool"
 echo "======================================="
 
-# Check if GitHub CLI is installed
 if ! command -v gh &> /dev/null; then
     echo "❌ GitHub CLI is not installed. Please install it first:"
     echo "   brew install gh"
     exit 1
 fi
 
-# Ensure we're logged in to GitHub
+if ! command -v jq &> /dev/null; then
+    echo "❌ jq is not installed. Please install it first:"
+    echo "   brew install jq"
+    exit 1
+fi
+
+if [ ! -f "$CONFIG_FILE" ]; then
+    echo "❌ Config file not found: $CONFIG_FILE"
+    exit 1
+fi
+
+if ! jq empty "$CONFIG_FILE" 2>/dev/null; then
+    echo "❌ Config file is not valid JSON: $CONFIG_FILE"
+    exit 1
+fi
+
 echo "🔐 Checking GitHub authentication..."
 if ! gh auth status &> /dev/null; then
     echo "📝 Not logged in to GitHub. Starting login process..."
@@ -101,7 +214,6 @@ else
     echo "✅ Already authenticated with GitHub"
 fi
 
-# Get current GitHub username
 echo "👤 Getting current GitHub username..."
 CURRENT_USER=$(gh api user --jq '.login')
 if [ -z "$CURRENT_USER" ]; then
@@ -110,101 +222,74 @@ if [ -z "$CURRENT_USER" ]; then
 fi
 echo "✅ Current user: $CURRENT_USER"
 
-# Prompt for target organization
-echo ""
-read -p "🏢 Enter target organization (default: octobooth): " ORG_NAME
-ORG_NAME="${ORG_NAME:-octobooth}"
-echo "✅ Target org: $ORG_NAME"
+# --- Load config ---
+
+ORG_NAME=$(cfg '.org')
+if [ -z "$ORG_NAME" ]; then
+    echo "❌ Config is missing top-level 'org'"
+    exit 1
+fi
+echo "🏢 Target org: $ORG_NAME"
+
+CODESPACE_MACHINE=$(cfg '.codespace_machine')
+
+REPO_COUNT=$(jq '.repos | length' "$CONFIG_FILE")
+if [ "$REPO_COUNT" -eq 0 ]; then
+    echo "❌ Config has no repos defined"
+    exit 1
+fi
 
 # --- Template selection ---
 
 echo ""
 echo "📋 Available templates:"
-echo "1. Game Repository ($ORG_NAME/gh-game)"
-echo "   CLI games written in Go"
-echo "   → Creates repo + new branch + codespace"
-echo ""
-echo "2. React Dashboard ($ORG_NAME/task-dashboard)"
-echo "   Core React app for demoing code"
-echo "   → Creates repo + codespace + issue assigned to Copilot"
-echo ""
-echo "3. Mona Gallery ($ORG_NAME/mona-gallery)"
-echo "   Insecure version of Mona Gallery for security demos"
-echo "   → Creates repo only"
-echo ""
-echo "4. Secure Code (github-samples/securing-your-code)"
-echo "   Repo with a full set of labs and exercises about security"
-echo "   → Creates repo only"
-echo ""
-echo "5. Security Supply Chain ($ORG_NAME/security-octo-supply)"
-echo "   Security demo with TypeScript and PHP vulnerabilities"
-echo "   → Creates repo + two demo PRs"
-echo ""
-echo "6. Tailspin Toys ($ORG_NAME/tailspin-toys)"
-echo "   Game crowdfunding platform (Flask + Astro/Svelte)"
-echo "   → Creates repo + issue assigned to Copilot + codespace"
-echo ""
+i=0
+while [ "$i" -lt "$REPO_COUNT" ]; do
+    display=$(jq -r ".repos[$i].display_name // .repos[$i].key" "$CONFIG_FILE")
+    template=$(jq -r ".repos[$i].template" "$CONFIG_FILE")
+    template_org=$(jq -r ".repos[$i].template_org // \"$ORG_NAME\"" "$CONFIG_FILE")
+    description_short=$(jq -r ".repos[$i].description_short // empty" "$CONFIG_FILE")
+    workflow_hint=$(jq -r ".repos[$i].workflow_hint // empty" "$CONFIG_FILE")
+
+    echo "$((i + 1)). $display ($template_org/$template)"
+    [ -n "$description_short" ] && echo "   $description_short"
+    [ -n "$workflow_hint" ] && echo "   → $workflow_hint"
+    echo ""
+    i=$((i + 1))
+done
 
 while true; do
-    read -p "🎯 Select template (1-6): " choice
-    case $choice in
-        1)
-            TEMPLATE_REPO="$ORG_NAME/gh-game"
-            REPO_BASE_NAME="gh-game"
-            REPO_DESCRIPTION="CLI games written in Go"
-            WORKFLOW="branch_and_codespace"
-            SUMMARY_LINES=("Branch: new-game" "Codespace: Created")
-            break
-            ;;
-        2)
-            TEMPLATE_REPO="$ORG_NAME/task-dashboard"
-            REPO_BASE_NAME="task-dashboard"
-            REPO_DESCRIPTION="Core React app for demoing code"
-            WORKFLOW="codespace_and_issue"
-            SUMMARY_LINES=("Issue: Created and assigned to Copilot" "Codespace: Created")
-            break
-            ;;
-        3)
-            TEMPLATE_REPO="$ORG_NAME/mona-gallery"
-            REPO_BASE_NAME="mona-gallery"
-            REPO_DESCRIPTION="Mona Gallery for security demos"
-            WORKFLOW="repo_only"
-            SUMMARY_LINES=("Status: Repository ready for use")
-            break
-            ;;
-        4)
-            TEMPLATE_REPO="github-samples/securing-your-code"
-            REPO_BASE_NAME="securing-your-code"
-            REPO_DESCRIPTION="Security labs and exercises"
-            WORKFLOW="repo_only"
-            SUMMARY_LINES=("Status: Repository ready for use")
-            break
-            ;;
-        5)
-            TEMPLATE_REPO="$ORG_NAME/template-security-octo-supply"
-            REPO_BASE_NAME="security-octo-supply"
-            REPO_DESCRIPTION="Security supply chain demo"
-            WORKFLOW="security_prs"
-            SUMMARY_LINES=("Security features: Enabled" "PRs: TypeScript + PHP demo PRs created")
-            break
-            ;;
-        6)
-            TEMPLATE_REPO="$ORG_NAME/template-tailspin-toys"
-            REPO_BASE_NAME="tailspin-toys"
-            REPO_DESCRIPTION="Game crowdfunding platform"
-            WORKFLOW="issue_and_codespace"
-            SUMMARY_LINES=("Issue: Created and assigned to Copilot" "Codespace: Created")
-            break
-            ;;
-        *)
-            echo "❌ Invalid choice. Please select 1, 2, 3, 4, 5, or 6."
-            ;;
-    esac
+    read -p "🎯 Select template (1-$REPO_COUNT): " choice
+    if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le "$REPO_COUNT" ]; then
+        SELECTED_INDEX=$((choice - 1))
+        break
+    fi
+    echo "❌ Invalid choice. Please enter a number between 1 and $REPO_COUNT."
 done
+
+# --- Resolve selected repo fields ---
+
+REPO_KEY=$(repo_cfg '.key')
+TEMPLATE_NAME=$(repo_cfg '.template')
+TEMPLATE_ORG=$(repo_cfg '.template_org')
+[ -z "$TEMPLATE_ORG" ] && TEMPLATE_ORG="$ORG_NAME"
+TEMPLATE_REPO="$TEMPLATE_ORG/$TEMPLATE_NAME"
+REPO_BASE_NAME=$(repo_cfg '.repo_base_name')
+REPO_DESCRIPTION=$(repo_cfg '.repo_description')
+WORKFLOW=$(repo_cfg '.workflow')
+
+# Read summary lines into a Bash array (Bash 3.2 compatible — no mapfile).
+SUMMARY_LINES=()
+while IFS= read -r line; do
+    [ -n "$line" ] && SUMMARY_LINES+=("$line")
+done < <(jq -r ".repos[$SELECTED_INDEX].summary_lines[]? // empty" "$CONFIG_FILE")
+
+# --- Validate before any remote side effects ---
+
+validate_selected_repo
 
 # --- Repository creation ---
 
-# Create repository name
 RANDOM_SUFFIX=$(LC_ALL=C tr -dc 'a-z0-9' < /dev/urandom | head -c 4)
 REPO_NAME="${REPO_BASE_NAME}-${RANDOM_SUFFIX}"
 FULL_REPO_NAME="${ORG_NAME}/${REPO_NAME}"
@@ -220,11 +305,11 @@ gh repo create "$FULL_REPO_NAME" \
 
 echo "✅ Repository created successfully: $FULL_REPO_NAME"
 
-# Wait a moment for template to be fully processed
 echo "⏳ Waiting for template to be fully processed..."
 sleep 3
 
 # --- Clone repository locally ---
+
 REPOS_DIR="$HOME/repos"
 if [ ! -d "$REPOS_DIR" ]; then
     echo "📁 Creating $REPOS_DIR directory..."
@@ -235,7 +320,6 @@ echo "📥 Cloning repository to $REPOS_DIR/$REPO_NAME..."
 gh repo clone "$FULL_REPO_NAME" "$REPOS_DIR/$REPO_NAME" -- --quiet
 echo "✅ Repository cloned to $REPOS_DIR/$REPO_NAME"
 
-# Resolve the default branch for workflows that need it
 DEFAULT_BRANCH=$(gh api "repos/$FULL_REPO_NAME" --jq '.default_branch')
 echo "📍 Default branch: $DEFAULT_BRANCH"
 
@@ -245,94 +329,75 @@ case $WORKFLOW in
     "branch_and_codespace")
         echo ""
         echo "🌿 Creating new branch and codespace..."
-        
+
         cd "$REPOS_DIR/$REPO_NAME"
-        
-        BRANCH_NAME="new-game"
+
+        BRANCH_NAME=$(repo_cfg '.branch_name')
         echo "🌿 Creating branch: $BRANCH_NAME from $DEFAULT_BRANCH"
         git checkout "$DEFAULT_BRANCH"
         git checkout -b "$BRANCH_NAME"
         git push -u origin "$BRANCH_NAME"
         echo "✅ Branch created and pushed: $BRANCH_NAME"
-        
+
         start_codespace "$BRANCH_NAME"
         ;;
-        
-    "codespace_and_issue")
+
+    "issue_and_codespace")
         echo ""
         echo "📝 Creating issue and codespace..."
-        
-        ISSUE_BODY_FILE="$SCRIPT_DIR/resources/task-dashboard/issue-body.md"
-        if [ ! -f "$ISSUE_BODY_FILE" ]; then
-            echo "❌ Issue body file not found: $ISSUE_BODY_FILE"
-            exit 1
-        fi
-        
+
+        ISSUE_TITLE=$(repo_cfg '.issue.title')
+        ISSUE_BODY_FILE="$SCRIPT_DIR/$(repo_cfg '.issue.body_file')"
+        ISSUE_ASSIGNEE=$(repo_cfg '.issue.assignee')
+
         gh issue create \
             --repo "$FULL_REPO_NAME" \
-            --title "Create Playwright tests to ensure functionality" \
+            --title "$ISSUE_TITLE" \
             --body-file "$ISSUE_BODY_FILE" \
-            --assignee "@copilot"
-        echo "✅ Issue created and assigned to Copilot"
-        
+            --assignee "$ISSUE_ASSIGNEE"
+        echo "✅ Issue created and assigned to $ISSUE_ASSIGNEE"
+
         start_codespace
         ;;
-        
+
     "repo_only")
         echo ""
         echo "✅ Repository creation complete (no additional actions needed)"
         ;;
-        
-    "issue_and_codespace")
-        echo ""
-        echo "📝 Creating issue and codespace..."
-        
-        ISSUE_BODY_FILE="$SCRIPT_DIR/resources/$REPO_BASE_NAME/issue-body.md"
-        if [ ! -f "$ISSUE_BODY_FILE" ]; then
-            echo "❌ Issue body file not found: $ISSUE_BODY_FILE"
-            exit 1
-        fi
-        
-        gh issue create \
-            --repo "$FULL_REPO_NAME" \
-            --title "Add filtering by publisher and category" \
-            --body-file "$ISSUE_BODY_FILE" \
-            --assignee "@copilot"
-        echo "✅ Issue created and assigned to Copilot"
-        
-        start_codespace
-        ;;
-        
+
     "security_prs")
         echo ""
         echo "🔒 Setting up security demo with PRs..."
-        
-        if [ ! -d "$SCRIPT_DIR/resources/security-octo-supply" ]; then
-            echo "❌ Resource directory not found: $SCRIPT_DIR/resources/security-octo-supply"
-            exit 1
+
+        ENABLE_SECURITY=$(repo_cfg '.enable_security_features')
+        if [ "$ENABLE_SECURITY" = "true" ]; then
+            echo "🛡️  Enabling security features..."
+            gh api "repos/$FULL_REPO_NAME/vulnerability-alerts" -X PUT --silent 2>/dev/null
+            gh api "repos/$FULL_REPO_NAME/automated-security-fixes" -X PUT --silent 2>/dev/null
+            gh api "repos/$FULL_REPO_NAME/code-scanning/default-setup" -X PATCH \
+                -f state=configured -f query_suite=default --silent 2>/dev/null
+            echo "✅ Dependabot alerts, security updates, and Code Scanning enabled"
         fi
-        
-        # Enable Dependabot and Code Scanning
-        echo "🛡️  Enabling security features..."
-        gh api "repos/$FULL_REPO_NAME/vulnerability-alerts" -X PUT --silent 2>/dev/null
-        gh api "repos/$FULL_REPO_NAME/automated-security-fixes" -X PUT --silent 2>/dev/null
-        gh api "repos/$FULL_REPO_NAME/code-scanning/default-setup" -X PATCH \
-            -f state=configured -f query_suite=default --silent 2>/dev/null
-        echo "✅ Dependabot alerts, security updates, and Code Scanning enabled"
-        
+
         clone_to_temp
-        
-        create_pr_from_resources \
-            "feature-add-tos-download" \
-            "pr-typescript" \
-            "feat: Adds terms of services download" \
-            "Demo: Preventing Vulnerabilities in TypeScript"
-        
-        create_pr_from_resources \
-            "feature/supplier-notes" \
-            "pr-php" \
-            "feat: add supplier notes feature for internal communication" \
-            "Demo: Preventing Vulnerabilities in PHP"
+
+        PR_COUNT=$(jq ".repos[$SELECTED_INDEX].prs | length" "$CONFIG_FILE")
+        i=0
+        while [ "$i" -lt "$PR_COUNT" ]; do
+            pr_branch=$(jq -r ".repos[$SELECTED_INDEX].prs[$i].branch" "$CONFIG_FILE")
+            pr_resource_dir=$(jq -r ".repos[$SELECTED_INDEX].prs[$i].resource_dir" "$CONFIG_FILE")
+            pr_body_file=$(jq -r ".repos[$SELECTED_INDEX].prs[$i].body_file" "$CONFIG_FILE")
+            pr_commit_msg=$(jq -r ".repos[$SELECTED_INDEX].prs[$i].commit_message" "$CONFIG_FILE")
+            pr_title=$(jq -r ".repos[$SELECTED_INDEX].prs[$i].title" "$CONFIG_FILE")
+
+            create_pr_from_resources \
+                "$pr_branch" \
+                "$pr_resource_dir" \
+                "$pr_body_file" \
+                "$pr_commit_msg" \
+                "$pr_title"
+            i=$((i + 1))
+        done
         ;;
 esac
 
@@ -350,7 +415,7 @@ for line in "${SUMMARY_LINES[@]}"; do
     echo "   $line"
 done
 
-if [[ "$WORKFLOW" == "branch_and_codespace" || "$WORKFLOW" == "codespace_and_issue" || "$WORKFLOW" == "issue_and_codespace" ]]; then
+if [[ "$WORKFLOW" == "branch_and_codespace" || "$WORKFLOW" == "issue_and_codespace" ]]; then
     echo ""
     echo "💡 You can access your codespace at: https://github.com/codespaces"
 fi

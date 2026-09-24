@@ -3,53 +3,6 @@
   "codespace_machine": "standardLinux32gb",
   "repos": [
     {
-      "key": "gh-game",
-      "display_name": "Game Repository",
-      "description_short": "CLI games written in Go",
-      "workflow_hint": "Creates repo + new branch + codespace",
-      "template": "gh-game",
-      "repo_base_name": "gh-game",
-      "repo_description": "CLI games written in Go",
-      "workflow": "branch_and_codespace",
-      "branch_name": "new-game",
-      "summary_lines": [
-        "Branch: new-game",
-        "Codespace: Created"
-      ]
-    },
-    {
-      "key": "task-dashboard",
-      "display_name": "React Dashboard",
-      "description_short": "Core React app for demoing code",
-      "workflow_hint": "Creates repo + codespace + issue assigned to Copilot",
-      "template": "task-dashboard",
-      "repo_base_name": "task-dashboard",
-      "repo_description": "Core React app for demoing code",
-      "workflow": "issue_and_codespace",
-      "issue": {
-        "title": "Create Playwright tests to ensure functionality",
-        "body_file": "resources/task-dashboard/issue-body.md",
-        "assignee": "@copilot"
-      },
-      "summary_lines": [
-        "Issue: Created and assigned to Copilot",
-        "Codespace: Created"
-      ]
-    },
-    {
-      "key": "mona-gallery",
-      "display_name": "Mona Gallery",
-      "description_short": "Insecure version of Mona Gallery for security demos",
-      "workflow_hint": "Creates repo only",
-      "template": "mona-gallery",
-      "repo_base_name": "mona-gallery",
-      "repo_description": "Mona Gallery for security demos",
-      "workflow": "repo_only",
-      "summary_lines": [
-        "Status: Repository ready for use"
-      ]
-    },
-    {
       "key": "securing-your-code",
       "display_name": "Secure Code",
       "description_short": "Repo with a full set of labs and exercises about security",
@@ -68,7 +21,7 @@
       "display_name": "Security Supply Chain",
       "description_short": "Security demo with TypeScript and PHP vulnerabilities",
       "workflow_hint": "Creates repo + two demo PRs",
-      "template": "template-security-octo-supply",
+      "template": "security-octo-supply",
       "repo_base_name": "security-octo-supply",
       "repo_description": "Security supply chain demo",
       "workflow": "security_prs",
@@ -99,7 +52,7 @@
       "display_name": "Tailspin Toys",
       "description_short": "Game crowdfunding platform (Flask + Astro/Svelte)",
       "workflow_hint": "Creates repo + issue assigned to Copilot + codespace",
-      "template": "template-tailspin-toys",
+      "template": "tailspin-toys",
       "repo_base_name": "tailspin-toys",
       "repo_description": "Game crowdfunding platform",
       "workflow": "issue_and_codespace",

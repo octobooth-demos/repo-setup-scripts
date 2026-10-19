@@ -469,9 +469,27 @@ run_cleanup() {
 echo "🚀 GitHub demo repository creation tool"
 echo "======================================="
 
+# `bash ./create-repo.sh` may not see PATH entries that only zsh startup files add
+# (for example Homebrew's /opt/homebrew/bin), so add common install locations and
+# the login shell's PATH before deciding a tool is missing.
+for dir in /opt/homebrew/bin /usr/local/bin "$HOME/.local/bin" "$HOME/bin"; do
+    if [ -d "$dir" ] && [[ ":$PATH:" != *":$dir:"* ]]; then
+        PATH="$PATH:$dir"
+    fi
+done
+if ! command -v gh &> /dev/null || ! command -v jq &> /dev/null; then
+    if [ -n "${SHELL:-}" ] && [ -x "$SHELL" ]; then
+        LOGIN_PATH=$("$SHELL" -lic 'printf "\n__DEMO_PATH__%s\n" "$PATH"' 2>/dev/null </dev/null | sed -n 's/^__DEMO_PATH__//p' | tail -1 || true)
+        [ -n "$LOGIN_PATH" ] && PATH="$PATH:$LOGIN_PATH"
+    fi
+fi
+export PATH
+
 if ! command -v gh &> /dev/null; then
-    echo "❌ GitHub CLI is not installed. Please install it first:"
-    echo "   brew install gh"
+    echo "❌ GitHub CLI (gh) was not found on PATH."
+    echo "   If 'gh --version' works in your terminal, run 'command -v gh' there and"
+    echo "   make sure that folder is on PATH for bash. Otherwise install it: brew install gh"
+    echo "   PATH seen by this script: $PATH"
     exit 1
 fi
 

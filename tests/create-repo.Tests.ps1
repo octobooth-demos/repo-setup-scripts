@@ -333,7 +333,7 @@ try {
                     Assert ($prCall.Arguments -contains 'trunk') 'PR did not use the default branch.'
                 }
             }
-            if ($scenario -eq 'serve') {
+            if ($scenario -in @('serve', 'stacked-prs')) {
                 Assert ($testState.NpmCalls.Count -eq 1) 'Serve did not start npm.'
                 Assert (($testState.NpmCalls[0].Arguments -join ' ') -eq 'start -- -o') 'Serve ran the wrong npm command.'
                 Assert ($testState.NpmCalls[0].Location.StartsWith($homeRepos)) 'Serve did not run in the local clone.'

@@ -54,7 +54,7 @@ The script prints `Target owner:` before creating anything. Templates in `octobo
 
 ## Showing it locally
 
-Pass `--serve` / `-Serve` to start the app right after setup. The script checks out the top of the stack in `~/repos/<repo>` and runs `npm start -- -o` (a static server on http://localhost:8080 that opens the browser; if 8080 is taken, for example by a server from an earlier demo repo, it uses the next free port and opens that instead). It needs Node.js and cannot be combined with `--no-clone`. Press Ctrl+C to stop.
+Booth Bingo starts the app automatically after setup, whether you pick it from the menu or pass `--template booth-bingo` (it is skipped with `--no-clone` or when Node.js is missing). For other templates, pass `--serve` / `-Serve`. The script checks out the top of the stack in `~/repos/<repo>` and runs `npm start -- -o` (a static server on http://localhost:8080 that opens the browser; if 8080 is taken, for example by a server from an earlier demo repo, it uses the next free port and opens that instead). It needs Node.js and cannot be combined with `--no-clone`. Press Ctrl+C to stop.
 
 ```bash
 bash ./create-repo.sh --template booth-bingo --serve
@@ -90,7 +90,7 @@ Deleting repos needs the `delete_repo` scope. The scripts request it when they l
 
 ## Workflows and config fields
 
-Each `repos[]` entry needs `key`, `display_name`, `template`, `repo_base_name`, and `workflow`. Optional `template_org` overrides the top-level `org` for the template source, optional `owner` pins where the repo is created (see [above](#where-repos-are-created)), and `summary_lines` are printed at the end.
+Each `repos[]` entry needs `key`, `display_name`, `template`, `repo_base_name`, and `workflow`. Optional `template_org` overrides the top-level `org` for the template source, optional `owner` pins where the repo is created (see [above](#where-repos-are-created)), optional `"serve": true` starts the [local preview](#showing-it-locally) automatically whenever the repo is cloned (Booth Bingo sets this), and `summary_lines` are printed at the end.
 
 | `workflow` | Extra fields | What it does |
 | --- | --- | --- |

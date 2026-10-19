@@ -409,6 +409,16 @@ try {
         else { $config.org }
     Write-Host "Target owner: $repoOwner"
 
+    # Entries with "serve": true start the local preview whenever there is a local clone.
+    if ($selectedRepo.serve -eq $true -and -not $NoClone -and -not $Serve) {
+        if (Get-Command 'npm' -ErrorAction SilentlyContinue) {
+            $Serve = $true
+        }
+        else {
+            Write-Host 'Skipping the local preview: Node.js (npm) is not installed.'
+        }
+    }
+
     $templateOrg = $selectedRepo.template_org
     if (-not $templateOrg) { $templateOrg = $config.org }
     $templateRepo = "$templateOrg/$($selectedRepo.template)"

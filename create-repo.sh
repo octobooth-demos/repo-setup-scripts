@@ -611,6 +611,15 @@ else
 fi
 echo "🏢 Target owner: $OWNER"
 
+# Entries with "serve": true start the local preview whenever there is a local clone.
+if [ "$(repo_cfg '.serve')" = "true" ] && [ "$NO_CLONE" = false ] && [ "$SERVE" = false ]; then
+    if command -v npm &> /dev/null; then
+        SERVE=true
+    else
+        echo "⚠️  Skipping the local preview: Node.js (npm) is not installed."
+    fi
+fi
+
 # Read summary lines into a Bash array (Bash 3.2 compatible — no mapfile).
 SUMMARY_LINES=()
 while IFS= read -r line; do

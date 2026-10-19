@@ -18,6 +18,7 @@
     },
     {
       "key": "security-octo-supply",
+      "owner": "org",
       "display_name": "Security Supply Chain",
       "description_short": "Security demo with TypeScript and PHP vulnerabilities",
       "workflow_hint": "Creates repo + two demo PRs",

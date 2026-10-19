@@ -15,22 +15,72 @@ DEMO_TOPIC="demo-generated"
 
 usage() {
     cat <<'EOF'
-Usage: create-repo.sh [--template <key>] [--no-clone]
+Usage: create-repo.sh [--template <key>] [--owner <name>] [--no-clone | --serve]
+       create-repo.sh --cleanup [--owner <name>] [--older-than <hours>] [--dry-run] [--yes]
 
-  (no args)          Interactive: pick a template from a menu.
-  --template <key>   Non-interactive: use the config.json repo entry with this key.
-                     Never prompts and never starts `gh auth login`.
-  --no-clone         Skip the permanent clone into ~/repos (useful in CI).
-  -h, --help         Show this help.
+  (no args)            Interactive: pick a template from a menu.
+  --template <key>     Non-interactive: use the config.json repo entry with this key.
+                       Never prompts and never starts `gh auth login`.
+  --owner <name>       Account or org to create the repo in. Default: the template's
+                       "owner" in config.json, otherwise the logged-in account.
+  --no-clone           Skip the permanent clone into ~/repos (useful in CI).
+  --serve              After setup, check out the demo (top of the stack for stacked
+                       PRs) and serve it on http://localhost:8080. Needs Node.js.
+  --cleanup            Delete repos with the demo-generated topic owned by --owner
+                       (default: the logged-in account) that are older than --older-than.
+  --older-than <hours> Age cutoff for --cleanup (default: 24).
+  --dry-run            With --cleanup, list what would be deleted.
+  --yes                With --cleanup, skip the confirmation prompt.
+  -h, --help           Show this help.
 EOF
+}
+
+require_value() {
+    if [ -z "${2:-}" ]; then
+        echo "❌ $1 requires a value"
+        usage
+        exit 2
+    fi
 }
 
 TEMPLATE_KEY=""
 NON_INTERACTIVE=false
 NO_CLONE=false
+OWNER_OVERRIDE=""
+SERVE=false
+CLEANUP=false
+OLDER_THAN_HOURS=24
+DRY_RUN=false
+ASSUME_YES=false
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
+        --owner)
+            require_value "$1" "${2:-}"
+            OWNER_OVERRIDE="$2"
+            shift 2
+            ;;
+        --serve)
+            SERVE=true
+            shift
+            ;;
+        --cleanup)
+            CLEANUP=true
+            shift
+            ;;
+        --older-than)
+            require_value "$1" "${2:-}"
+            OLDER_THAN_HOURS="$2"
+            shift 2
+            ;;
+        --dry-run)
+            DRY_RUN=true
+            shift
+            ;;
+        --yes)
+            ASSUME_YES=true
+            shift
+            ;;
         --template)
             if [ -z "${2:-}" ]; then
                 echo "❌ --template requires a template key"
@@ -66,6 +116,23 @@ while [ "$#" -gt 0 ]; do
             ;;
     esac
 done
+
+if [ "$CLEANUP" = true ] && { [ -n "$TEMPLATE_KEY" ] || [ "$SERVE" = true ] || [ "$NO_CLONE" = true ]; }; then
+    echo "❌ --cleanup cannot be combined with --template, --serve, or --no-clone"
+    exit 2
+fi
+if [ "$CLEANUP" = false ] && { [ "$DRY_RUN" = true ] || [ "$ASSUME_YES" = true ]; }; then
+    echo "❌ --dry-run and --yes only apply to --cleanup"
+    exit 2
+fi
+if ! [[ "$OLDER_THAN_HOURS" =~ ^[0-9]+$ ]]; then
+    echo "❌ --older-than must be a whole number of hours"
+    exit 2
+fi
+if [ "$SERVE" = true ] && [ "$NO_CLONE" = true ]; then
+    echo "❌ --serve needs the local clone, so it cannot be combined with --no-clone"
+    exit 2
+fi
 
 # --- Helper functions ---
 
@@ -344,6 +411,59 @@ validate_selected_repo() {
     fi
 }
 
+# Delete demo repos (demo-generated topic) owned by $OWNER that are older than
+# $OLDER_THAN_HOURS. Never touches repos without the topic.
+run_cleanup() {
+    local endpoint="orgs/$OWNER/repos?per_page=100"
+    [ "$OWNER" = "$CURRENT_USER" ] && endpoint="user/repos?affiliation=owner&per_page=100"
+
+    echo "🧹 Looking for '$DEMO_TOPIC' repos owned by $OWNER older than ${OLDER_THAN_HOURS}h..."
+    local candidates=()
+    local line
+    while IFS= read -r line; do
+        [ -n "$line" ] && candidates+=("$line")
+    done < <(gh api --paginate "$endpoint" | jq -r \
+        --arg owner "$OWNER" --arg topic "$DEMO_TOPIC" --argjson hours "$OLDER_THAN_HOURS" '
+        .[]
+        | select(.owner.login == $owner)
+        | select((.topics // []) | index($topic))
+        | select((.created_at | fromdateiso8601) < (now - $hours * 3600))
+        | "\(.full_name)  (created \(.created_at))"')
+
+    if [ "${#candidates[@]}" -eq 0 ]; then
+        echo "✅ Nothing to clean up."
+        return
+    fi
+    printf '   %s\n' "${candidates[@]}"
+    if [ "$DRY_RUN" = true ]; then
+        echo "ℹ️  Dry run: would delete ${#candidates[@]} repo(s)."
+        return
+    fi
+    if [ "$ASSUME_YES" != true ]; then
+        local answer=""
+        read -r -p "❓ Delete these ${#candidates[@]} repo(s)? [y/N] " answer || true
+        if [[ ! "$answer" =~ ^[Yy] ]]; then
+            echo "Cancelled."
+            return
+        fi
+    fi
+
+    local failed=0 repo
+    for line in "${candidates[@]}"; do
+        repo="${line%% *}"
+        if gh repo delete "$repo" --yes; then
+            echo "🗑️  Deleted $repo"
+        else
+            failed=$((failed + 1))
+        fi
+    done
+    if [ "$failed" -gt 0 ]; then
+        echo "❌ $failed repo(s) could not be deleted. If this is a permissions error, run:"
+        echo "   gh auth refresh -h github.com -s delete_repo"
+        exit 1
+    fi
+}
+
 # --- Preflight checks ---
 
 echo "🚀 GitHub demo repository creation tool"
@@ -366,6 +486,11 @@ if [ ! -f "$CONFIG_FILE" ]; then
     exit 1
 fi
 
+if [ "$SERVE" = true ] && ! command -v npm &> /dev/null; then
+    echo "❌ --serve needs Node.js (npm). Install it from https://nodejs.org/"
+    exit 1
+fi
+
 if ! jq empty "$CONFIG_FILE" 2>/dev/null; then
     echo "❌ Config file is not valid JSON: $CONFIG_FILE"
     exit 1
@@ -379,16 +504,19 @@ if ! gh auth status &> /dev/null; then
         exit 1
     fi
     echo "📝 Not logged in to GitHub. Starting login process..."
-    gh auth login
+    # delete_repo lets --cleanup remove this account's old demo repos.
+    gh auth login -s delete_repo
 else
     echo "✅ Already authenticated with GitHub"
 fi
 
 echo "👤 Getting current GitHub username..."
 CURRENT_USER=$(gh api user --jq '.login' 2>/dev/null || true)
+USER_TOKEN=true
 if [ -z "$CURRENT_USER" ] && [ "$NON_INTERACTIVE" = true ]; then
     # GitHub App installation tokens cannot read /user.
     CURRENT_USER="${GITHUB_ACTOR:-github-app}"
+    USER_TOKEN=false
 fi
 if [ -z "$CURRENT_USER" ]; then
     echo "❌ Failed to get current GitHub username"
@@ -403,7 +531,12 @@ if [ -z "$ORG_NAME" ]; then
     echo "❌ Config is missing top-level 'org'"
     exit 1
 fi
-echo "🏢 Target org: $ORG_NAME"
+
+if [ "$CLEANUP" = true ]; then
+    OWNER="${OWNER_OVERRIDE:-$CURRENT_USER}"
+    run_cleanup
+    exit 0
+fi
 
 CODESPACE_MACHINE=$(cfg '.codespace_machine')
 
@@ -463,6 +596,21 @@ REPO_BASE_NAME=$(repo_cfg '.repo_base_name')
 REPO_DESCRIPTION=$(repo_cfg '.repo_description')
 WORKFLOW=$(repo_cfg '.workflow')
 
+# Owner precedence: --owner, then the entry's "owner" ("org" = top-level org),
+# then the logged-in account. App tokens have no account, so they use the org.
+CONFIG_OWNER=$(repo_cfg '.owner')
+[ "$CONFIG_OWNER" = "org" ] && CONFIG_OWNER="$ORG_NAME"
+if [ -n "$OWNER_OVERRIDE" ]; then
+    OWNER="$OWNER_OVERRIDE"
+elif [ -n "$CONFIG_OWNER" ]; then
+    OWNER="$CONFIG_OWNER"
+elif [ "$USER_TOKEN" = true ]; then
+    OWNER="$CURRENT_USER"
+else
+    OWNER="$ORG_NAME"
+fi
+echo "🏢 Target owner: $OWNER"
+
 # Read summary lines into a Bash array (Bash 3.2 compatible — no mapfile).
 SUMMARY_LINES=()
 while IFS= read -r line; do
@@ -477,7 +625,7 @@ validate_selected_repo
 
 RANDOM_SUFFIX=$(LC_ALL=C tr -dc 'a-z0-9' < /dev/urandom | head -c 4)
 REPO_NAME="${REPO_BASE_NAME}-${RANDOM_SUFFIX}"
-FULL_REPO_NAME="${ORG_NAME}/${REPO_NAME}"
+FULL_REPO_NAME="${OWNER}/${REPO_NAME}"
 
 echo ""
 echo "📦 Creating repository: $FULL_REPO_NAME"
@@ -623,6 +771,7 @@ case $WORKFLOW in
             prev_branch="$layer_branch"
             i=$((i + 1))
         done
+        SERVE_BRANCH="$prev_branch"
         set_output top_pr_url "$TOP_PR_URL"
 
         register_stack
@@ -653,3 +802,22 @@ fi
 
 echo ""
 echo "✨ All done!"
+
+# --- Optional local preview ---
+
+if [ "$SERVE" = true ]; then
+    cleanup_temp
+    cd "$CLONE_PATH"
+    if [ ! -f package.json ]; then
+        echo "⚠️  --serve: this template has no package.json, so there is nothing to serve."
+        exit 0
+    fi
+    git fetch --quiet origin
+    git checkout --quiet "${SERVE_BRANCH:-$DEFAULT_BRANCH}"
+    echo ""
+    echo "🌐 Serving ${SERVE_BRANCH:-$DEFAULT_BRANCH} at http://localhost:8080 (Ctrl+C to stop)"
+    if jq -e '.scripts.layer' package.json > /dev/null; then
+        echo "   Switch layers from another terminal: cd \"$CLONE_PATH\" && npm run layer -- <0-3>"
+    fi
+    npm start -- -o
+fi

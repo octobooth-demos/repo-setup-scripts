@@ -10,7 +10,7 @@ Run [`create-repo.ps1`](create-repo.ps1) with Windows PowerShell 5.1 or [PowerSh
 .\create-repo.ps1
 ```
 
-Select a template when prompted. The script offers GitHub login if needed, creates a private repository in the configured organization, clones it into `$HOME/repos`, and runs the selected workflow. You need permission to create repositories in that organization and any permissions required for the selected security or Codespaces features.
+Select a template when prompted. The script offers GitHub login if needed, creates a private repository in the [target owner](#where-repos-are-created), clones it into `$HOME/repos`, and runs the selected workflow. You need permission to create repositories in that organization and any permissions required for the selected security or Codespaces features.
 
 Configuration and resource paths are resolved relative to the script, so it can be invoked from another directory. The script restores your working directory and removes its temporary security-demo clone even if a command fails. The permanent clone and any already-created GitHub resources are retained on failure; errors stop the script rather than continuing with incomplete setup.
 
@@ -36,11 +36,61 @@ bash ./create-repo.sh --template booth-bingo [--no-clone]
 
 With no arguments the scripts behave exactly as before. In non-interactive mode they never start `gh auth login`; authenticate first (or set `GH_TOKEN`), otherwise the script fails. `--no-clone` / `-NoClone` skips the permanent clone into `~/repos` and is rejected for `branch_and_codespace`. Unknown keys fail before anything is created and list the valid keys.
 
-Every repository the scripts create gets the `demo-generated` topic, which is what [cleanup](#chatops) uses to find demo repos.
+Every repository the scripts create gets the `demo-generated` topic, which is what [cleanup](#cleaning-up) uses to find demo repos.
+
+## Where repos are created
+
+By default, repos are created in **the account that is logged in** (`gh api user`), so each booth machine (`octobooth-1`, `octobooth-2`, …) gets its own copies. The owner is resolved in this order:
+
+1. `--owner <name>` / `-Owner <name>`
+2. The config entry's `owner` field. `"owner": "org"` means the top-level `org`; any other value is used as-is. `security-octo-supply` is pinned to the org because it needs code scanning.
+3. The logged-in account.
+4. The top-level `org` (only when there is no user account, such as a GitHub App token in Actions).
+
+The script prints `Target owner:` before creating anything. Templates in `octobooth-demos` are internal, so the booth account must be an org member to use them.
+
+> [!NOTE]
+> `tailspin-toys` assigns an issue to `@copilot` and starts a Codespace. In a personal account those need Copilot coding agent and Codespaces access on that account. If they are not available, run it with `--owner octobooth-demos`.
+
+## Showing it locally
+
+Pass `--serve` / `-Serve` to start the app right after setup. The script checks out the top of the stack in `~/repos/<repo>` and runs `npm start -- -o` (a static server on http://localhost:8080 that opens the browser). It needs Node.js and cannot be combined with `--no-clone`. Press Ctrl+C to stop.
+
+```bash
+bash ./create-repo.sh --template booth-bingo --serve
+```
+
+```powershell
+.\create-repo.ps1 -Template booth-bingo -Serve
+```
+
+While it is running, switch the code to any layer from a second terminal and reload the browser:
+
+```bash
+cd ~/repos/booth-bingo-xxxx
+npm run layer -- 0   # main: the plain grid
+npm run layer -- 3   # full stack: win detection + celebration
+```
+
+`npm run layer` refuses to run if you have uncommitted changes, and falls back to `main` once a layer branch has been merged and deleted.
+
+## Cleaning up
+
+Delete old demo repos from the logged-in account (or `--owner` / `-Owner`). Only repos with the `demo-generated` topic that are older than the cutoff (default 24 hours) are considered; everything else is left alone. The script lists matches and asks before deleting.
+
+```bash
+bash ./create-repo.sh --cleanup [--older-than 24] [--dry-run] [--yes] [--owner <name>]
+```
+
+```powershell
+.\create-repo.ps1 -Cleanup [-OlderThanHours 24] [-DryRun] [-Yes] [-Owner <name>]
+```
+
+Deleting repos needs the `delete_repo` scope. The scripts request it when they log in; for an existing login run `gh auth refresh -h github.com -s delete_repo`.
 
 ## Workflows and config fields
 
-Each `repos[]` entry needs `key`, `display_name`, `template`, `repo_base_name`, and `workflow`. Optional `template_org` overrides the top-level `org` for the template source, and `summary_lines` are printed at the end.
+Each `repos[]` entry needs `key`, `display_name`, `template`, `repo_base_name`, and `workflow`. Optional `template_org` overrides the top-level `org` for the template source, optional `owner` pins where the repo is created (see [above](#where-repos-are-created)), and `summary_lines` are printed at the end.
 
 | `workflow` | Extra fields | What it does |
 | --- | --- | --- |
@@ -60,13 +110,13 @@ Each `repos[]` entry needs `key`, `display_name`, `template`, `repo_base_name`, 
 2. `bingo/2-wire-ui` → layer 1: highlight the winning line
 3. `bingo/3-celebration` → layer 2: banner, confetti, reset
 
-Each overlay holds the cumulative files for its layer. The booth talk track is in the template's README. Merge stacks from the GitHub UI, not `gh pr merge`.
+Each overlay holds the cumulative files for its layer. The booth talk track is in the template's README; use [`--serve`](#showing-it-locally) and `npm run layer` to show each layer running. Merge stacks from the GitHub UI, not `gh pr merge`.
 
 ## ChatOps
 
 Two workflows in this repo let you create and clean up demos without a booth machine running the script.
 
-- **[New demo](.github/workflows/new-demo.yml)**: run it from the Actions tab and pick a template, or comment `/new-demo <key>` on any issue or PR in this repo. It replies with the repo URL and, for stacks, the top PR URL. Only `repo_only`, `security_prs`, and `stacked_prs` templates are allowed, because Codespaces need a user token.
+- **[New demo](.github/workflows/new-demo.yml)**: run it from the Actions tab and pick a template, or comment `/new-demo <key>` on any issue or PR in this repo. Repos are always created in `octobooth-demos`, because App tokens cannot create repos in personal accounts. It replies with the repo URL and, for stacks, the top PR URL. Only `repo_only`, `security_prs`, and `stacked_prs` templates are allowed, because Codespaces need a user token.
 - **[Clean up demos](.github/workflows/cleanup-demos.yml)**: runs nightly, from the Actions tab (`max_age_hours`, default 24; `dry_run`, default on), or by comment: `/cleanup [hours] [--dry-run]`. It only deletes repos in `octobooth-demos` that have the `demo-generated` topic **and** are older than the cutoff.
 
 Comment commands only run for users with write, maintain, or admin access to this repository.

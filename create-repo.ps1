@@ -4,8 +4,17 @@
 param(
     # Non-interactive: config.json repo key to create. Never prompts or starts gh auth login.
     [string]$Template,
+    # Account or org to create the repo in. Default: the template's "owner" in config.json, else the logged-in account.
+    [string]$Owner,
     # Skip the permanent clone into $HOME/repos (useful in CI).
-    [switch]$NoClone
+    [switch]$NoClone,
+    # After setup, check out the demo (top of the stack) and serve it on http://localhost:8080. Needs Node.js.
+    [switch]$Serve,
+    # Delete demo-generated repos owned by -Owner (default: logged-in account) older than -OlderThanHours.
+    [switch]$Cleanup,
+    [int]$OlderThanHours = 24,
+    [switch]$DryRun,
+    [switch]$Yes
 )
 
 $ErrorActionPreference = 'Stop'
@@ -16,6 +25,19 @@ $originalLocation = Get-Location
 $tempDirectory = $null
 $demoTopic = 'demo-generated'
 $nonInteractive = -not [string]::IsNullOrWhiteSpace($Template)
+
+if ($Cleanup -and ($nonInteractive -or $Serve -or $NoClone)) {
+    throw '-Cleanup cannot be combined with -Template, -Serve, or -NoClone.'
+}
+if (-not $Cleanup -and ($DryRun -or $Yes)) {
+    throw '-DryRun and -Yes only apply to -Cleanup.'
+}
+if ($OlderThanHours -lt 0) {
+    throw '-OlderThanHours must be zero or more.'
+}
+if ($Serve -and $NoClone) {
+    throw '-Serve needs the local clone, so it cannot be combined with -NoClone.'
+}
 
 # Native command failures do not throw consistently across PowerShell versions.
 function Invoke-Native {
@@ -138,6 +160,72 @@ function Start-DemoCodespace {
     Write-Host 'Codespace created successfully!'
 }
 
+function Connect-GitHubAccount {
+    Write-Host 'Checking GitHub authentication...'
+    # Authentication status is the one expected nonzero exit: offer login.
+    & gh auth status | Out-Host
+    if ($LASTEXITCODE -ne 0) {
+        if ($nonInteractive) {
+            throw 'Not authenticated with GitHub. In non-interactive mode, log in first (gh auth login) or set GH_TOKEN.'
+        }
+        Write-Host 'Not logged in to GitHub. Starting login process...'
+        Invoke-Native 'gh' @('auth', 'login', '-s', 'delete_repo') | Out-Host
+    }
+    $currentUser = & gh api user --jq '.login'
+    if ($LASTEXITCODE -ne 0) { $currentUser = $null }
+    $userToken = $true
+    if ([string]::IsNullOrWhiteSpace($currentUser) -and $nonInteractive) {
+        # GitHub App installation tokens cannot read /user.
+        $currentUser = if ($env:GITHUB_ACTOR) { $env:GITHUB_ACTOR } else { 'github-app' }
+        $userToken = $false
+    }
+    if ([string]::IsNullOrWhiteSpace($currentUser)) {
+        throw 'Failed to get current GitHub username.'
+    }
+    Write-Host "Current user: $currentUser"
+    [pscustomobject]@{ User = $currentUser; UserToken = $userToken }
+}
+
+# Delete demo repos (demo-generated topic) owned by $CleanupOwner older than -OlderThanHours.
+# Never touches repos without the topic.
+function Invoke-DemoCleanup {
+    param([string]$CleanupOwner, [string]$CurrentUser)
+
+    $endpoint = if ($CleanupOwner -eq $CurrentUser) { 'user/repos?affiliation=owner&per_page=100' } else { "orgs/$CleanupOwner/repos?per_page=100" }
+    Write-Host "Looking for '$demoTopic' repos owned by $CleanupOwner older than $($OlderThanHours)h..."
+    $lines = & gh api --paginate $endpoint --jq '.[] | {full_name, created_at, topics, owner: .owner.login}'
+    if ($LASTEXITCODE -ne 0) { throw "gh api $endpoint failed with exit code $LASTEXITCODE." }
+    $cutoff = [DateTimeOffset]::UtcNow.AddHours(-$OlderThanHours)
+    $candidates = @($lines | Where-Object { $_ } | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object {
+        $_.owner -eq $CleanupOwner -and @($_.topics) -contains $demoTopic -and [DateTimeOffset]$_.created_at -lt $cutoff
+    })
+
+    if ($candidates.Count -eq 0) {
+        Write-Host 'Nothing to clean up.'
+        return
+    }
+    foreach ($repo in $candidates) { Write-Host "   $($repo.full_name)  (created $($repo.created_at))" }
+    if ($DryRun) {
+        Write-Host "Dry run: would delete $($candidates.Count) repo(s)."
+        return
+    }
+    if (-not $Yes) {
+        $answer = Read-Host "Delete these $($candidates.Count) repo(s)? [y/N]"
+        if ($answer -notmatch '^[Yy]') {
+            Write-Host 'Cancelled.'
+            return
+        }
+    }
+    $failed = 0
+    foreach ($repo in $candidates) {
+        & gh repo delete $repo.full_name --yes
+        if ($LASTEXITCODE -eq 0) { Write-Host "Deleted $($repo.full_name)" } else { $failed++ }
+    }
+    if ($failed -gt 0) {
+        throw "$failed repo(s) could not be deleted. If this is a permissions error, run: gh auth refresh -h github.com -s delete_repo"
+    }
+}
+
 # Fresh booth machines often have no git identity; fall back to the GitHub account's noreply address.
 function Set-GitIdentity {
     $email = & git config user.email
@@ -247,6 +335,9 @@ try {
             throw "$command is not installed. Install it and make sure it is on PATH."
         }
     }
+    if ($Serve -and -not (Get-Command 'npm' -ErrorAction SilentlyContinue)) {
+        throw '-Serve needs Node.js (npm). Install it from https://nodejs.org/'
+    }
     if (-not (Test-Path -LiteralPath $configFile -PathType Leaf)) {
         throw "Config file not found: $configFile"
     }
@@ -263,7 +354,12 @@ try {
     if ($null -eq $config.repos -or $repos.Count -eq 0) {
         throw 'Config has no repos defined.'
     }
-    Write-Host "Target org: $($config.org)"
+    if ($Cleanup) {
+        $account = Connect-GitHubAccount
+        $cleanupOwner = if ($Owner) { $Owner } else { $account.User }
+        Invoke-DemoCleanup $cleanupOwner $account.User
+        return
+    }
     if ($nonInteractive) {
         $selectedRepo = $repos | Where-Object { $_.key -eq $Template } | Select-Object -First 1
         if ($null -eq $selectedRepo) {
@@ -299,26 +395,19 @@ try {
     }
     Assert-SelectedRepo $selectedRepo
 
-    Write-Host 'Checking GitHub authentication...'
-    # Authentication status is the one expected nonzero exit: offer login.
-    & gh auth status
-    if ($LASTEXITCODE -ne 0) {
-        if ($nonInteractive) {
-            throw 'Not authenticated with GitHub. In non-interactive mode, log in first (gh auth login) or set GH_TOKEN.'
-        }
-        Write-Host 'Not logged in to GitHub. Starting login process...'
-        Invoke-Native 'gh' @('auth', 'login')
-    }
-    $currentUser = & gh api user --jq '.login'
-    if ($LASTEXITCODE -ne 0) { $currentUser = $null }
-    if ([string]::IsNullOrWhiteSpace($currentUser) -and $nonInteractive) {
-        # GitHub App installation tokens cannot read /user.
-        $currentUser = if ($env:GITHUB_ACTOR) { $env:GITHUB_ACTOR } else { 'github-app' }
-    }
-    if ([string]::IsNullOrWhiteSpace($currentUser)) {
-        throw 'Failed to get current GitHub username.'
-    }
-    Write-Host "Current user: $currentUser"
+    $account = Connect-GitHubAccount
+    $currentUser = $account.User
+    $userToken = $account.UserToken
+
+    # Owner precedence: -Owner, then the entry's "owner" ("org" = top-level org),
+    # then the logged-in account. App tokens have no account, so they use the org.
+    $configOwner = $selectedRepo.owner
+    if ($configOwner -eq 'org') { $configOwner = $config.org }
+    $repoOwner = if ($Owner) { $Owner }
+        elseif ($configOwner) { $configOwner }
+        elseif ($userToken) { $currentUser }
+        else { $config.org }
+    Write-Host "Target owner: $repoOwner"
 
     $templateOrg = $selectedRepo.template_org
     if (-not $templateOrg) { $templateOrg = $config.org }
@@ -326,7 +415,7 @@ try {
     $alphabet = 'abcdefghijklmnopqrstuvwxyz0123456789'.ToCharArray()
     $suffix = -join (1..4 | ForEach-Object { $alphabet[(Get-Random -Maximum $alphabet.Length)] })
     $repoName = "$($selectedRepo.repo_base_name)-$suffix"
-    $fullRepoName = "$($config.org)/$repoName"
+    $fullRepoName = "$repoOwner/$repoName"
 
     Write-Host "Creating repository: $fullRepoName"
     Write-Host "Using template: $templateRepo"
@@ -442,6 +531,27 @@ try {
     }
     if ($selectedRepo.workflow -in @('branch_and_codespace', 'issue_and_codespace')) {
         Write-Host 'You can access your codespace at: https://github.com/codespaces'
+    }
+
+    if ($Serve) {
+        Set-Location -LiteralPath $clonePath
+        if ($tempDirectory -and (Test-Path -LiteralPath $tempDirectory)) {
+            Remove-Item -LiteralPath $tempDirectory -Recurse -Force
+        }
+        if (-not (Test-Path -LiteralPath 'package.json' -PathType Leaf)) {
+            Write-Host '-Serve: this template has no package.json, so there is nothing to serve.'
+            return
+        }
+        $serveBranch = if ($selectedRepo.workflow -eq 'stacked_prs') { @($selectedRepo.stack)[-1].branch } else { $defaultBranch }
+        Invoke-Native 'git' @('fetch', '--quiet', 'origin') | Out-Host
+        Invoke-Native 'git' @('checkout', '--quiet', $serveBranch) | Out-Host
+        Write-Host ''
+        Write-Host "Serving $serveBranch at http://localhost:8080 (Ctrl+C to stop)"
+        if ((Get-Content -LiteralPath 'package.json' -Raw | ConvertFrom-Json).scripts.layer) {
+            Write-Host "   Switch layers from another terminal: cd `"$clonePath`"; npm run layer -- <0-3>"
+        }
+        # Ctrl+C ends the server; that is the normal way out, not a failure.
+        & npm start '--' -o
     }
 }
 finally {

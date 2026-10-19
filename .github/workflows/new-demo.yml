@@ -93,7 +93,8 @@ jobs:
           gh auth setup-git
           git config --global user.name "${APP_SLUG}[bot]"
           git config --global user.email "${APP_SLUG}[bot]@users.noreply.github.com"
-          bash ./create-repo.sh --template "$TEMPLATE_KEY" --no-clone
+          # App tokens cannot create repos in personal accounts, so ChatOps always targets the org.
+          bash ./create-repo.sh --template "$TEMPLATE_KEY" --no-clone --owner octobooth-demos
 
       - name: Comment result
         if: always() && github.event_name == 'issue_comment'

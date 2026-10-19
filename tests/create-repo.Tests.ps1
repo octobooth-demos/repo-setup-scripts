@@ -10,6 +10,7 @@ $originalLocation = Get-Location
 $testState = [pscustomobject]@{
     Answers = $null; Calls = $null; NeedsLogin = $false; Failure = $null
     NextPr = 1; StackNumbers = @(); StackMismatch = $false; GitEmail = $null
+    CleanupRepos = @(); NpmCalls = $null
 }
 
 function Assert {
@@ -35,6 +36,11 @@ function Start-Sleep {
     param([int]$Seconds)
 }
 
+function npm {
+    $testState.NpmCalls.Add([pscustomobject]@{ Arguments = @($args); Location = (Get-Location).Path })
+    $global:LASTEXITCODE = 0
+}
+
 function gh {
     $arguments = @($args)
     $testState.Calls.Add([pscustomobject]@{ Command = 'gh'; Arguments = $arguments; Location = (Get-Location).Path })
@@ -49,6 +55,9 @@ function gh {
     }
     if ($arguments[0] -eq 'api' -and $arguments[1] -eq 'user') {
         return 'demo-user'
+    }
+    if ($arguments[0] -eq 'api' -and $arguments[1] -eq '--paginate') {
+        return @($testState.CleanupRepos | ForEach-Object { $_ | ConvertTo-Json -Compress })
     }
     if ($arguments[0] -eq 'api' -and $arguments[-1] -eq '.default_branch') {
         return 'trunk'
@@ -72,6 +81,9 @@ function gh {
         $clonePath = $arguments[3]
         New-Item -ItemType Directory -Path (Join-Path $clonePath 'api/src') -Force | Out-Null
         Set-Content -LiteralPath (Join-Path $clonePath 'api/src/existing.txt') -Value 'preserve me'
+        if ($clonePath.StartsWith($homeRepos)) {
+            Set-Content -LiteralPath (Join-Path $clonePath 'package.json') -Value '{"scripts":{"start":"x","layer":"y"}}'
+        }
     }
 }
 
@@ -141,7 +153,9 @@ try {
         'outside-body', 'invalid-json', 'missing-org', 'empty-repos',
         'create-failure', 'push-failure', 'login-failure',
         'stacked-prs', 'stack-one-layer', 'stack-missing-field', 'stack-api-failure', 'stack-verify-mismatch',
-        'non-interactive', 'unknown-template', 'non-interactive-login', 'no-clone-branch'
+        'non-interactive', 'unknown-template', 'non-interactive-login', 'no-clone-branch',
+        'owner-override', 'serve', 'serve-no-clone', 'dry-run-without-cleanup', 'cleanup-with-template',
+        'cleanup', 'cleanup-dry-run', 'cleanup-cancel', 'cleanup-org'
     )) {
         $config = $originalConfig | ConvertFrom-Json
         $config.repos += $branchRepo
@@ -153,6 +167,15 @@ try {
         $testState.StackNumbers = @()
         $testState.StackMismatch = $false
         $testState.GitEmail = $null
+        $testState.NpmCalls = New-Object 'System.Collections.Generic.List[object]'
+        $old = '2020-01-01T00:00:00Z'
+        $fresh = [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ')
+        $testState.CleanupRepos = @(
+            [pscustomobject]@{ full_name = 'demo-user/old-demo'; created_at = $old; topics = @('demo-generated'); owner = 'demo-user' }
+            [pscustomobject]@{ full_name = 'demo-user/fresh-demo'; created_at = $fresh; topics = @('demo-generated'); owner = 'demo-user' }
+            [pscustomobject]@{ full_name = 'demo-user/old-personal'; created_at = $old; topics = @('other'); owner = 'demo-user' }
+            [pscustomobject]@{ full_name = 'someone/old-demo'; created_at = $old; topics = @('demo-generated'); owner = 'someone' }
+        )
         $expectedFailure = $null
         switch ($scenario) {
             'security-prs' { $selection = '2' }
@@ -207,6 +230,26 @@ try {
                 $testState.NeedsLogin = $true
                 $expectedFailure = 'Not authenticated'
             }
+            'owner-override' { $selection = $null; $scriptArgs = @{ Template = 'booth-bingo'; NoClone = $true; Owner = 'other-org' } }
+            'serve' { $selection = $null; $scriptArgs = @{ Template = 'booth-bingo'; Serve = $true } }
+            'serve-no-clone' {
+                $selection = $null
+                $scriptArgs = @{ Template = 'booth-bingo'; Serve = $true; NoClone = $true }
+                $expectedFailure = 'cannot be combined with -NoClone'
+            }
+            'dry-run-without-cleanup' { $selection = $null; $scriptArgs = @{ DryRun = $true }; $expectedFailure = 'only apply to -Cleanup' }
+            'cleanup-with-template' {
+                $selection = $null
+                $scriptArgs = @{ Cleanup = $true; Template = 'booth-bingo' }
+                $expectedFailure = '-Cleanup cannot be combined'
+            }
+            'cleanup' { $selection = $null; $scriptArgs = @{ Cleanup = $true; Yes = $true } }
+            'cleanup-dry-run' { $selection = $null; $scriptArgs = @{ Cleanup = $true; DryRun = $true } }
+            'cleanup-cancel' { $selection = 'n'; $scriptArgs = @{ Cleanup = $true } }
+            'cleanup-org' {
+                $selection = $null
+                $scriptArgs = @{ Cleanup = $true; Yes = $true; Owner = 'someone'; OlderThanHours = 1 }
+            }
             'no-clone-branch' {
                 $selection = $null
                 $scriptArgs = @{ Template = 'branch-demo'; NoClone = $true }
@@ -245,10 +288,35 @@ try {
                 Assert ((Find-Calls 'gh' 'repo clone').Count -eq 0) 'Cloned after repository creation failed.'
             }
         }
+        elseif ($scenario -like 'cleanup*') {
+            Assert ($null -eq $caught) "$scenario failed: $caught"
+            Assert ((Find-Calls 'gh' 'repo create').Count -eq 0) 'Cleanup created a repository.'
+            $list = @(Find-Calls 'gh' 'api --paginate')
+            Assert ($list.Count -eq 1) 'Cleanup did not list repositories.'
+            $deleted = @((Find-Calls 'gh' 'repo delete') | ForEach-Object { $_.Arguments[2] })
+            switch ($scenario) {
+                'cleanup' {
+                    Assert ($list[0].Arguments[2] -like 'user/repos*') 'Own account should use user/repos.'
+                    Assert (($deleted -join ',') -eq 'demo-user/old-demo') "Deleted '$($deleted -join ',')'."
+                }
+                'cleanup-org' {
+                    Assert ($list[0].Arguments[2] -like 'orgs/someone/repos*') 'Other owner should use orgs/<owner>/repos.'
+                    Assert (($deleted -join ',') -eq 'someone/old-demo') "Deleted '$($deleted -join ',')'."
+                }
+                default { Assert ($deleted.Count -eq 0) "$scenario deleted '$($deleted -join ',')'." }
+            }
+            Assert ($testState.Answers.Count -eq 0) "$scenario did not consume the expected input."
+        }
         else {
             Assert ($null -eq $caught) "$scenario failed: $caught"
             $create = @(Find-Calls 'gh' 'repo create')[0]
-            Assert ($create.Arguments[2] -match '^octobooth-demos/[a-z-]+-[a-z0-9]{4}$') 'Invalid repository name.'
+            $expectedOwner = switch ($scenario) {
+                'security-prs' { 'octobooth-demos' }
+                'nested-body' { 'octobooth-demos' }
+                'owner-override' { 'other-org' }
+                default { 'demo-user' }
+            }
+            Assert ($create.Arguments[2] -match "^$expectedOwner/[a-z-]+-[a-z0-9]{4}$") "Invalid repository name '$($create.Arguments[2])'."
             Assert ($create.Arguments -contains '--private') 'Repository is not private.'
             $topic = @(Find-Calls 'gh' 'repo edit')[0]
             Assert ($null -ne $topic -and $topic.Arguments -contains 'demo-generated') 'demo-generated topic was not added.'
@@ -265,6 +333,13 @@ try {
                     Assert ($prCall.Arguments -contains 'trunk') 'PR did not use the default branch.'
                 }
             }
+            if ($scenario -eq 'serve') {
+                Assert ($testState.NpmCalls.Count -eq 1) 'Serve did not start npm.'
+                Assert (($testState.NpmCalls[0].Arguments -join ' ') -eq 'start -- -o') 'Serve ran the wrong npm command.'
+                Assert ($testState.NpmCalls[0].Location.StartsWith($homeRepos)) 'Serve did not run in the local clone.'
+                Assert ((Find-Calls 'git' 'checkout --quiet bingo/3-celebration').Count -eq 1) 'Serve did not check out the top layer.'
+            }
+            elseif ($testState.NpmCalls.Count -ne 0) { throw "$scenario ran npm without -Serve." }
             if ($scenario -in @('stacked-prs', 'non-interactive')) {
                 $prCalls = @(Find-Calls 'gh' 'pr create')
                 Assert ($prCalls.Count -eq 3) 'Expected three stacked PRs.'
@@ -284,7 +359,7 @@ try {
                 }
                 $stackCalls = @(Find-Calls 'gh' 'api --method POST repos/')
                 Assert ($stackCalls.Count -eq 1) 'Expected one stack registration.'
-                Assert ($stackCalls[0].Arguments[3] -match '^repos/octobooth-demos/booth-bingo-[a-z0-9]{4}/stacks$') 'Wrong stacks endpoint.'
+                Assert ($stackCalls[0].Arguments[3] -match '^repos/demo-user/booth-bingo-[a-z0-9]{4}/stacks$') 'Wrong stacks endpoint.'
                 $numbers = @($stackCalls[0].Arguments | Where-Object { $_ -like 'pull_requests`[`]=*' })
                 Assert (($numbers -join ',') -eq 'pull_requests[]=1,pull_requests[]=2,pull_requests[]=3') "Stack order was '$($numbers -join ',')'."
                 Assert ((Find-Calls 'gh' 'api repos/').Where({ $_.Arguments[1] -like '*/stacks?pull_request=1' }).Count -ge 1) 'Stack was not verified.'

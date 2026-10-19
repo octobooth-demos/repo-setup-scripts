@@ -138,6 +138,18 @@ function Start-DemoCodespace {
     Write-Host 'Codespace created successfully!'
 }
 
+# Fresh booth machines often have no git identity; fall back to the GitHub account's noreply address.
+function Set-GitIdentity {
+    $email = & git config user.email
+    if ($LASTEXITCODE -eq 0 -and $email) { return }
+    $userId = & gh api user --jq .id
+    if ($LASTEXITCODE -ne 0) { $userId = $null }
+    $email = if ($userId) { "$userId+$currentUser@users.noreply.github.com" } else { "$currentUser@users.noreply.github.com" }
+    Write-Host "No git identity configured; committing as $currentUser <$email> in this clone only"
+    Invoke-Native 'git' @('config', 'user.name', $currentUser) | Out-Host
+    Invoke-Native 'git' @('config', 'user.email', $email) | Out-Host
+}
+
 function New-ResourcePullRequest {
     param($PullRequest, [string]$BaseBranch = $defaultBranch)
 
@@ -388,6 +400,7 @@ try {
             $tempClonePath = Join-Path $tempDirectory $repoName
             Invoke-Native 'gh' @('repo', 'clone', $fullRepoName, $tempClonePath, '--', '--quiet')
             Set-Location -LiteralPath $tempClonePath
+            Set-GitIdentity
             foreach ($pr in $selectedRepo.prs) {
                 New-ResourcePullRequest $pr | Out-Null
             }
@@ -400,6 +413,7 @@ try {
             $tempClonePath = Join-Path $tempDirectory $repoName
             Invoke-Native 'gh' @('repo', 'clone', $fullRepoName, $tempClonePath, '--', '--quiet')
             Set-Location -LiteralPath $tempClonePath
+            Set-GitIdentity
             $previousBranch = $defaultBranch
             $stackNumbers = @()
             foreach ($layer in $selectedRepo.stack) {

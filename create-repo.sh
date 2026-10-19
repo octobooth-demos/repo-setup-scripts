@@ -98,6 +98,21 @@ clone_to_temp() {
     cd "$TEMP_DIR"
     gh repo clone "$FULL_REPO_NAME" "$REPO_NAME" -- --quiet
     cd "$REPO_NAME"
+    ensure_git_identity
+}
+
+# Fresh booth machines often have no git identity; fall back to the GitHub account's noreply address.
+ensure_git_identity() {
+    if [ -n "$(git config user.email || true)" ]; then
+        return
+    fi
+    local user_id
+    user_id=$(gh api user --jq '.id' 2>/dev/null || true)
+    local email="${CURRENT_USER}@users.noreply.github.com"
+    [ -n "$user_id" ] && email="${user_id}+${CURRENT_USER}@users.noreply.github.com"
+    echo "ℹ️  No git identity configured; committing as $CURRENT_USER <$email> in this clone only"
+    git config user.name "$CURRENT_USER"
+    git config user.email "$email"
 }
 
 # Start a codespace for the current repo.

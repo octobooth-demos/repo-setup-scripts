@@ -9,7 +9,7 @@ $homeRepos = Microsoft.PowerShell.Management\Join-Path $testRoot 'repos'
 $originalLocation = Get-Location
 $testState = [pscustomobject]@{
     Answers = $null; Calls = $null; NeedsLogin = $false; Failure = $null
-    NextPr = 1; StackNumbers = @(); StackMismatch = $false
+    NextPr = 1; StackNumbers = @(); StackMismatch = $false; GitEmail = $null
 }
 
 function Assert {
@@ -83,6 +83,11 @@ function git {
         $global:LASTEXITCODE = 42
         return
     }
+    if ($arguments[0] -eq 'config' -and $arguments.Count -eq 2) {
+        if ($testState.GitEmail) { return $testState.GitEmail }
+        $global:LASTEXITCODE = 1
+        return
+    }
     if ($arguments[0] -eq 'commit') {
         Assert (Test-Path -LiteralPath './api/src/existing.txt') 'Copying resources removed an existing file.'
         Assert (-not (Test-Path -LiteralPath './pr-body.md')) 'PR body would be committed.'
@@ -147,6 +152,7 @@ try {
         $testState.NextPr = 1
         $testState.StackNumbers = @()
         $testState.StackMismatch = $false
+        $testState.GitEmail = $null
         $expectedFailure = $null
         switch ($scenario) {
             'security-prs' { $selection = '2' }
@@ -189,7 +195,11 @@ try {
             }
             'stack-api-failure' { $selection = '5'; $testState.Failure = 'api --method'; $expectedFailure = 'Failed to register the native stack' }
             'stack-verify-mismatch' { $selection = '5'; $testState.StackMismatch = $true; $expectedFailure = 'Stack verification failed' }
-            'non-interactive' { $selection = $null; $scriptArgs = @{ Template = 'booth-bingo'; NoClone = $true } }
+            'non-interactive' {
+                $selection = $null
+                $scriptArgs = @{ Template = 'booth-bingo'; NoClone = $true }
+                $testState.GitEmail = 'booth@example.com'
+            }
             'unknown-template' { $selection = $null; $scriptArgs = @{ Template = 'nope' }; $expectedFailure = 'Unknown template key: nope' }
             'non-interactive-login' {
                 $selection = $null
@@ -279,7 +289,12 @@ try {
                 Assert (($numbers -join ',') -eq 'pull_requests[]=1,pull_requests[]=2,pull_requests[]=3') "Stack order was '$($numbers -join ',')'."
                 Assert ((Find-Calls 'gh' 'api repos/').Where({ $_.Arguments[1] -like '*/stacks?pull_request=1' }).Count -ge 1) 'Stack was not verified.'
             }
+            if ($scenario -eq 'stacked-prs') {
+                $identity = @(Find-Calls 'git' 'config user.email demo-user+demo-user@users.noreply.github.com')
+                Assert ($identity.Count -eq 1) 'Missing git identity was not filled in.'
+            }
             if ($scenario -eq 'non-interactive') {
+                Assert ((Find-Calls 'git' 'config user.name').Count -eq 0) 'Overwrote an existing git identity.'
                 Assert ($testState.Answers.Count -eq 0) 'Non-interactive mode consumed input.'
                 foreach ($clone in (Find-Calls 'gh' 'repo clone')) {
                     Assert (-not $clone.Arguments[3].StartsWith($homeRepos)) '-NoClone still cloned into ~/repos.'

@@ -6,7 +6,8 @@
   "type": "module",
   "scripts": {
     "test": "node --test",
-    "start": "npx --yes http-server -c-1 .",
+    "start": "node scripts/serve.js",
+    "stop": "node scripts/serve.js --stop",
     "layer": "node scripts/layer.js"
   }
 }

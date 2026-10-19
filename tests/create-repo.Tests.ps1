@@ -335,9 +335,9 @@ try {
             }
             if ($scenario -in @('serve', 'stacked-prs')) {
                 Assert ($testState.NpmCalls.Count -eq 1) 'Serve did not start npm.'
-                Assert (($testState.NpmCalls[0].Arguments -join ' ') -eq 'start -- -o') 'Serve ran the wrong npm command.'
+                Assert (($testState.NpmCalls[0].Arguments -join ' ') -eq 'start -- --open') 'Serve ran the wrong npm command.'
                 Assert ($testState.NpmCalls[0].Location.StartsWith($homeRepos)) 'Serve did not run in the local clone.'
-                Assert ((Find-Calls 'git' 'checkout --quiet bingo/3-celebration').Count -eq 1) 'Serve did not check out the top layer.'
+                Assert ((Find-Calls 'git' 'checkout --quiet trunk').Count -eq 1) 'Serve did not check out the default branch.'
             }
             elseif ($testState.NpmCalls.Count -ne 0) { throw "$scenario ran npm without -Serve." }
             if ($scenario -in @('stacked-prs', 'non-interactive')) {

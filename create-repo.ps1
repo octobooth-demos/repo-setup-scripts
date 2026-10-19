@@ -8,7 +8,7 @@ param(
     [string]$Owner,
     # Skip the permanent clone into $HOME/repos (useful in CI).
     [switch]$NoClone,
-    # After setup, check out the demo (top of the stack) and serve it locally (port 8080, or the next free one). Needs Node.js.
+    # After setup, check out the default branch and serve it on http://localhost:8080 (npm start). Needs Node.js.
     [switch]$Serve,
     # Delete demo-generated repos owned by -Owner (default: logged-in account) older than -OlderThanHours.
     [switch]$Cleanup,
@@ -552,16 +552,19 @@ try {
             Write-Host '-Serve: this template has no package.json, so there is nothing to serve.'
             return
         }
-        $serveBranch = if ($selectedRepo.workflow -eq 'stacked_prs') { @($selectedRepo.stack)[-1].branch } else { $defaultBranch }
+        # Start on the default branch so the audience sees the app before the PRs land.
         Invoke-Native 'git' @('fetch', '--quiet', 'origin') | Out-Host
-        Invoke-Native 'git' @('checkout', '--quiet', $serveBranch) | Out-Host
+        Invoke-Native 'git' @('checkout', '--quiet', $defaultBranch) | Out-Host
         Write-Host ''
-        Write-Host "Serving $serveBranch locally; the browser opens on the port shown below (Ctrl+C to stop)"
+        Write-Host "Serving $defaultBranch (before any PRs are merged). Ctrl+C to stop."
         if ((Get-Content -LiteralPath 'package.json' -Raw | ConvertFrom-Json).scripts.layer) {
-            Write-Host "   Switch layers from another terminal: cd `"$clonePath`"; npm run layer -- <0-3>"
+            Write-Host "   From another terminal: cd `"$clonePath`""
+            Write-Host '     npm run layer -- 1..3   preview a layer of the stack'
+            Write-Host "     npm run layer -- 0      back to $defaultBranch; after merging the stack, this pulls the merged code"
+            Write-Host '   Then reload the browser.'
         }
         # Ctrl+C ends the server; that is the normal way out, not a failure.
-        & npm start '--' -o
+        & npm start '--' --open
     }
 }
 finally {

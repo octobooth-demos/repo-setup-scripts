@@ -54,7 +54,7 @@ The script prints `Target owner:` before creating anything. Templates in `octobo
 
 ## Showing it locally
 
-Booth Bingo starts the app automatically after setup, whether you pick it from the menu or pass `--template booth-bingo` (it is skipped with `--no-clone` or when Node.js is missing). For other templates, pass `--serve` / `-Serve`. The script checks out the top of the stack in `~/repos/<repo>` and runs `npm start -- -o` (a static server on http://localhost:8080 that opens the browser; if 8080 is taken, for example by a server from an earlier demo repo, it uses the next free port and opens that instead). It needs Node.js and cannot be combined with `--no-clone`. Press Ctrl+C to stop.
+Booth Bingo starts the app automatically after setup, whether you pick it from the menu or pass `--template booth-bingo` (it is skipped with `--no-clone` or when Node.js is missing). For other templates, pass `--serve` / `-Serve`. The script checks out `main` in `~/repos/<repo>` (so the audience sees the game before the stack lands) and runs `npm start -- --open`, which serves it on http://localhost:8080 and opens the browser. Starting a new Booth Bingo server stops the one from the previous demo repo, so 8080 always shows the latest repo; `npm run stop` stops it. It needs Node.js 18+ and cannot be combined with `--no-clone`. Press Ctrl+C to stop.
 
 ```bash
 bash ./create-repo.sh --template booth-bingo --serve
@@ -68,8 +68,8 @@ While it is running, switch the code to any layer from a second terminal and rel
 
 ```bash
 cd ~/repos/booth-bingo-xxxx
-npm run layer -- 0   # main: the plain grid
-npm run layer -- 3   # full stack: win detection + celebration
+npm run layer -- 3   # preview the full stack: win detection + celebration
+npm run layer -- 0   # back to main; after merging the stack this pulls the merged code
 ```
 
 `npm run layer` refuses to run if you have uncommitted changes, and falls back to `main` once a layer branch has been merged and deleted.

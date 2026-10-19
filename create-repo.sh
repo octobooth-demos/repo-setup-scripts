@@ -24,8 +24,8 @@ Usage: create-repo.sh [--template <key>] [--owner <name>] [--no-clone | --serve]
   --owner <name>       Account or org to create the repo in. Default: the template's
                        "owner" in config.json, otherwise the logged-in account.
   --no-clone           Skip the permanent clone into ~/repos (useful in CI).
-  --serve              After setup, check out the demo (top of the stack for stacked
-                       PRs) and serve it locally (port 8080, or the next free one). Needs Node.js.
+  --serve              After setup, check out the default branch and serve it on
+                       http://localhost:8080 (npm start). Needs Node.js.
   --cleanup            Delete repos with the demo-generated topic owned by --owner
                        (default: the logged-in account) that are older than --older-than.
   --older-than <hours> Age cutoff for --cleanup (default: 24).
@@ -798,7 +798,6 @@ case $WORKFLOW in
             prev_branch="$layer_branch"
             i=$((i + 1))
         done
-        SERVE_BRANCH="$prev_branch"
         set_output top_pr_url "$TOP_PR_URL"
 
         register_stack
@@ -840,11 +839,15 @@ if [ "$SERVE" = true ]; then
         exit 0
     fi
     git fetch --quiet origin
-    git checkout --quiet "${SERVE_BRANCH:-$DEFAULT_BRANCH}"
+    # Start on the default branch so the audience sees the app before the PRs land.
+    git checkout --quiet "$DEFAULT_BRANCH"
     echo ""
-    echo "🌐 Serving ${SERVE_BRANCH:-$DEFAULT_BRANCH} locally; the browser opens on the port shown below (Ctrl+C to stop)"
+    echo "🌐 Serving $DEFAULT_BRANCH (before any PRs are merged). Ctrl+C to stop."
     if jq -e '.scripts.layer' package.json > /dev/null; then
-        echo "   Switch layers from another terminal: cd \"$CLONE_PATH\" && npm run layer -- <0-3>"
+        echo "   From another terminal: cd \"$CLONE_PATH\""
+        echo "     npm run layer -- 1..3   preview a layer of the stack"
+        echo "     npm run layer -- 0      back to $DEFAULT_BRANCH; after merging the stack, this pulls the merged code"
+        echo "   Then reload the browser."
     fi
-    npm start -- -o
+    npm start -- --open
 fi

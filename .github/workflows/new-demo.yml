@@ -1,0 +1,131 @@
+name: New demo
+
+on:
+  workflow_dispatch:
+    inputs:
+      template:
+        description: Demo template key from config.json
+        type: choice
+        required: true
+        default: booth-bingo
+        options:
+          - booth-bingo
+          - securing-your-code
+          - security-octo-supply
+          - ctrl-slash
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: new-demo-${{ github.event.issue.number || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  new-demo:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'issue_comment' && startsWith(github.event.comment.body, '/new-demo'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check commenter permission
+        if: github.event_name == 'issue_comment'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ACTOR: ${{ github.event.comment.user.login }}
+          REPO: ${{ github.repository }}
+        run: |
+          permission=$(gh api "repos/$REPO/collaborators/$ACTOR/permission" --jq '.permission')
+          case "$permission" in
+            admin|maintain|write) echo "$ACTOR has $permission permission." ;;
+            *) echo "::error::$ACTOR does not have write access ($permission)."; exit 1 ;;
+          esac
+
+      - uses: actions/checkout@v4
+
+      - name: Resolve template key
+        id: key
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_TEMPLATE: ${{ inputs.template }}
+          COMMENT_BODY: ${{ github.event.comment.body }}
+        run: |
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            key="$INPUT_TEMPLATE"
+          else
+            first_line=$(printf '%s\n' "$COMMENT_BODY" | head -n 1 | tr -d '\r')
+            key=$(printf '%s' "$first_line" | awk '$1 == "/new-demo" { print $2 }')
+          fi
+          if ! [[ "$key" =~ ^[a-z0-9-]+$ ]]; then
+            echo "::error::Usage: /new-demo <template-key>"
+            exit 1
+          fi
+          # Codespace workflows need a user token, so ChatOps only allows these.
+          if ! jq -e --arg key "$key" \
+            '.repos[] | select(.key == $key and (.workflow | IN("repo_only", "security_prs", "stacked_prs")))' \
+            config.json > /dev/null; then
+            valid=$(jq -r '[.repos[] | select(.workflow | IN("repo_only", "security_prs", "stacked_prs")) | .key] | join(", ")' config.json)
+            echo "::error::Unknown or unsupported template key '$key'. Valid keys: $valid"
+            exit 1
+          fi
+          echo "key=$key" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: octobooth-demos
+
+      - name: Create demo repository
+        id: create
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          TEMPLATE_KEY: ${{ steps.key.outputs.key }}
+          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
+        run: |
+          gh auth setup-git
+          git config --global user.name "${APP_SLUG}[bot]"
+          git config --global user.email "${APP_SLUG}[bot]@users.noreply.github.com"
+          bash ./create-repo.sh --template "$TEMPLATE_KEY" --no-clone
+
+      - name: Comment result
+        if: always() && github.event_name == 'issue_comment'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          ISSUE: ${{ github.event.issue.number }}
+          OUTCOME: ${{ steps.create.outcome }}
+          TEMPLATE_KEY: ${{ steps.key.outputs.key }}
+          REPO_URL: ${{ steps.create.outputs.repo_url }}
+          TOP_PR_URL: ${{ steps.create.outputs.top_pr_url }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          if [ "$OUTCOME" = "success" ]; then
+            body="✅ Created \`$TEMPLATE_KEY\` demo: $REPO_URL"
+            if [ -n "$TOP_PR_URL" ]; then
+              body="$body"$'\n\n'"Top of stack: $TOP_PR_URL"
+            fi
+          else
+            body="❌ Demo creation failed. See $RUN_URL"
+          fi
+          gh issue comment "$ISSUE" --repo "$REPO" --body "$body"
+
+      - name: Job summary
+        if: always()
+        env:
+          REPO_URL: ${{ steps.create.outputs.repo_url }}
+          TOP_PR_URL: ${{ steps.create.outputs.top_pr_url }}
+        run: |
+          {
+            echo "### New demo"
+            echo "- Repository: ${REPO_URL:-not created}"
+            [ -n "$TOP_PR_URL" ] && echo "- Top of stack: $TOP_PR_URL"
+            true
+          } >> "$GITHUB_STEP_SUMMARY"

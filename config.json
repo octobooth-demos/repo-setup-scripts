@@ -78,6 +78,43 @@
       "summary_lines": [
         "Status: Repository ready for use"
       ]
+    },
+    {
+      "key": "booth-bingo",
+      "display_name": "Booth Bingo (Stacked PRs)",
+      "description_short": "Tiny bingo web game with one feature shipped as a stack of 3 PRs",
+      "workflow_hint": "Creates repo + 3 stacked PRs registered as a native stack",
+      "template": "booth-bingo",
+      "repo_base_name": "booth-bingo",
+      "repo_description": "Booth Bingo stacked pull requests demo",
+      "workflow": "stacked_prs",
+      "stack": [
+        {
+          "branch": "bingo/1-game-logic",
+          "resource_dir": "resources/booth-bingo/layer-1",
+          "commit_message": "feat: add checkWin game logic with tests",
+          "title": "Bingo 1/3: Game logic",
+          "body_file": "resources/booth-bingo/layer-1/pr-body.md"
+        },
+        {
+          "branch": "bingo/2-wire-ui",
+          "resource_dir": "resources/booth-bingo/layer-2",
+          "commit_message": "feat: highlight the winning line on the card",
+          "title": "Bingo 2/3: Wire up the UI",
+          "body_file": "resources/booth-bingo/layer-2/pr-body.md"
+        },
+        {
+          "branch": "bingo/3-celebration",
+          "resource_dir": "resources/booth-bingo/layer-3",
+          "commit_message": "feat: add BINGO banner, confetti, and reset",
+          "title": "Bingo 3/3: Celebration",
+          "body_file": "resources/booth-bingo/layer-3/pr-body.md"
+        }
+      ],
+      "summary_lines": [
+        "Stack: 3 PRs registered as a native stack",
+        "Next: open the top PR and use the stack navigator"
+      ]
     }
   ]
 }

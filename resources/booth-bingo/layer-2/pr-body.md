@@ -9,4 +9,4 @@ Builds on layer 1. The next PR adds the celebration.
 
 ### Try it
 
-Run `npm start`, open http://localhost:8080, and tap any row, column, or diagonal.
+Run `npm start`, open the URL it prints, and tap any row, column, or diagonal.

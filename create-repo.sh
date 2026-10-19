@@ -25,7 +25,7 @@ Usage: create-repo.sh [--template <key>] [--owner <name>] [--no-clone | --serve]
                        "owner" in config.json, otherwise the logged-in account.
   --no-clone           Skip the permanent clone into ~/repos (useful in CI).
   --serve              After setup, check out the demo (top of the stack for stacked
-                       PRs) and serve it on http://localhost:8080. Needs Node.js.
+                       PRs) and serve it locally (port 8080, or the next free one). Needs Node.js.
   --cleanup            Delete repos with the demo-generated topic owned by --owner
                        (default: the logged-in account) that are older than --older-than.
   --older-than <hours> Age cutoff for --cleanup (default: 24).
@@ -815,7 +815,7 @@ if [ "$SERVE" = true ]; then
     git fetch --quiet origin
     git checkout --quiet "${SERVE_BRANCH:-$DEFAULT_BRANCH}"
     echo ""
-    echo "🌐 Serving ${SERVE_BRANCH:-$DEFAULT_BRANCH} at http://localhost:8080 (Ctrl+C to stop)"
+    echo "🌐 Serving ${SERVE_BRANCH:-$DEFAULT_BRANCH} locally; the browser opens on the port shown below (Ctrl+C to stop)"
     if jq -e '.scripts.layer' package.json > /dev/null; then
         echo "   Switch layers from another terminal: cd \"$CLONE_PATH\" && npm run layer -- <0-3>"
     fi

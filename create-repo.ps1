@@ -8,7 +8,7 @@ param(
     [string]$Owner,
     # Skip the permanent clone into $HOME/repos (useful in CI).
     [switch]$NoClone,
-    # After setup, check out the demo (top of the stack) and serve it on http://localhost:8080. Needs Node.js.
+    # After setup, check out the demo (top of the stack) and serve it locally (port 8080, or the next free one). Needs Node.js.
     [switch]$Serve,
     # Delete demo-generated repos owned by -Owner (default: logged-in account) older than -OlderThanHours.
     [switch]$Cleanup,
@@ -546,7 +546,7 @@ try {
         Invoke-Native 'git' @('fetch', '--quiet', 'origin') | Out-Host
         Invoke-Native 'git' @('checkout', '--quiet', $serveBranch) | Out-Host
         Write-Host ''
-        Write-Host "Serving $serveBranch at http://localhost:8080 (Ctrl+C to stop)"
+        Write-Host "Serving $serveBranch locally; the browser opens on the port shown below (Ctrl+C to stop)"
         if ((Get-Content -LiteralPath 'package.json' -Raw | ConvertFrom-Json).scripts.layer) {
             Write-Host "   Switch layers from another terminal: cd `"$clonePath`"; npm run layer -- <0-3>"
         }

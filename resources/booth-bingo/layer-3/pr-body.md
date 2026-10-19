@@ -10,4 +10,4 @@ Builds on layer 2. Merging this PR merges the whole stack into `main`.
 
 ### Try it
 
-Run `npm start`, open http://localhost:8080, get three in a row, then press **New card**.
+Run `npm start`, open the URL it prints, get three in a row, then press **New card**.

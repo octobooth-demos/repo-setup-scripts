@@ -13,7 +13,7 @@ A tiny, no-build web game used to demo **stacked pull requests** on GitHub. Visi
 ## Run it
 
 ```bash
-npm start              # serves on http://localhost:8080 (no npm install needed)
+npm start              # serves on http://localhost:8080, or the next free port (no npm install needed)
 npm run layer -- 2     # switch to a layer: 0 = main, 1-3 = the stack
 npm test               # node --test
 ```

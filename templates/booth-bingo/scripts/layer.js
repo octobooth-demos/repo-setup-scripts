@@ -35,4 +35,4 @@ try {
 git('checkout', '--quiet', branch);
 // Follow GitHub, including after "Rebase stack" rewrites the branch.
 git('reset', '--quiet', '--hard', `origin/${branch}`);
-console.log(`Now showing ${label} (${branch}). Reload http://localhost:8080`);
+console.log(`Now showing ${label} (${branch}). Reload the browser tab.`);

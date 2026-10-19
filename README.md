@@ -54,7 +54,7 @@ The script prints `Target owner:` before creating anything. Templates in `octobo
 
 ## Showing it locally
 
-Pass `--serve` / `-Serve` to start the app right after setup. The script checks out the top of the stack in `~/repos/<repo>` and runs `npm start -- -o` (a static server on http://localhost:8080 that opens the browser). It needs Node.js and cannot be combined with `--no-clone`. Press Ctrl+C to stop.
+Pass `--serve` / `-Serve` to start the app right after setup. The script checks out the top of the stack in `~/repos/<repo>` and runs `npm start -- -o` (a static server on http://localhost:8080 that opens the browser; if 8080 is taken, for example by a server from an earlier demo repo, it uses the next free port and opens that instead). It needs Node.js and cannot be combined with `--no-clone`. Press Ctrl+C to stop.
 
 ```bash
 bash ./create-repo.sh --template booth-bingo --serve

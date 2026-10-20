@@ -230,8 +230,8 @@
         }
       ],
       "summary_lines": [
-        "AI Scan: findings appear on the PR with an \"AI\" label, usually within 10 minutes",
-        "Agentic autofix: one alert assigned to Copilot; its draft PR appears in about 10 minutes",
+        "AI Scan: check the PR for findings labeled \"AI\" (usually within 10 minutes)",
+        "Agentic autofix: check Security -> Code scanning for the alert assigned to Copilot; its draft PR usually appears within 10 minutes",
         "Presenter notes: resources/ai-security/ANSWER_KEY.md in repo-setup-scripts"
       ]
     }

@@ -498,7 +498,8 @@ wait_for_codeql() {
     local attempt=1 alerts
     ALERT_COUNT=0
     while [ "$attempt" -le 60 ]; do
-        alerts=$(gh api "repos/$FULL_REPO_NAME/code-scanning/alerts?state=open&ref=refs/heads/$DEFAULT_BRANCH&per_page=100" 2>/dev/null || echo '[]')
+        # On failure gh prints the JSON error body to stdout, so discard it.
+        alerts=$(gh api "repos/$FULL_REPO_NAME/code-scanning/alerts?state=open&ref=refs/heads/$DEFAULT_BRANCH&per_page=100" 2>/dev/null) || alerts='[]'
         ALERT_COUNT=$(echo "$alerts" | jq 'length' 2>/dev/null || true)
         [[ "$ALERT_COUNT" =~ ^[0-9]+$ ]] || ALERT_COUNT=0
         if [ "$ALERT_COUNT" -gt 0 ]; then
@@ -522,7 +523,8 @@ wait_for_codeql() {
 assign_alert_to_copilot() {
     local rule="$1"
     local alerts number=""
-    alerts=$(gh api "repos/$FULL_REPO_NAME/code-scanning/alerts?state=open&ref=refs/heads/$DEFAULT_BRANCH&per_page=100" 2>/dev/null || echo '[]')
+    # On failure gh prints the JSON error body to stdout, so discard it.
+    alerts=$(gh api "repos/$FULL_REPO_NAME/code-scanning/alerts?state=open&ref=refs/heads/$DEFAULT_BRANCH&per_page=100" 2>/dev/null) || alerts='[]'
     if [ -n "$rule" ]; then
         number=$(echo "$alerts" | jq -r --arg rule "$rule" '[.[] | select(.rule.id == $rule)][0].number // empty')
         [ -z "$number" ] && echo "ℹ️  No open '$rule' alert; assigning the first open alert instead."

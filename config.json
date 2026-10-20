@@ -234,6 +234,22 @@
         "Agentic autofix: check Security -> Code scanning for the alert assigned to Copilot; its draft PR usually appears within 10 minutes",
         "Presenter notes: resources/ai-security/ANSWER_KEY.md in repo-setup-scripts"
       ]
+    },
+    {
+      "key": "ensemble-blank",
+      "owner": "org",
+      "display_name": "Ensemble: Blank Prompt",
+      "description_short": "Empty repo + one seed prompt: Ensemble builds a playable 2048-style Octocat game with tests in autopilot",
+      "workflow_hint": "Creates an empty repo (README only). Then copy the seed prompt or click Run with Ensemble",
+      "repo_base_name": "ensemble-blank",
+      "repo_description": "Ensemble blank-prompt demo",
+      "workflow": "blank",
+      "seed_prompt_file": "resources/ensemble-blank/seed-prompt.txt",
+      "summary_lines": [
+        "Status: Empty repository ready for the seed prompt",
+        "Next: run the seed prompt with the Ensemble model in autopilot (~4-5 min)",
+        "Presenter notes: resources/ensemble-blank/ANSWER_KEY.md in repo-setup-scripts"
+      ]
     }
   ]
 }

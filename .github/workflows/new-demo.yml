@@ -16,6 +16,7 @@ on:
           - ctrl-slash
           - octocart
           - ai-security
+          - ensemble-blank
   issue_comment:
     types: [created]
 
@@ -71,9 +72,9 @@ jobs:
           fi
           # Codespace workflows need a user token, so ChatOps only allows these.
           if ! jq -e --arg key "$key" \
-            '.repos[] | select(.key == $key and (.workflow | IN("repo_only", "security_prs", "stacked_prs", "code_review_prs", "ai_security")))' \
+            '.repos[] | select(.key == $key and (.workflow | IN("repo_only", "security_prs", "stacked_prs", "code_review_prs", "ai_security", "blank")))' \
             config.json > /dev/null; then
-            valid=$(jq -r '[.repos[] | select(.workflow | IN("repo_only", "security_prs", "stacked_prs", "code_review_prs", "ai_security")) | .key] | join(", ")' config.json)
+            valid=$(jq -r '[.repos[] | select(.workflow | IN("repo_only", "security_prs", "stacked_prs", "code_review_prs", "ai_security", "blank")) | .key] | join(", ")' config.json)
             echo "::error::Unknown or unsupported template key '$key'. Valid keys: $valid"
             exit 1
           fi

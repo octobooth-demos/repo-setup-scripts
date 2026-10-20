@@ -169,7 +169,7 @@ try {
         'stacked-prs', 'stack-one-layer', 'stack-missing-field', 'stack-api-failure', 'stack-verify-mismatch',
         'non-interactive', 'unknown-template', 'non-interactive-login', 'no-clone-branch',
         'owner-override', 'serve', 'serve-no-clone', 'pages-failure', 'bad-visibility', 'dry-run-without-cleanup', 'cleanup-with-template',
-        'cleanup', 'cleanup-dry-run', 'cleanup-cancel', 'cleanup-org'
+        'cleanup', 'cleanup-dry-run', 'cleanup-cancel', 'cleanup-org', 'cleanup-all', 'cleanup-all-with-age'
     )) {
         $config = $originalConfig | ConvertFrom-Json
         $config.repos += $branchRepo
@@ -257,6 +257,12 @@ try {
                 $expectedFailure = 'cannot be combined with -NoClone'
             }
             'dry-run-without-cleanup' { $selection = $null; $scriptArgs = @{ DryRun = $true }; $expectedFailure = 'only apply to -Cleanup' }
+            'cleanup-all' { $selection = $null; $scriptArgs = @{ Cleanup = $true; Yes = $true; All = $true } }
+            'cleanup-all-with-age' {
+                $selection = $null
+                $scriptArgs = @{ Cleanup = $true; All = $true; OlderThanHours = 5 }
+                $expectedFailure = '-All cannot be combined'
+            }
             'cleanup-with-template' {
                 $selection = $null
                 $scriptArgs = @{ Cleanup = $true; Template = 'booth-bingo' }
@@ -324,6 +330,9 @@ try {
                 'cleanup' {
                     Assert ($list[0].Arguments[2] -like 'user/repos*') 'Own account should use user/repos.'
                     Assert (($deleted -join ',') -eq 'demo-user/old-demo') "Deleted '$($deleted -join ',')'."
+                }
+                'cleanup-all' {
+                    Assert (($deleted -join ',') -eq 'demo-user/old-demo,demo-user/fresh-demo') "Deleted '$($deleted -join ',')'."
                 }
                 'cleanup-org' {
                     Assert ($list[0].Arguments[2] -like 'orgs/someone/repos*') 'Other owner should use orgs/<owner>/repos.'

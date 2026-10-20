@@ -13,6 +13,10 @@ on:
         description: List repos that would be deleted without deleting them
         type: boolean
         default: true
+      all:
+        description: "End of event: ignore the age cutoff and delete EVERY demo-generated repo, including ones in use"
+        type: boolean
+        default: false
   issue_comment:
     types: [created]
 
@@ -46,18 +50,21 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           INPUT_HOURS: ${{ inputs.max_age_hours }}
           INPUT_DRY_RUN: ${{ inputs.dry_run }}
+          INPUT_ALL: ${{ inputs.all }}
           COMMENT_BODY: ${{ github.event.comment.body }}
         run: |
           hours=24
+          all=false
           # Only the nightly schedule deletes without an explicit opt-in.
           dry_run=false
           case "$EVENT_NAME" in
             workflow_dispatch)
               hours="${INPUT_HOURS:-24}"
               dry_run="${INPUT_DRY_RUN:-true}"
+              all="${INPUT_ALL:-false}"
               ;;
             issue_comment)
-              # Accepts: /cleanup [hours] [--dry-run | --confirm]. Dry run unless --confirm.
+              # Accepts: /cleanup [hours | --all] [--dry-run | --confirm]. Dry run unless --confirm.
               first_line=$(printf '%s\n' "$COMMENT_BODY" | head -n 1 | tr -d '\r')
               read -r -a words <<< "$first_line"
               if [ "${words[0]:-}" != "/cleanup" ]; then
@@ -71,7 +78,8 @@ jobs:
                 case "$word" in
                   --dry-run) dry_run=true ;;
                   --confirm) dry_run=false ;;
-                  -*) echo "::error::Unknown option '$word'. Usage: /cleanup [hours] [--dry-run | --confirm]"; exit 1 ;;
+                  --all) all=true ;;
+                  -*) echo "::error::Unknown option '$word'. Usage: /cleanup [hours | --all] [--dry-run | --confirm]"; exit 1 ;;
                   *) hours="$word" ;;
                 esac
               done
@@ -83,12 +91,17 @@ jobs:
             exit 1
           fi
           hours=$((10#$hours))
-          if [ "$hours" -lt "$MIN_AGE_HOURS" ]; then
+          if [ "$all" = "true" ]; then
+            # End-of-event override: skip the age cutoff and the minimum-age guard.
+            echo "::warning::--all ignores the age cutoff: every '$TOPIC' repo in $ORG will be deleted, including ones created minutes ago."
+            hours=0
+          elif [ "$hours" -lt "$MIN_AGE_HOURS" ]; then
             echo "::error::max age must be at least $MIN_AGE_HOURS hour(s) so demos in use are not deleted, got '$hours'."
             exit 1
           fi
           echo "hours=$hours" >> "$GITHUB_OUTPUT"
           echo "dry_run=$dry_run" >> "$GITHUB_OUTPUT"
+          echo "all=$all" >> "$GITHUB_OUTPUT"
 
       - name: Check commenter permission
         if: github.event_name == 'issue_comment' && steps.opts.outputs.run == 'true'
@@ -119,6 +132,7 @@ jobs:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           HOURS: ${{ steps.opts.outputs.hours }}
           DRY_RUN: ${{ steps.opts.outputs.dry_run }}
+          ALL: ${{ steps.opts.outputs.all }}
         run: |
           cutoff=$(date -u -d "-$HOURS hours" +%Y-%m-%dT%H:%M:%SZ)
           echo "Deleting $ORG repos with topic '$TOPIC' created before $cutoff (dry run: $DRY_RUN)"
@@ -151,7 +165,11 @@ jobs:
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
           {
-            echo "### Demo cleanup (dry run: $DRY_RUN, older than ${HOURS}h)"
+            if [ "$ALL" = "true" ]; then
+              echo "### Demo cleanup (dry run: $DRY_RUN, ALL demo repos, age cutoff ignored)"
+            else
+              echo "### Demo cleanup (dry run: $DRY_RUN, older than ${HOURS}h)"
+            fi
             if [ "${#deleted[@]}" -eq 0 ] && [ "${#failed[@]}" -eq 0 ]; then echo "Nothing to delete."; fi
             [ "${#deleted[@]}" -gt 0 ] && printf -- '- %s\n' "${deleted[@]}"
             if [ "${#failed[@]}" -gt 0 ]; then
@@ -177,14 +195,18 @@ jobs:
           FAILED_COUNT: ${{ steps.cleanup.outputs.failed_count }}
           FAILED_LIST: ${{ steps.cleanup.outputs.failed_list }}
           DRY_RUN: ${{ steps.opts.outputs.dry_run }}
+          ALL: ${{ steps.opts.outputs.all }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           verb="Deleted"
           [ "$DRY_RUN" = "true" ] && verb="Would delete"
+          scope="[hours]"
+          [ "$ALL" = "true" ] && scope="--all"
           if [ "$OUTCOME" = "success" ]; then
             body="🧹 $verb ${COUNT:-0} demo repo(s)."
+            [ "$ALL" = "true" ] && body="⚠️ \`--all\` ignores the age cutoff, so this includes demos created minutes ago."$'\n\n'"$body"
             [ "${COUNT:-0}" != "0" ] && body="$body"$'\n\n'"$LIST"
-            [ "$DRY_RUN" = "true" ] && body="$body"$'\n\n'"This was a dry run. Comment \`/cleanup [hours] --confirm\` to delete."
+            [ "$DRY_RUN" = "true" ] && body="$body"$'\n\n'"This was a dry run. Comment \`/cleanup $scope --confirm\` to delete."
           elif [ "${FAILED_COUNT:-0}" != "0" ]; then
             body="⚠️ $verb ${COUNT:-0} demo repo(s), but ${FAILED_COUNT} could not be deleted. See $RUN_URL"
             [ "${COUNT:-0}" != "0" ] && body="$body"$'\n\n'"Deleted:"$'\n'"$LIST"

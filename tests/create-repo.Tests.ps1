@@ -127,6 +127,7 @@ function git {
             'feat: Adds terms of services download' {
                 Assert (Test-Path -LiteralPath './api/src/routes/legal.ts') 'TypeScript resources were not copied.'
                 Assert (Test-Path -LiteralPath './api/documents/legal/en/terms_v2.1.pdf') 'Binary resources were not copied.'
+                Assert ((Get-Content -LiteralPath './api/package.json' -Raw).Contains('ua-parser-js')) 'TypeScript dependency change was not copied.'
             }
             'feat: add checkWin game logic with tests' {
                 Assert (Test-Path -LiteralPath './src/bingo.js') 'Stack layer 1 resources were not copied.'
@@ -179,8 +180,19 @@ try {
         repo_description = 'Branch demo'; workflow = 'branch_and_codespace'; branch_name = 'feature/demo'
     }
 
+    # Every PR/issue resource referenced by the real config must exist.
+    foreach ($repo in ($originalConfig | ConvertFrom-Json).repos) {
+        $paths = @($repo.prs | Where-Object { $_ } | ForEach-Object { $_.resource_dir; $_.body_file })
+        $paths += @($repo.stack | Where-Object { $_ } | ForEach-Object { $_.resource_dir; $_.body_file })
+        if ($repo.issue) { $paths += $repo.issue.body_file }
+        foreach ($path in ($paths | Where-Object { $_ })) {
+            Assert (Test-Path -LiteralPath (Join-Path $sourceRoot $path)) "$($repo.key): '$path' does not exist."
+        }
+    }
+    Write-Host 'PASS: config-resources'
+
     foreach ($scenario in @(
-        'repo-only', 'security-prs', 'issue-codespace', 'branch-codespace',
+        'repo-only', 'security-prs', 'security-prs-v4', 'issue-codespace', 'branch-codespace',
         'login', 'invalid-selection', 'no-machine', 'nested-body',
         'missing-template', 'missing-body', 'empty-prs', 'unknown-workflow',
         'outside-body', 'invalid-json', 'missing-org', 'empty-repos',
@@ -194,6 +206,7 @@ try {
     )) {
         $config = $originalConfig | ConvertFrom-Json
         $config.repos += $branchRepo
+        $branchSelection = [string]@($config.repos).Count
         $selection = '1'
         $scriptArgs = @{}
         $testState.NeedsLogin = $false
@@ -217,8 +230,9 @@ try {
         $expectedFailure = $null
         switch ($scenario) {
             'security-prs' { $selection = '2' }
+            'security-prs-v4' { $selection = $null; $scriptArgs = @{ Template = 'security-octo-supply-v4'; NoClone = $true } }
             'issue-codespace' { $selection = '3' }
-            'branch-codespace' { $selection = '7' }
+            'branch-codespace' { $selection = $branchSelection }
             'code-review-prs' { $selection = '6' }
             'code-review-fallback' { $selection = '6'; $testState.Failure = 'pr edit' }
             'code-review-unsupported' { $selection = '6'; $testState.Failure = 'pr edit'; $testState.ReviewApiFailure = $true }
@@ -311,7 +325,7 @@ try {
         if ($scenario -eq 'invalid-json') { Set-Content -LiteralPath $configPath -Value '{' }
         $testState.Answers = New-Object 'System.Collections.Generic.Queue[string]'
         if ($scenario -eq 'invalid-selection') {
-            foreach ($answer in @('text', '0', '999999999999999999999', '8', '1')) { $testState.Answers.Enqueue($answer) }
+            foreach ($answer in @('text', '0', '999999999999999999999', [string](@($config.repos).Count + 1), '1')) { $testState.Answers.Enqueue($answer) }
         }
         elseif ($selection) { $testState.Answers.Enqueue($selection) }
         $testState.Calls = New-Object 'System.Collections.Generic.List[object]'
@@ -373,11 +387,12 @@ try {
             $create = @(Find-Calls 'gh' 'repo create')[0]
             $expectedOwner = switch ($scenario) {
                 'security-prs' { 'octobooth-demos' }
+                'security-prs-v4' { 'octobooth-demos' }
                 'nested-body' { 'octobooth-demos' }
                 'owner-override' { 'other-org' }
                 default { 'demo-user' }
             }
-            Assert ($create.Arguments[2] -match "^$expectedOwner/[a-z-]+-[a-z0-9]{4}$") "Invalid repository name '$($create.Arguments[2])'."
+            Assert ($create.Arguments[2] -match "^$expectedOwner/[a-z0-9-]+-[a-z0-9]{4}$") "Invalid repository name '$($create.Arguments[2])'."
             $isBingo = $create.Arguments[2] -like '*/booth-bingo-*'
             $expectedVisibility = if ($isBingo) { '--public' } else { '--private' }
             Assert ($create.Arguments -contains $expectedVisibility) "Repository was not created with $expectedVisibility."
@@ -405,9 +420,13 @@ try {
             else {
                 Assert (($create.Arguments -join ' ').Contains('--template=octobooth-demos/')) 'Template org fallback was ignored.'
             }
-            if ($selection -eq '2') {
+            if ($selection -eq '2' -or $scenario -eq 'security-prs-v4') {
                 Assert ((Find-Calls 'gh' 'pr create').Count -eq 2) 'Expected two PRs.'
                 Assert ((Find-Calls 'gh' 'api repos/').Count -eq 6) 'Expected readiness checks and four security API calls.'
+                $disable = @(Find-Calls 'gh' 'workflow disable codeql-advanced.yml')
+                Assert ($disable.Count -eq 1 -and $disable[0].Arguments -contains $create.Arguments[2]) 'codeql-advanced.yml was not disabled.'
+                $firstPr = $testState.Calls.IndexOf((Find-Calls 'gh' 'pr create')[0])
+                Assert ($testState.Calls.IndexOf($disable[0]) -lt $firstPr) 'codeql-advanced.yml was disabled after PRs were opened.'
                 foreach ($prCall in (Find-Calls 'gh' 'pr create')) {
                     Assert ($prCall.Arguments -contains 'trunk') 'PR did not use the default branch.'
                 }
@@ -454,16 +473,16 @@ try {
                     Assert (-not $clone.Arguments[3].StartsWith($homeRepos)) '-NoClone still cloned into ~/repos.'
                 }
             }
-            if ($selection -in @('3', '7')) {
+            if ($selection -in @('3', $branchSelection)) {
                 $codespace = @(Find-Calls 'gh' 'codespace create')[0]
                 Assert (($codespace.Arguments -contains '--machine') -eq ($scenario -ne 'no-machine')) 'Wrong machine arguments.'
-                Assert (($codespace.Arguments -contains '--branch') -eq ($selection -eq '7')) 'Wrong branch arguments.'
+                Assert (($codespace.Arguments -contains '--branch') -eq ($selection -eq $branchSelection)) 'Wrong branch arguments.'
             }
             if ($selection -eq '3') {
                 $issue = @(Find-Calls 'gh' 'issue create')[0]
                 Assert ($issue.Arguments -contains '@copilot') 'Issue assignee was not preserved.'
             }
-            if ($selection -eq '7') {
+            if ($selection -eq $branchSelection) {
                 Assert ((Find-Calls 'git' 'checkout trunk').Count -eq 1) 'Branch workflow did not checkout default branch.'
                 Assert ((Find-Calls 'git' 'push -u origin feature/demo').Count -eq 1) 'Branch was not pushed.'
             }

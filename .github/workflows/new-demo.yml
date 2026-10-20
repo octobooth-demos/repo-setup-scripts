@@ -12,6 +12,7 @@ on:
           - booth-bingo
           - securing-your-code
           - security-octo-supply
+          - security-octo-supply-v4
           - ctrl-slash
           - octocart
   issue_comment:

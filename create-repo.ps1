@@ -625,6 +625,14 @@ try {
                     '-f', 'state=configured', '-f', 'query_suite=default', '--silent'
                 )
                 Write-Host 'Dependabot alerts, security updates, and Code Scanning enabled.'
+                # Default setup rejects advanced-setup SARIF uploads, which would fail a check on every PR.
+                Invoke-GhQuiet workflow disable codeql-advanced.yml -R $fullRepoName | Out-Null
+                if ($LASTEXITCODE -eq 0) {
+                    Write-Host 'Disabled codeql-advanced.yml (default setup is on).'
+                }
+                else {
+                    Write-Host 'codeql-advanced.yml not found or already disabled.'
+                }
             }
             $tempDirectory = Join-Path ([IO.Path]::GetTempPath()) ([IO.Path]::GetRandomFileName())
             New-Item -ItemType Directory -Path $tempDirectory | Out-Null

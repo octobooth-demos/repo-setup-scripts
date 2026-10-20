@@ -13,6 +13,8 @@ param(
     # Delete demo-generated repos owned by -Owner (default: logged-in account) older than -OlderThanHours.
     [switch]$Cleanup,
     [int]$OlderThanHours = 24,
+    # End of event: ignore the age cutoff and delete every demo repo (same as -OlderThanHours 0, with a warning).
+    [switch]$All,
     [switch]$DryRun,
     [switch]$Yes
 )
@@ -30,9 +32,13 @@ $nonInteractive = -not [string]::IsNullOrWhiteSpace($Template)
 if ($Cleanup -and ($nonInteractive -or $Serve -or $NoClone)) {
     throw '-Cleanup cannot be combined with -Template, -Serve, or -NoClone.'
 }
-if (-not $Cleanup -and ($DryRun -or $Yes)) {
-    throw '-DryRun and -Yes only apply to -Cleanup.'
+if (-not $Cleanup -and ($DryRun -or $Yes -or $All)) {
+    throw '-DryRun, -Yes, and -All only apply to -Cleanup.'
 }
+if ($All -and $PSBoundParameters.ContainsKey('OlderThanHours')) {
+    throw '-All cannot be combined with -OlderThanHours.'
+}
+if ($All) { $OlderThanHours = 0 }
 if ($OlderThanHours -lt 0) {
     throw '-OlderThanHours must be zero or more.'
 }
@@ -194,13 +200,40 @@ function Connect-GitHubAccount {
     [pscustomobject]@{ User = $currentUser; UserToken = $userToken }
 }
 
+# Cleanup only ever deletes repos carrying $demoTopic, so an untagged demo repo
+# would never be cleaned up. Retry, then delete the new repo rather than leave it.
+function Add-DemoTopic {
+    param([string]$RepoName)
+
+    for ($attempt = 1; $attempt -le 3; $attempt++) {
+        & gh repo edit $RepoName --add-topic $demoTopic | Out-Null
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "Added topic: $demoTopic"
+            return
+        }
+        if ($attempt -lt 3) { Start-Sleep -Seconds 2 }
+    }
+    $message = "Could not add the '$demoTopic' topic to $RepoName, so cleanup would never find it."
+    & gh repo delete $RepoName --yes
+    if ($LASTEXITCODE -eq 0) {
+        throw "$message Deleted the untagged repo; run the script again."
+    }
+    throw "$message Could not delete it either. Tag it with 'gh repo edit $RepoName --add-topic $demoTopic' or delete it with 'gh repo delete $RepoName --yes'."
+}
+
 # Delete demo repos (demo-generated topic) owned by $CleanupOwner older than -OlderThanHours.
 # Never touches repos without the topic.
 function Invoke-DemoCleanup {
     param([string]$CleanupOwner, [string]$CurrentUser)
 
     $endpoint = if ($CleanupOwner -eq $CurrentUser) { 'user/repos?affiliation=owner&per_page=100' } else { "orgs/$CleanupOwner/repos?per_page=100" }
-    Write-Host "Looking for '$demoTopic' repos owned by $CleanupOwner older than $($OlderThanHours)h..."
+    if ($All) {
+        Write-Warning "-All ignores the age cutoff: every '$demoTopic' repo owned by $CleanupOwner will be deleted, including demos still in use."
+        Write-Host "Looking for all '$demoTopic' repos owned by $CleanupOwner..."
+    }
+    else {
+        Write-Host "Looking for '$demoTopic' repos owned by $CleanupOwner older than $($OlderThanHours)h..."
+    }
     $lines = & gh api --paginate $endpoint --jq '.[] | {full_name, created_at, topics, owner: .owner.login}'
     if ($LASTEXITCODE -ne 0) { throw "gh api $endpoint failed with exit code $LASTEXITCODE." }
     $cutoff = [DateTimeOffset]::UtcNow.AddHours(-$OlderThanHours)
@@ -533,9 +566,7 @@ try {
     Set-ActionOutput 'repo_name' $fullRepoName
     Set-ActionOutput 'repo_url' "https://github.com/$fullRepoName"
 
-    # The cleanup workflow only ever deletes repos carrying this topic.
-    Invoke-Native 'gh' @('repo', 'edit', $fullRepoName, '--add-topic', $demoTopic) | Out-Null
-    Write-Host "Added topic: $demoTopic"
+    Add-DemoTopic $fullRepoName
 
     Write-Host 'Waiting for template to be fully processed...'
     $defaultBranch = Wait-RepoReady

@@ -17,7 +17,7 @@ PAGES_WORKFLOW="pages.yml"
 usage() {
     cat <<'EOF'
 Usage: create-repo.sh [--template <key>] [--owner <name>] [--no-clone | --serve]
-       create-repo.sh --cleanup [--owner <name>] [--older-than <hours>] [--dry-run] [--yes]
+       create-repo.sh --cleanup [--owner <name>] [--older-than <hours> | --all] [--dry-run] [--yes]
 
   (no args)            Interactive: pick a template from a menu.
   --template <key>     Non-interactive: use the config.json repo entry with this key.
@@ -30,6 +30,8 @@ Usage: create-repo.sh [--template <key>] [--owner <name>] [--no-clone | --serve]
   --cleanup            Delete repos with the demo-generated topic owned by --owner
                        (default: the logged-in account) that are older than --older-than.
   --older-than <hours> Age cutoff for --cleanup (default: 24).
+  --all                With --cleanup, ignore the age cutoff and delete every demo repo
+                       (end of event). Same as --older-than 0, with a warning.
   --dry-run            With --cleanup, list what would be deleted.
   --yes                With --cleanup, skip the confirmation prompt.
   -h, --help           Show this help.
@@ -51,6 +53,8 @@ OWNER_OVERRIDE=""
 SERVE=false
 CLEANUP=false
 OLDER_THAN_HOURS=24
+OLDER_THAN_SET=false
+ALL=false
 DRY_RUN=false
 ASSUME_YES=false
 
@@ -72,7 +76,12 @@ while [ "$#" -gt 0 ]; do
         --older-than)
             require_value "$1" "${2:-}"
             OLDER_THAN_HOURS="$2"
+            OLDER_THAN_SET=true
             shift 2
+            ;;
+        --all)
+            ALL=true
+            shift
             ;;
         --dry-run)
             DRY_RUN=true
@@ -122,10 +131,15 @@ if [ "$CLEANUP" = true ] && { [ -n "$TEMPLATE_KEY" ] || [ "$SERVE" = true ] || [
     echo "❌ --cleanup cannot be combined with --template, --serve, or --no-clone"
     exit 2
 fi
-if [ "$CLEANUP" = false ] && { [ "$DRY_RUN" = true ] || [ "$ASSUME_YES" = true ]; }; then
-    echo "❌ --dry-run and --yes only apply to --cleanup"
+if [ "$CLEANUP" = false ] && { [ "$DRY_RUN" = true ] || [ "$ASSUME_YES" = true ] || [ "$ALL" = true ]; }; then
+    echo "❌ --dry-run, --yes, and --all only apply to --cleanup"
     exit 2
 fi
+if [ "$ALL" = true ] && [ "$OLDER_THAN_SET" = true ]; then
+    echo "❌ --all cannot be combined with --older-than"
+    exit 2
+fi
+[ "$ALL" = true ] && OLDER_THAN_HOURS=0
 if ! [[ "$OLDER_THAN_HOURS" =~ ^[0-9]+$ ]]; then
     echo "❌ --older-than must be a whole number of hours"
     exit 2
@@ -312,6 +326,28 @@ validate_pr_entries() {
         fi
         i=$((i + 1))
     done
+}
+
+# Cleanup only ever deletes repos carrying $DEMO_TOPIC, so an untagged demo repo
+# would never be cleaned up. Retry, then delete the new repo rather than leave it.
+tag_demo_repo() {
+    local attempt
+    for attempt in 1 2 3; do
+        if gh repo edit "$FULL_REPO_NAME" --add-topic "$DEMO_TOPIC" > /dev/null; then
+            echo "🏷️  Added topic: $DEMO_TOPIC"
+            return 0
+        fi
+        [ "$attempt" -lt 3 ] && sleep 2
+    done
+    echo "❌ Could not add the '$DEMO_TOPIC' topic to $FULL_REPO_NAME, so cleanup would never find it."
+    if gh repo delete "$FULL_REPO_NAME" --yes; then
+        echo "🗑️  Deleted the untagged repo $FULL_REPO_NAME. Run the script again."
+    else
+        echo "   Could not delete it either. Tag or delete it by hand:"
+        echo "   gh repo edit $FULL_REPO_NAME --add-topic $DEMO_TOPIC"
+        echo "   gh repo delete $FULL_REPO_NAME --yes"
+    fi
+    exit 1
 }
 
 # Wait (bounded) until a repo generated from a template has its default branch.
@@ -506,7 +542,12 @@ run_cleanup() {
     local endpoint="orgs/$OWNER/repos?per_page=100"
     [ "$OWNER" = "$CURRENT_USER" ] && endpoint="user/repos?affiliation=owner&per_page=100"
 
-    echo "🧹 Looking for '$DEMO_TOPIC' repos owned by $OWNER older than ${OLDER_THAN_HOURS}h..."
+    if [ "$ALL" = true ]; then
+        echo "⚠️  --all ignores the age cutoff: every '$DEMO_TOPIC' repo owned by $OWNER will be deleted, including demos still in use."
+        echo "🧹 Looking for all '$DEMO_TOPIC' repos owned by $OWNER..."
+    else
+        echo "🧹 Looking for '$DEMO_TOPIC' repos owned by $OWNER older than ${OLDER_THAN_HOURS}h..."
+    fi
     local candidates=()
     local line
     while IFS= read -r line; do
@@ -760,9 +801,7 @@ echo "✅ Repository created successfully: $FULL_REPO_NAME"
 set_output repo_name "$FULL_REPO_NAME"
 set_output repo_url "https://github.com/$FULL_REPO_NAME"
 
-# The cleanup workflow only ever deletes repos carrying this topic.
-gh repo edit "$FULL_REPO_NAME" --add-topic "$DEMO_TOPIC" > /dev/null
-echo "🏷️  Added topic: $DEMO_TOPIC"
+tag_demo_repo
 
 wait_for_repo_ready
 echo "📍 Default branch: $DEFAULT_BRANCH"

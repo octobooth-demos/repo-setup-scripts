@@ -2,7 +2,7 @@
 // background, watch the log, then jump into the new repo (app session, VS Code, GitHub).
 
 import { createServer } from "node:http";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { readFileSync, existsSync, mkdirSync, writeFileSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir, homedir } from "node:os";
 import { join, dirname } from "node:path";
@@ -147,6 +147,18 @@ function startRun({ template, owner, noClone = false, openBrowser = false }) {
     if (!openBrowser) env.DEMO_NO_BROWSER = "1";
     else delete env.DEMO_NO_BROWSER;
     delete env.GITHUB_ACTIONS;
+    // The app may inject its own GH_TOKEN (without scopes like `codespace`), which would
+    // override the user's `gh auth login`. Prefer the stored login, like a terminal run.
+    if (env.GH_TOKEN || env.GITHUB_TOKEN) {
+        const stored = { ...env };
+        delete stored.GH_TOKEN;
+        delete stored.GITHUB_TOKEN;
+        const probe = spawnSync("gh", ["auth", "token", "-h", "github.com"], { env: stored, stdio: "ignore", timeout: 10000 });
+        if (probe.status === 0) {
+            delete env.GH_TOKEN;
+            delete env.GITHUB_TOKEN;
+        }
+    }
 
     const child = spawn(cmd, args, { cwd: REPO_ROOT, env, stdio: ["ignore", "pipe", "pipe"] });
     processes.set(run.id, child);

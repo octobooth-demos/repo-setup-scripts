@@ -27,6 +27,7 @@
       "repo_description": "Security supply chain demo",
       "workflow": "security_prs",
       "enable_security_features": true,
+      "codeql": "advanced",
       "prs": [
         {
           "branch": "feature-add-tos-download",
@@ -167,6 +168,38 @@
         "PRs: promo codes, order export, wishlist, and product reviews feature PRs created",
         "Copilot Code Review: requested on the first three PRs (check warnings); request it live on \"Add product reviews\" (Reviewers -> Copilot)",
         "Presenter answer key: resources/octocart/ANSWER_KEY.md in repo-setup-scripts"
+      ]
+    },
+    {
+      "key": "ai-security",
+      "owner": "org",
+      "display_name": "AI Security (AI Scan + agentic autofix)",
+      "description_short": "AI Scan findings on an infra PR (Dockerfile, shell, Terraform, PHP) plus CodeQL alerts to assign to Copilot",
+      "workflow_hint": "Creates repo, waits for CodeQL on main, opens an AI Scan PR, and assigns one alert to Copilot (takes ~5-10 min)",
+      "template": "security-octo-supply",
+      "repo_base_name": "ai-security",
+      "repo_description": "AI Scan and agentic autofix demo",
+      "workflow": "ai_security",
+      "seed": {
+        "resource_dir": "resources/ai-security/seed",
+        "commit_message": "feat: add supplier portal document center"
+      },
+      "prs": [
+        {
+          "branch": "feature/containerize-supplier-portal",
+          "resource_dir": "resources/ai-security/pr-infra",
+          "commit_message": "feat: containerize the supplier portal and deploy it to staging",
+          "title": "Containerize the supplier portal and deploy it to staging",
+          "body_file": "resources/ai-security/pr-infra/pr-body.md"
+        }
+      ],
+      "autofix": {
+        "preassign_rule": "js/sql-injection"
+      },
+      "summary_lines": [
+        "AI Scan: enabled; findings appear on the PR with an \"AI\" label in a few minutes",
+        "Agentic autofix: one alert assigned to Copilot; assign the rest live from Security -> Code scanning",
+        "Presenter notes: resources/ai-security/ANSWER_KEY.md in repo-setup-scripts"
       ]
     }
   ]

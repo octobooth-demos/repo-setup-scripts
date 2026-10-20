@@ -11,6 +11,11 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 CONFIG_FILE="$SCRIPT_DIR/config.json"
 DEMO_TOPIC="demo-generated"
 PAGES_WORKFLOW="pages.yml"
+AI_SCAN_API_VERSION="2026-03-10"
+# The UI's "Assign to Copilot" uses github-agentic-autofix[bot]; the GA changelog names
+# copilot-swe-agent[bot], so it's kept as a fallback.
+COPILOT_AUTOFIX_ASSIGNEES=("github-agentic-autofix[bot]" "copilot-swe-agent[bot]")
+CODEQL_WAIT_SECONDS="${CODEQL_WAIT_SECONDS:-900}"
 
 # --- Arguments ---
 
@@ -354,7 +359,7 @@ tag_demo_repo() {
 # Sets DEFAULT_BRANCH.
 wait_for_repo_ready() {
     local attempt=1
-    local max_attempts=15
+    local max_attempts=60
     echo "⏳ Waiting for template to be fully processed..."
     while [ "$attempt" -le "$max_attempts" ]; do
         DEFAULT_BRANCH=$(gh api "repos/$FULL_REPO_NAME" --jq '.default_branch' 2>/dev/null || true)
@@ -401,6 +406,117 @@ register_stack() {
         exit 1
     fi
     echo "✅ Native stack registered and verified: $actual"
+}
+
+# Turn on AI Scan for pull requests. Org-owned repos inherit the org setting, so
+# this is usually a no-op; it only warns because the org may enforce the value.
+enable_ai_scan() {
+    echo "🤖 Enabling AI Scan for pull requests..."
+    if gh api --method PATCH "repos/$FULL_REPO_NAME/code-scanning/ai-scan" \
+        -H "X-GitHub-Api-Version: $AI_SCAN_API_VERSION" -f pr_scan=enabled --silent 2>/dev/null; then
+        echo "✅ AI Scan for pull requests enabled"
+        return 0
+    fi
+    local state
+    state=$(gh api "repos/$FULL_REPO_NAME/code-scanning/ai-scan" \
+        -H "X-GitHub-Api-Version: $AI_SCAN_API_VERSION" --jq '.pr_scan' 2>/dev/null || true)
+    if [ "$state" = "enabled" ]; then
+        echo "✅ AI Scan for pull requests already enabled (inherited from the organization)"
+        return 0
+    fi
+    echo "⚠️  Could not enable AI Scan for pull requests (current state: ${state:-unknown})."
+    echo "   An org owner must allow it under Settings → Code security → Global settings → AI Scan."
+}
+
+# Wait (bounded) for the CodeQL workflow run on <sha> to finish and for open
+# default-branch alerts to show up. Exits with a clear message on failure.
+# Usage: wait_for_codeql <sha>
+wait_for_codeql() {
+    local sha="$1"
+    local waited=0
+    local run_id="" state=""
+    echo "⏳ Waiting for CodeQL ($CODEQL_WORKFLOW) to analyze $DEFAULT_BRANCH (usually 3-6 minutes)..."
+    while [ "$waited" -lt "$CODEQL_WAIT_SECONDS" ]; do
+        if [ -z "$run_id" ]; then
+            run_id=$(gh run list --repo "$FULL_REPO_NAME" --workflow "$CODEQL_WORKFLOW" --commit "$sha" \
+                --limit 1 --json databaseId --jq '.[0].databaseId // empty' 2>/dev/null || true)
+        fi
+        if [ -n "$run_id" ]; then
+            state=$(gh run view "$run_id" --repo "$FULL_REPO_NAME" --json status,conclusion \
+                --jq '"\(.status) \(.conclusion)"' 2>/dev/null || true)
+            case "$state" in
+                "completed success") break ;;
+                completed\ *)
+                    echo "❌ CodeQL finished with '${state#completed }' on $DEFAULT_BRANCH."
+                    echo "   See https://github.com/$FULL_REPO_NAME/actions/runs/$run_id"
+                    exit 1
+                    ;;
+            esac
+        fi
+        sleep 10
+        waited=$((waited + 10))
+    done
+    if [ "$state" != "completed success" ]; then
+        if [ -z "$run_id" ]; then
+            echo "❌ CodeQL never started on $DEFAULT_BRANCH. Check that Actions are enabled for $FULL_REPO_NAME."
+        else
+            echo "❌ CodeQL was still running after $((CODEQL_WAIT_SECONDS / 60)) minutes."
+            echo "   See https://github.com/$FULL_REPO_NAME/actions/runs/$run_id"
+        fi
+        exit 1
+    fi
+    echo "✅ CodeQL analysis finished"
+
+    local attempt=1
+    ALERT_COUNT=0
+    while [ "$attempt" -le 12 ]; do
+        ALERT_COUNT=$(gh api "repos/$FULL_REPO_NAME/code-scanning/alerts?state=open&ref=refs/heads/$DEFAULT_BRANCH&per_page=100" \
+            --jq 'length' 2>/dev/null || true)
+        [[ "$ALERT_COUNT" =~ ^[0-9]+$ ]] || ALERT_COUNT=0
+        [ "$ALERT_COUNT" -gt 0 ] && break
+        sleep 5
+        attempt=$((attempt + 1))
+    done
+    if [ "$ALERT_COUNT" -eq 0 ]; then
+        echo "❌ CodeQL finished but no open alerts appeared on $DEFAULT_BRANCH."
+        exit 1
+    fi
+    echo "🚨 $ALERT_COUNT open code scanning alerts on $DEFAULT_BRANCH"
+}
+
+# Assign one default-branch alert to Copilot (agentic autofix) so a draft fix PR
+# is ready by demo time. Prefers <rule_id>, else the first open alert. Only warns.
+# Usage: assign_alert_to_copilot [rule_id]
+assign_alert_to_copilot() {
+    local rule="$1"
+    local alerts number=""
+    alerts=$(gh api "repos/$FULL_REPO_NAME/code-scanning/alerts?state=open&ref=refs/heads/$DEFAULT_BRANCH&per_page=100" 2>/dev/null || echo '[]')
+    if [ -n "$rule" ]; then
+        number=$(echo "$alerts" | jq -r --arg rule "$rule" '[.[] | select(.rule.id == $rule)][0].number // empty')
+        [ -z "$number" ] && echo "ℹ️  No open '$rule' alert; assigning the first open alert instead."
+    fi
+    [ -z "$number" ] && number=$(echo "$alerts" | jq -r '.[0].number // empty')
+    if [ -z "$number" ]; then
+        echo "⚠️  No open alert to assign to Copilot."
+        return 0
+    fi
+    echo "🤖 Assigning code scanning alert #$number to Copilot (agentic autofix)..."
+    local assignee assignees=""
+    for assignee in "${COPILOT_AUTOFIX_ASSIGNEES[@]}"; do
+        assignees=$(gh api --method PATCH "repos/$FULL_REPO_NAME/code-scanning/alerts/$number" \
+            -H "X-GitHub-Api-Version: $AI_SCAN_API_VERSION" -f "assignees[]=$assignee" \
+            --jq '[.assignees[]?.login] | join(",")' 2>/dev/null || true)
+        [[ ",$assignees," == *",$assignee,"* ]] && break
+        assignees=""
+    done
+    if [ -n "$assignees" ]; then
+        ASSIGNED_ALERT_URL="https://github.com/$FULL_REPO_NAME/security/code-scanning/$number"
+        echo "✅ Alert #$number assigned to Copilot; a draft fix PR appears in about 10 minutes."
+        return 0
+    fi
+    echo "⚠️  Could not assign alert #$number to Copilot. Agentic autofix must be on for the repo,"
+    echo "   and the token needs a user (GitHub App tokens may not be able to assign Copilot)."
+    echo "   Assign it from https://github.com/$FULL_REPO_NAME/security/code-scanning/$number (Assign to Copilot)."
 }
 
 # Write a key=value pair to $GITHUB_OUTPUT when running in GitHub Actions.
@@ -516,6 +632,20 @@ validate_selected_repo() {
             ;;
         security_prs|code_review_prs)
             validate_pr_entries prs 1
+            ;;
+        ai_security)
+            validate_pr_entries prs 1
+            local seed_dir seed_msg
+            seed_dir=$(repo_cfg '.seed.resource_dir')
+            seed_msg=$(repo_cfg '.seed.commit_message')
+            if [ -n "$seed_dir$seed_msg" ]; then
+                [ -z "$seed_dir" ] && missing+=("seed.resource_dir")
+                [ -z "$seed_msg" ] && missing+=("seed.commit_message")
+                if [ -n "$seed_dir" ] && [ ! -d "$SCRIPT_DIR/$seed_dir" ]; then
+                    echo "❌ seed.resource_dir not found: $SCRIPT_DIR/$seed_dir"
+                    exit 1
+                fi
+            fi
             ;;
         stacked_prs)
             validate_pr_entries stack 2
@@ -878,8 +1008,14 @@ case $WORKFLOW in
             # Private repos need Advanced Security before Code Scanning default setup.
             gh api "repos/$FULL_REPO_NAME" -X PATCH \
                 -f 'security_and_analysis[advanced_security][status]=enabled' --silent
-            gh api "repos/$FULL_REPO_NAME/code-scanning/default-setup" -X PATCH \
-                -f state=configured -f query_suite=default --silent
+            # "codeql": "advanced" means the template ships its own CodeQL workflow;
+            # default setup would make GitHub reject that workflow's uploads.
+            if [ "$(repo_cfg '.codeql')" = "advanced" ]; then
+                echo "ℹ️  Using the template's CodeQL workflow (advanced setup)"
+            else
+                gh api "repos/$FULL_REPO_NAME/code-scanning/default-setup" -X PATCH \
+                    -f state=configured -f query_suite=default --silent
+            fi
             echo "✅ Dependabot alerts, security updates, and Code Scanning enabled"
         fi
 
@@ -902,6 +1038,58 @@ case $WORKFLOW in
                 "$pr_title"
             i=$((i + 1))
         done
+        ;;
+
+    "ai_security")
+        echo ""
+        echo "🤖 Setting up AI Scan + agentic autofix demo..."
+
+        # The template runs CodeQL through its own advanced workflow. Default setup
+        # is deliberately not enabled: it would reject that workflow's uploads.
+        CODEQL_WORKFLOW=$(repo_cfg '.codeql_workflow')
+        [ -z "$CODEQL_WORKFLOW" ] && CODEQL_WORKFLOW="codeql-advanced.yml"
+        # Private repos need Advanced Security before code scanning results are accepted.
+        gh api "repos/$FULL_REPO_NAME" -X PATCH \
+            -f 'security_and_analysis[advanced_security][status]=enabled' --silent
+        echo "✅ Advanced Security enabled"
+        enable_ai_scan
+
+        clone_to_temp
+
+        SEED_DIR=$(repo_cfg '.seed.resource_dir')
+        if [ -n "$SEED_DIR" ]; then
+            echo "🌱 Adding extra default-branch code for CodeQL to flag..."
+            cp -R "$SCRIPT_DIR/$SEED_DIR"/. .
+            git add -A
+            git commit -m "$(repo_cfg '.seed.commit_message')" --quiet
+            git push origin "$DEFAULT_BRANCH" --quiet 2>/dev/null
+        else
+            gh workflow run "$CODEQL_WORKFLOW" --repo "$FULL_REPO_NAME" --ref "$DEFAULT_BRANCH" > /dev/null
+        fi
+        wait_for_codeql "$(git rev-parse HEAD)"
+
+        assign_alert_to_copilot "$(repo_cfg '.autofix.preassign_rule')"
+
+        PR_COUNT=$(jq ".repos[$SELECTED_INDEX].prs | length" "$CONFIG_FILE")
+        i=0
+        while [ "$i" -lt "$PR_COUNT" ]; do
+            create_pr_from_resources \
+                "$(jq -r ".repos[$SELECTED_INDEX].prs[$i].branch" "$CONFIG_FILE")" \
+                "$(jq -r ".repos[$SELECTED_INDEX].prs[$i].resource_dir" "$CONFIG_FILE")" \
+                "$(jq -r ".repos[$SELECTED_INDEX].prs[$i].body_file" "$CONFIG_FILE")" \
+                "$(jq -r ".repos[$SELECTED_INDEX].prs[$i].commit_message" "$CONFIG_FILE")" \
+                "$(jq -r ".repos[$SELECTED_INDEX].prs[$i].title" "$CONFIG_FILE")"
+            i=$((i + 1))
+        done
+
+        if [ "$NO_CLONE" = false ]; then
+            git -C "$CLONE_PATH" pull --quiet origin "$DEFAULT_BRANCH"
+            git -C "$CLONE_PATH" fetch --quiet origin
+        fi
+        PULLS_URL="https://github.com/$FULL_REPO_NAME/pulls"
+        ALERTS_URL="https://github.com/$FULL_REPO_NAME/security/code-scanning"
+        set_output pulls_url "$PULLS_URL"
+        set_output alerts_url "$ALERTS_URL"
         ;;
 
     "code_review_prs")
@@ -999,6 +1187,12 @@ fi
 if [ -n "${PULLS_URL:-}" ]; then
     echo "   Pull requests: $PULLS_URL"
 fi
+if [ -n "${ALERTS_URL:-}" ]; then
+    echo "   Code scanning alerts: $ALERTS_URL"
+fi
+if [ -n "${ASSIGNED_ALERT_URL:-}" ]; then
+    echo "   Assigned to Copilot: $ASSIGNED_ALERT_URL"
+fi
 if [ -n "${PAGES_URL:-}" ]; then
     echo "   Game (GitHub Pages): $PAGES_URL"
 fi
@@ -1018,6 +1212,9 @@ echo "✨ All done!"
 if [ -n "${PAGES_URL:-}" ]; then
     [ -n "${TOP_PR_URL:-}" ] && open_url "$TOP_PR_URL"
     open_url "$PAGES_URL"
+fi
+if [ -n "${ALERTS_URL:-}" ]; then
+    open_url "$ALERTS_URL"
 fi
 if [ -n "${PULLS_URL:-}" ]; then
     open_url "$PULLS_URL"

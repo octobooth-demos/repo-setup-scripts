@@ -27,6 +27,11 @@ $originalLocation = Get-Location
 $tempDirectory = $null
 $demoTopic = 'demo-generated'
 $pagesWorkflow = 'pages.yml'
+$aiScanApiVersion = '2026-03-10'
+# The UI's "Assign to Copilot" uses github-agentic-autofix[bot]; the GA changelog names
+# copilot-swe-agent[bot], so it's kept as a fallback.
+$copilotAutofixAssignees = @('github-agentic-autofix[bot]', 'copilot-swe-agent[bot]')
+$codeqlWaitSeconds = if ($env:CODEQL_WAIT_SECONDS) { [int]$env:CODEQL_WAIT_SECONDS } else { 900 }
 $nonInteractive = -not [string]::IsNullOrWhiteSpace($Template)
 
 if ($Cleanup -and ($nonInteractive -or $Serve -or $NoClone)) {
@@ -145,6 +150,22 @@ function Assert-SelectedRepo {
         }
         'code_review_prs' {
             $missing += @(Assert-PullRequestEntries $Repo.prs 'prs' 1)
+        }
+        'ai_security' {
+            $missing += @(Assert-PullRequestEntries $Repo.prs 'prs' 1)
+            if ($Repo.seed) {
+                foreach ($field in @('resource_dir', 'commit_message')) {
+                    if ([string]::IsNullOrWhiteSpace($Repo.seed.$field)) {
+                        $missing += "seed.$field"
+                    }
+                }
+                if ($Repo.seed.resource_dir) {
+                    $seedPath = Join-Path $scriptDirectory $Repo.seed.resource_dir
+                    if (-not (Test-Path -LiteralPath $seedPath -PathType Container)) {
+                        throw "seed.resource_dir not found: $seedPath"
+                    }
+                }
+            }
         }
         'stacked_prs' {
             $missing += @(Assert-PullRequestEntries $Repo.stack 'stack' 2)
@@ -332,7 +353,7 @@ function Request-CopilotReview {
 
 # Wait (bounded) until a repo generated from a template has its default branch.
 function Wait-RepoReady {
-    $maxAttempts = 15
+    $maxAttempts = 60
     for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
         $branch = & gh api "repos/$fullRepoName" --jq '.default_branch'
         if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($branch)) {
@@ -401,6 +422,111 @@ function Open-Url {
     param([string]$Url)
     if ($env:GITHUB_ACTIONS -or $env:DEMO_NO_BROWSER) { return }
     try { Start-Process $Url } catch { Write-Host "Open $Url in your browser." }
+}
+
+# Turn on AI Scan for pull requests. Org-owned repos inherit the org setting, so
+# this is usually a no-op; it only warns because the org may enforce the value.
+function Enable-AiScan {
+    Write-Host 'Enabling AI Scan for pull requests...'
+    Invoke-GhQuiet api --method PATCH "repos/$fullRepoName/code-scanning/ai-scan" `
+        -H "X-GitHub-Api-Version: $aiScanApiVersion" -f pr_scan=enabled --silent | Out-Null
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host 'AI Scan for pull requests enabled.'
+        return
+    }
+    $state = "$(@(Invoke-GhQuiet api "repos/$fullRepoName/code-scanning/ai-scan" `
+        -H "X-GitHub-Api-Version: $aiScanApiVersion" --jq '.pr_scan')[-1])".Trim()
+    if ($LASTEXITCODE -eq 0 -and $state -eq 'enabled') {
+        Write-Host 'AI Scan for pull requests already enabled (inherited from the organization).'
+        return
+    }
+    if (-not $state) { $state = 'unknown' }
+    Write-Warning "Could not enable AI Scan for pull requests (current state: $state). An org owner must allow it under Settings -> Code security -> Global settings -> AI Scan."
+}
+
+# Open default-branch code scanning alerts as objects (empty on failure).
+function Get-OpenCodeScanningAlerts {
+    $json = Invoke-GhQuiet api "repos/$fullRepoName/code-scanning/alerts?state=open&ref=refs/heads/$defaultBranch&per_page=100"
+    if ($LASTEXITCODE -ne 0 -or -not $json) { return @() }
+    try { $parsed = ($json -join "`n") | ConvertFrom-Json } catch { return @() }
+    # Windows PowerShell 5.1 emits a JSON array as one object; enumerate it explicitly.
+    foreach ($alert in $parsed) { $alert }
+}
+
+# Wait (bounded) for the CodeQL workflow run on $Sha to finish and for open
+# default-branch alerts to show up. Throws a clear message on failure.
+function Wait-CodeQLAnalysis {
+    param([string]$Workflow, [string]$Sha)
+
+    Write-Host "Waiting for CodeQL ($Workflow) to analyze $defaultBranch (usually 3-6 minutes)..."
+    $runId = $null
+    $state = ''
+    for ($waited = 0; $waited -lt $codeqlWaitSeconds; $waited += 10) {
+        if (-not $runId) {
+            $runId = "$(@(Invoke-GhQuiet run list --repo $fullRepoName --workflow $Workflow --commit $Sha `
+                --limit 1 --json databaseId --jq '.[0].databaseId // empty')[-1])".Trim()
+        }
+        if ($runId) {
+            # One field per line; avoids embedded quotes that PowerShell 5.1 mangles.
+            $fields = @(Invoke-GhQuiet run view $runId --repo $fullRepoName --json status,conclusion --jq '.status, .conclusion')
+            $state = (($fields | ForEach-Object { "$_".Trim() }) -join ' ').Trim()
+            if ($state -eq 'completed success') { break }
+            if ($state -like 'completed *') {
+                throw "CodeQL finished with '$($state.Substring(10))' on $defaultBranch. See https://github.com/$fullRepoName/actions/runs/$runId"
+            }
+        }
+        Start-Sleep -Seconds 10
+    }
+    if ($state -ne 'completed success') {
+        if (-not $runId) {
+            throw "CodeQL never started on $defaultBranch. Check that Actions are enabled for $fullRepoName."
+        }
+        throw "CodeQL was still running after $([int]($codeqlWaitSeconds / 60)) minutes. See https://github.com/$fullRepoName/actions/runs/$runId"
+    }
+    Write-Host 'CodeQL analysis finished.'
+
+    $alerts = @()
+    for ($attempt = 1; $attempt -le 12; $attempt++) {
+        $alerts = @(Get-OpenCodeScanningAlerts)
+        if ($alerts.Count -gt 0) { break }
+        Start-Sleep -Seconds 5
+    }
+    if ($alerts.Count -eq 0) {
+        throw "CodeQL finished but no open alerts appeared on $defaultBranch."
+    }
+    Write-Host "$($alerts.Count) open code scanning alerts on $defaultBranch"
+}
+
+# Assign one default-branch alert to Copilot (agentic autofix) so a draft fix PR
+# is ready by demo time. Prefers $Rule, else the first open alert. Only warns.
+# Returns the alert URL when assigned.
+function Set-CopilotAlertAssignee {
+    param([string]$Rule)
+
+    $alerts = @(Get-OpenCodeScanningAlerts)
+    $alert = $null
+    if ($Rule) {
+        $alert = $alerts | Where-Object { $_.rule.id -eq $Rule } | Select-Object -First 1
+        if (-not $alert) { Write-Host "No open '$Rule' alert; assigning the first open alert instead." }
+    }
+    if (-not $alert) { $alert = $alerts | Select-Object -First 1 }
+    if (-not $alert) {
+        Write-Warning 'No open alert to assign to Copilot.'
+        return $null
+    }
+    $number = $alert.number
+    $alertUrl = "https://github.com/$fullRepoName/security/code-scanning/$number"
+    Write-Host "Assigning code scanning alert #$number to Copilot (agentic autofix)..."
+    foreach ($assignee in $copilotAutofixAssignees) {
+        $assignees = @(Invoke-GhQuiet api --method PATCH "repos/$fullRepoName/code-scanning/alerts/$number" `
+            -H "X-GitHub-Api-Version: $aiScanApiVersion" -f "assignees[]=$assignee" `
+            --jq '.assignees[]?.login')
+        if ($LASTEXITCODE -ne 0 -or -not (($assignees | ForEach-Object { "$_".Trim() }) -contains $assignee)) { continue }
+        Write-Host "Alert #$number assigned to Copilot; a draft fix PR appears in about 10 minutes."
+        return $alertUrl
+    }
+    Write-Warning "Could not assign alert #$number to Copilot. Agentic autofix must be on for the repo, and the token needs a user (GitHub App tokens may not be able to assign Copilot). Assign it from $alertUrl (Assign to Copilot)."
+    return $null
 }
 
 # Turn on GitHub Pages (built by the template's pages.yml workflow), run the first
@@ -587,6 +713,8 @@ try {
     }
     $topPullRequestUrl = $null
     $pullsUrl = $null
+    $alertsUrl = $null
+    $assignedAlertUrl = $null
 
     switch ($selectedRepo.workflow) {
         'repo_only' {
@@ -620,10 +748,17 @@ try {
                     'api', "repos/$fullRepoName", '-X', 'PATCH',
                     '-f', 'security_and_analysis[advanced_security][status]=enabled', '--silent'
                 )
-                Invoke-Native 'gh' @(
-                    'api', "repos/$fullRepoName/code-scanning/default-setup", '-X', 'PATCH',
-                    '-f', 'state=configured', '-f', 'query_suite=default', '--silent'
-                )
+                # "codeql": "advanced" means the template ships its own CodeQL workflow;
+                # default setup would make GitHub reject that workflow's uploads.
+                if ($selectedRepo.codeql -eq 'advanced') {
+                    Write-Host "Using the template's CodeQL workflow (advanced setup)."
+                }
+                else {
+                    Invoke-Native 'gh' @(
+                        'api', "repos/$fullRepoName/code-scanning/default-setup", '-X', 'PATCH',
+                        '-f', 'state=configured', '-f', 'query_suite=default', '--silent'
+                    )
+                }
                 Write-Host 'Dependabot alerts, security updates, and Code Scanning enabled.'
             }
             $tempDirectory = Join-Path ([IO.Path]::GetTempPath()) ([IO.Path]::GetRandomFileName())
@@ -662,6 +797,55 @@ try {
             }
             $pullsUrl = "https://github.com/$fullRepoName/pulls"
             Set-ActionOutput 'pulls_url' $pullsUrl
+        }
+        'ai_security' {
+            Write-Host 'Setting up AI Scan + agentic autofix demo...'
+            # The template runs CodeQL through its own advanced workflow. Default setup
+            # is deliberately not enabled: it would reject that workflow's uploads.
+            $codeqlWorkflow = if ($selectedRepo.codeql_workflow) { $selectedRepo.codeql_workflow } else { 'codeql-advanced.yml' }
+            # Private repos need Advanced Security before code scanning results are accepted.
+            Invoke-Native 'gh' @(
+                'api', "repos/$fullRepoName", '-X', 'PATCH',
+                '-f', 'security_and_analysis[advanced_security][status]=enabled', '--silent'
+            )
+            Write-Host 'Advanced Security enabled.'
+            Enable-AiScan
+
+            $tempDirectory = Join-Path ([IO.Path]::GetTempPath()) ([IO.Path]::GetRandomFileName())
+            New-Item -ItemType Directory -Path $tempDirectory | Out-Null
+            Set-Location -LiteralPath $tempDirectory
+            $tempClonePath = Join-Path $tempDirectory $repoName
+            Invoke-Native 'gh' @('repo', 'clone', $fullRepoName, $tempClonePath, '--', '--quiet')
+            Set-Location -LiteralPath $tempClonePath
+            Set-GitIdentity
+
+            if ($selectedRepo.seed) {
+                Write-Host 'Adding extra default-branch code for CodeQL to flag...'
+                $seedPath = Join-Path $scriptDirectory $selectedRepo.seed.resource_dir
+                Get-ChildItem -LiteralPath $seedPath -Force | Copy-Item -Destination . -Recurse -Force
+                Invoke-Native 'git' @('add', '-A') | Out-Host
+                Invoke-Native 'git' @('commit', '-m', $selectedRepo.seed.commit_message, '--quiet') | Out-Host
+                Invoke-Native 'git' @('push', 'origin', $defaultBranch, '--quiet') | Out-Host
+            }
+            else {
+                Invoke-Native 'gh' @('workflow', 'run', $codeqlWorkflow, '--repo', $fullRepoName, '--ref', $defaultBranch) | Out-Null
+            }
+            $headSha = "$(@(Invoke-Native 'git' @('rev-parse', 'HEAD'))[-1])".Trim()
+            Wait-CodeQLAnalysis $codeqlWorkflow $headSha
+
+            $assignedAlertUrl = Set-CopilotAlertAssignee $selectedRepo.autofix.preassign_rule
+
+            foreach ($pr in $selectedRepo.prs) {
+                New-ResourcePullRequest $pr | Out-Null
+            }
+            if (-not $NoClone) {
+                Invoke-Native 'git' @('-C', $clonePath, 'pull', '--quiet', 'origin', $defaultBranch) | Out-Host
+                Invoke-Native 'git' @('-C', $clonePath, 'fetch', '--quiet', 'origin') | Out-Host
+            }
+            $pullsUrl = "https://github.com/$fullRepoName/pulls"
+            $alertsUrl = "https://github.com/$fullRepoName/security/code-scanning"
+            Set-ActionOutput 'pulls_url' $pullsUrl
+            Set-ActionOutput 'alerts_url' $alertsUrl
         }
         'stacked_prs' {
             Write-Host 'Setting up stacked PRs demo...'
@@ -703,6 +887,12 @@ try {
     if ($pullsUrl) {
         Write-Host "   Pull requests: $pullsUrl"
     }
+    if ($alertsUrl) {
+        Write-Host "   Code scanning alerts: $alertsUrl"
+    }
+    if ($assignedAlertUrl) {
+        Write-Host "   Assigned to Copilot: $assignedAlertUrl"
+    }
     if ($pagesUrl) {
         Write-Host "   Game (GitHub Pages): $pagesUrl"
     }
@@ -718,6 +908,7 @@ try {
         if ($topPullRequestUrl) { Open-Url $topPullRequestUrl }
         Open-Url $pagesUrl
     }
+    if ($alertsUrl) { Open-Url $alertsUrl }
     if ($pullsUrl) { Open-Url $pullsUrl }
 
     if ($Serve) {

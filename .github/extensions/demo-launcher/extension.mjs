@@ -233,10 +233,10 @@ function sessionPrompt(run, kind, target) {
         ? `It is cloned locally at ${r.clonePath} (use that path for create_project).`
         : `It is not cloned locally; create the project from the GitHub repo ${r.repo}.`;
     if (kind === "pr") {
-        return `[Demo Launcher] Open a Copilot app session for pull request #${target} in ${r.repo} using open_pr_session (repo_full_name "${r.repo}", pr_number ${target}). Don't start any work in it (omit kickoff), then navigate me to it.`;
+        return `[Demo Launcher] Open a Copilot app session for pull request #${target} in ${r.repo}. ${where} First add it as a project in this app (create_project) if it isn't one already, then use open_pr_session (repo_full_name "${r.repo}", pr_number ${target}). Don't start any work in it (omit kickoff), then navigate me to it.`;
     }
     if (kind === "issue") {
-        return `[Demo Launcher] Open a Copilot app session for issue #${target} in ${r.repo} using open_issue_session (repo_full_name "${r.repo}", issue_number ${target}). Don't start any work in it (omit kickoff), then navigate me to it.`;
+        return `[Demo Launcher] Open a Copilot app session for issue #${target} in ${r.repo}. ${where} First add it as a project in this app (create_project) if it isn't one already, then use open_issue_session (repo_full_name "${r.repo}", issue_number ${target}). Don't start any work in it (omit kickoff), then navigate me to it.`;
     }
     return `[Demo Launcher] I just created the demo repo ${r.repo} (${run.templateName}). ${where} Add it as a project in this app (create_project) if it isn't one already, create a new idle session in it (create_session with that project_id, no kickoff, detached: true), then navigate me to that session.`;
 }

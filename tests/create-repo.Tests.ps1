@@ -12,6 +12,7 @@ $testState = [pscustomobject]@{
     NextPr = 1; StackNumbers = @(); StackMismatch = $false; GitEmail = $null; ReviewApiFailure = $false
     CleanupRepos = @(); NpmCalls = $null; PagesDisabled = $false; Opened = $null
     CodeqlConclusion = 'success'; AssignFailure = $false; AutofixBotMissing = $false; AnalysesCount = '2'; LateRulePolls = 0
+    StalePushRun = $false
 }
 Remove-Item Env:DEMO_NO_BROWSER -ErrorAction SilentlyContinue
 
@@ -72,10 +73,15 @@ function gh {
         return
     }
     if ($arguments[0] -eq 'run' -and $arguments[1] -eq 'list') {
-        if ($arguments -contains 'databaseId') { return '123' }
+        if ($arguments -contains 'databaseId') {
+            # An older failed push run on the same commit, visible before the dispatched run.
+            if ($testState.StalePushRun -and ($arguments -join ' ') -notlike '*--event workflow_dispatch*') { return '999' }
+            return '123'
+        }
         return @('completed', 'success')
     }
     if ($arguments[0] -eq 'run' -and $arguments[1] -eq 'view') {
+        if ($arguments[2] -eq '999') { return @('completed', 'failure') }
         return @('completed', $testState.CodeqlConclusion)
     }
     if ($arguments[0] -eq 'api' -and $arguments[1] -like '*/code-scanning/analyses?*') {
@@ -251,6 +257,7 @@ try {
         $testState.AutofixBotMissing = $false
         $testState.AnalysesCount = '2'
         $testState.LateRulePolls = 0
+        $testState.StalePushRun = $false
         $testState.Opened = New-Object 'System.Collections.Generic.List[string]'
         $testState.NpmCalls = New-Object 'System.Collections.Generic.List[object]'
         $old = '2020-01-01T00:00:00Z'
@@ -284,7 +291,7 @@ try {
             'ai-security-assign-fallback' { $selection = '7'; $testState.AutofixBotMissing = $true }
             'ai-security-codeql-failure' { $selection = '7'; $testState.CodeqlConclusion = 'failure'; $expectedFailure = "CodeQL finished with 'failure'" }
             'ai-security-missing-seed' { $selection = '7'; $config.repos[6].seed.commit_message = ''; $expectedFailure = 'seed.commit_message' }
-            'ai-security-no-seed' { $selection = '7'; $config.repos[6].PSObject.Properties.Remove('seed') }
+            'ai-security-no-seed' { $selection = '7'; $config.repos[6].PSObject.Properties.Remove('seed'); $testState.StalePushRun = $true }
             'ai-security-scan-only' {
                 $selection = '7'
                 $config.repos[6].PSObject.Properties.Remove('autofix')
@@ -634,10 +641,12 @@ try {
                     if ($scenario -eq 'ai-security-no-seed') {
                         Assert ($seedPush.Count -eq 0) 'Pushed to the default branch without a seed.'
                         Assert ($dispatch.Count -eq 1 -and $dispatch[0].Arguments -contains 'trunk') 'CodeQL was not started on the default branch.'
+                        Assert (($runList[0].Arguments -join ' ') -like '*--event workflow_dispatch*') 'CodeQL wait could pick up the earlier push run instead of the dispatched one.'
                     }
                     else {
                         Assert ($seedPush.Count -eq 1) 'Seed commit was not pushed to the default branch.'
                         Assert ($dispatch.Count -eq 0) 'Dispatched CodeQL although the seed push starts it.'
+                        Assert ($runList[0].Arguments -notcontains '--event') 'Filtered the seed push run by event.'
                     }
                     Assert ($runList.Count -ge 1 -and $runList[0].Arguments -contains 'abc1234') 'Did not wait for CodeQL on the pushed commit.'
                     $expectedAssignees = if ($scenario -in @('ai-security-assign-fallback', 'ai-security-assign-failure')) {

@@ -475,15 +475,18 @@ function Wait-CodeScanningEnabled {
 # Wait (bounded) for the CodeQL workflow run on $Sha to finish and for open
 # default-branch alerts to show up (preferring an alert for $Rule, since results
 # for each language arrive separately). Throws a clear message on failure.
+# $Event limits the run lookup to one trigger, so a dispatched run on an
+# already-scanned commit isn't confused with that commit's earlier push run.
 function Wait-CodeQLAnalysis {
-    param([string]$Workflow, [string]$Sha, [string]$Rule)
+    param([string]$Workflow, [string]$Sha, [string]$Rule, [string]$Event)
 
     Write-Host "Waiting for CodeQL ($Workflow) to analyze $defaultBranch (usually 3-6 minutes)..."
     $runId = $null
     $state = ''
     for ($waited = 0; $waited -lt $codeqlWaitSeconds; $waited += 10) {
         if (-not $runId) {
-            $runId = "$(@(Invoke-GhQuiet run list --repo $fullRepoName --workflow $Workflow --commit $Sha `
+            $eventArgs = if ($Event) { @('--event', $Event) } else { @() }
+            $runId = "$(@(Invoke-GhQuiet run list --repo $fullRepoName --workflow $Workflow --commit $Sha @eventArgs `
                 --limit 1 --json databaseId --jq '.[0].databaseId // empty')[-1])".Trim()
         }
         if ($runId) {
@@ -843,6 +846,7 @@ try {
             # Agentic autofix only works on default-branch alerts, so wait for CodeQL first.
             if ($selectedRepo.PSObject.Properties['autofix']) {
                 $codeqlWorkflow = if ($selectedRepo.codeql_workflow) { $selectedRepo.codeql_workflow } else { 'codeql-advanced.yml' }
+                $codeqlEvent = ''
                 if ($selectedRepo.seed) {
                     Write-Host 'Adding extra default-branch code for CodeQL to flag...'
                     $seedPath = Join-Path $scriptDirectory $selectedRepo.seed.resource_dir
@@ -853,9 +857,10 @@ try {
                 }
                 else {
                     Invoke-Native 'gh' @('workflow', 'run', $codeqlWorkflow, '--repo', $fullRepoName, '--ref', $defaultBranch) | Out-Null
+                    $codeqlEvent = 'workflow_dispatch'
                 }
                 $headSha = "$(@(Invoke-Native 'git' @('rev-parse', 'HEAD'))[-1])".Trim()
-                Wait-CodeQLAnalysis $codeqlWorkflow $headSha $selectedRepo.autofix.preassign_rule
+                Wait-CodeQLAnalysis $codeqlWorkflow $headSha $selectedRepo.autofix.preassign_rule $codeqlEvent
                 $assignedAlertUrl = Set-CopilotAlertAssignee $selectedRepo.autofix.preassign_rule
                 $alertsUrl = "https://github.com/$fullRepoName/security/code-scanning"
                 Set-ActionOutput 'alerts_url' $alertsUrl

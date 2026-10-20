@@ -450,17 +450,22 @@ wait_for_code_scanning() {
 # Wait (bounded) for the CodeQL workflow run on <sha> to finish and for open
 # default-branch alerts to show up (preferring an alert for <rule>, since results
 # for each language arrive separately). Exits with a clear message on failure.
-# Usage: wait_for_codeql <sha> [rule_id]
+# [event] limits the run lookup to one trigger, so a dispatched run on an
+# already-scanned commit isn't confused with that commit's earlier push run.
+# Usage: wait_for_codeql <sha> [rule_id] [event]
 wait_for_codeql() {
     local sha="$1"
     local rule="${2:-}"
+    local event="${3:-}"
+    local event_args=()
+    [ -n "$event" ] && event_args=(--event "$event")
     local waited=0
     local run_id="" state=""
     echo "⏳ Waiting for CodeQL ($CODEQL_WORKFLOW) to analyze $DEFAULT_BRANCH (usually 3-6 minutes)..."
     while [ "$waited" -lt "$CODEQL_WAIT_SECONDS" ]; do
         if [ -z "$run_id" ]; then
             run_id=$(gh run list --repo "$FULL_REPO_NAME" --workflow "$CODEQL_WORKFLOW" --commit "$sha" \
-                --limit 1 --json databaseId --jq '.[0].databaseId // empty' 2>/dev/null || true)
+                ${event_args[@]+"${event_args[@]}"} --limit 1 --json databaseId --jq '.[0].databaseId // empty' 2>/dev/null || true)
         fi
         if [ -n "$run_id" ]; then
             state=$(gh run view "$run_id" --repo "$FULL_REPO_NAME" --json status,conclusion \
@@ -1092,6 +1097,7 @@ case $WORKFLOW in
             CODEQL_WORKFLOW=$(repo_cfg '.codeql_workflow')
             [ -z "$CODEQL_WORKFLOW" ] && CODEQL_WORKFLOW="codeql-advanced.yml"
             SEED_DIR=$(repo_cfg '.seed.resource_dir')
+            CODEQL_EVENT=""
             if [ -n "$SEED_DIR" ]; then
                 echo "🌱 Adding extra default-branch code for CodeQL to flag..."
                 cp -R "$SCRIPT_DIR/$SEED_DIR"/. .
@@ -1100,8 +1106,9 @@ case $WORKFLOW in
                 git push origin "$DEFAULT_BRANCH" --quiet 2>/dev/null
             else
                 gh workflow run "$CODEQL_WORKFLOW" --repo "$FULL_REPO_NAME" --ref "$DEFAULT_BRANCH" > /dev/null
+                CODEQL_EVENT="workflow_dispatch"
             fi
-            wait_for_codeql "$(git rev-parse HEAD)" "$(repo_cfg '.autofix.preassign_rule')"
+            wait_for_codeql "$(git rev-parse HEAD)" "$(repo_cfg '.autofix.preassign_rule')" "$CODEQL_EVENT"
             assign_alert_to_copilot "$(repo_cfg '.autofix.preassign_rule')"
             ALERTS_URL="https://github.com/$FULL_REPO_NAME/security/code-scanning"
             set_output alerts_url "$ALERTS_URL"

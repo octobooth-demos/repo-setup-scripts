@@ -191,6 +191,27 @@ function Connect-GitHubAccount {
     [pscustomobject]@{ User = $currentUser; UserToken = $userToken }
 }
 
+# Cleanup only ever deletes repos carrying $demoTopic, so an untagged demo repo
+# would never be cleaned up. Retry, then delete the new repo rather than leave it.
+function Add-DemoTopic {
+    param([string]$RepoName)
+
+    for ($attempt = 1; $attempt -le 3; $attempt++) {
+        & gh repo edit $RepoName --add-topic $demoTopic | Out-Null
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "Added topic: $demoTopic"
+            return
+        }
+        if ($attempt -lt 3) { Start-Sleep -Seconds 2 }
+    }
+    $message = "Could not add the '$demoTopic' topic to $RepoName, so cleanup would never find it."
+    & gh repo delete $RepoName --yes
+    if ($LASTEXITCODE -eq 0) {
+        throw "$message Deleted the untagged repo; run the script again."
+    }
+    throw "$message Could not delete it either. Tag it with 'gh repo edit $RepoName --add-topic $demoTopic' or delete it with 'gh repo delete $RepoName --yes'."
+}
+
 # Delete demo repos (demo-generated topic) owned by $CleanupOwner older than -OlderThanHours.
 # Never touches repos without the topic.
 function Invoke-DemoCleanup {
@@ -510,9 +531,7 @@ try {
     Set-ActionOutput 'repo_name' $fullRepoName
     Set-ActionOutput 'repo_url' "https://github.com/$fullRepoName"
 
-    # The cleanup workflow only ever deletes repos carrying this topic.
-    Invoke-Native 'gh' @('repo', 'edit', $fullRepoName, '--add-topic', $demoTopic) | Out-Null
-    Write-Host "Added topic: $demoTopic"
+    Add-DemoTopic $fullRepoName
 
     Write-Host 'Waiting for template to be fully processed...'
     $defaultBranch = Wait-RepoReady

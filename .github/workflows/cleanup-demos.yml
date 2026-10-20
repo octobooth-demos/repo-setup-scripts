@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       max_age_hours:
-        description: Delete demo-generated repos older than this many hours
+        description: Delete demo-generated repos older than this many hours (minimum 1)
         type: number
         default: 24
       dry_run:
@@ -28,17 +28,70 @@ concurrency:
 env:
   ORG: octobooth-demos
   TOPIC: demo-generated
+  # Manual and comment runs cannot target repos younger than this.
+  MIN_AGE_HOURS: 1
 
 jobs:
   cleanup:
+    # Cheap pre-filter; "Resolve options" requires the first word to be exactly /cleanup.
     if: >-
       github.event_name != 'issue_comment' ||
       startsWith(github.event.comment.body, '/cleanup')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      - name: Resolve options
+        id: opts
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_HOURS: ${{ inputs.max_age_hours }}
+          INPUT_DRY_RUN: ${{ inputs.dry_run }}
+          COMMENT_BODY: ${{ github.event.comment.body }}
+        run: |
+          hours=24
+          # Only the nightly schedule deletes without an explicit opt-in.
+          dry_run=false
+          case "$EVENT_NAME" in
+            workflow_dispatch)
+              hours="${INPUT_HOURS:-24}"
+              dry_run="${INPUT_DRY_RUN:-true}"
+              ;;
+            issue_comment)
+              # Accepts: /cleanup [hours] [--dry-run | --confirm]. Dry run unless --confirm.
+              first_line=$(printf '%s\n' "$COMMENT_BODY" | head -n 1 | tr -d '\r')
+              read -r -a words <<< "$first_line"
+              if [ "${words[0]:-}" != "/cleanup" ]; then
+                echo "Comment does not start with the /cleanup command; ignoring."
+                echo "run=false" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+              echo "run=true" >> "$GITHUB_OUTPUT"
+              dry_run=true
+              for word in "${words[@]:1}"; do
+                case "$word" in
+                  --dry-run) dry_run=true ;;
+                  --confirm) dry_run=false ;;
+                  -*) echo "::error::Unknown option '$word'. Usage: /cleanup [hours] [--dry-run | --confirm]"; exit 1 ;;
+                  *) hours="$word" ;;
+                esac
+              done
+              ;;
+          esac
+          [ "$EVENT_NAME" != "issue_comment" ] && echo "run=true" >> "$GITHUB_OUTPUT"
+          if ! [[ "$hours" =~ ^[0-9]+$ ]]; then
+            echo "::error::max age must be a whole number of hours, got '$hours'."
+            exit 1
+          fi
+          hours=$((10#$hours))
+          if [ "$hours" -lt "$MIN_AGE_HOURS" ]; then
+            echo "::error::max age must be at least $MIN_AGE_HOURS hour(s) so demos in use are not deleted, got '$hours'."
+            exit 1
+          fi
+          echo "hours=$hours" >> "$GITHUB_OUTPUT"
+          echo "dry_run=$dry_run" >> "$GITHUB_OUTPUT"
+
       - name: Check commenter permission
-        if: github.event_name == 'issue_comment'
+        if: github.event_name == 'issue_comment' && steps.opts.outputs.run == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           ACTOR: ${{ github.event.comment.user.login }}
@@ -50,41 +103,9 @@ jobs:
             *) echo "::error::$ACTOR does not have write access ($permission)."; exit 1 ;;
           esac
 
-      - name: Resolve options
-        id: opts
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          INPUT_HOURS: ${{ inputs.max_age_hours }}
-          INPUT_DRY_RUN: ${{ inputs.dry_run }}
-          COMMENT_BODY: ${{ github.event.comment.body }}
-        run: |
-          hours=24
-          dry_run=false
-          case "$EVENT_NAME" in
-            workflow_dispatch)
-              hours="${INPUT_HOURS:-24}"
-              dry_run="${INPUT_DRY_RUN:-true}"
-              ;;
-            issue_comment)
-              # Accepts: /cleanup [hours] [--dry-run]
-              first_line=$(printf '%s\n' "$COMMENT_BODY" | head -n 1 | tr -d '\r')
-              for word in $(printf '%s' "$first_line" | awk '$1 == "/cleanup" { $1 = ""; print }'); do
-                case "$word" in
-                  --dry-run) dry_run=true ;;
-                  *) hours="$word" ;;
-                esac
-              done
-              ;;
-          esac
-          if ! [[ "$hours" =~ ^[0-9]+$ ]]; then
-            echo "::error::max age must be a whole number of hours, got '$hours'."
-            exit 1
-          fi
-          echo "hours=$hours" >> "$GITHUB_OUTPUT"
-          echo "dry_run=$dry_run" >> "$GITHUB_OUTPUT"
-
       - name: Create GitHub App token
         id: app-token
+        if: steps.opts.outputs.run == 'true'
         uses: actions/create-github-app-token@v1
         with:
           app-id: ${{ secrets.APP_ID }}
@@ -93,6 +114,7 @@ jobs:
 
       - name: Delete old demo repositories
         id: cleanup
+        if: steps.opts.outputs.run == 'true'
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           HOURS: ${{ steps.opts.outputs.hours }}
@@ -100,33 +122,51 @@ jobs:
         run: |
           cutoff=$(date -u -d "-$HOURS hours" +%Y-%m-%dT%H:%M:%SZ)
           echo "Deleting $ORG repos with topic '$TOPIC' created before $cutoff (dry run: $DRY_RUN)"
-          # Re-check topics per repo so a search index lag can never widen the match.
-          mapfile -t repos < <(gh api --paginate "orgs/$ORG/repos?per_page=100" \
+          # Capture first so a failed listing fails the step instead of looking like "nothing to delete".
+          listing=$(gh api --paginate "orgs/$ORG/repos?per_page=100" \
             --jq ".[] | select((.topics // []) | index(\"$TOPIC\")) | select(.created_at < \"$cutoff\") | .full_name")
           deleted=()
-          for repo in "${repos[@]}"; do
+          failed=()
+          while IFS= read -r repo; do
             [ -z "$repo" ] && continue
             if [ "$DRY_RUN" = "true" ]; then
               echo "Would delete $repo"
+              deleted+=("$repo")
+            elif gh repo delete "$repo" --yes < /dev/null; then
+              echo "Deleted $repo"
+              deleted+=("$repo")
             else
-              echo "Deleting $repo"
-              gh repo delete "$repo" --yes
+              echo "::error::Failed to delete $repo"
+              failed+=("$repo")
             fi
-            deleted+=("$repo")
-          done
+          done <<< "$listing"
           {
             echo "count=${#deleted[@]}"
             echo "list<<EOF"
-            printf -- '- %s\n' "${deleted[@]}"
+            [ "${#deleted[@]}" -gt 0 ] && printf -- '- %s\n' "${deleted[@]}"
+            echo "EOF"
+            echo "failed_count=${#failed[@]}"
+            echo "failed_list<<EOF"
+            [ "${#failed[@]}" -gt 0 ] && printf -- '- %s\n' "${failed[@]}"
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
           {
             echo "### Demo cleanup (dry run: $DRY_RUN, older than ${HOURS}h)"
-            if [ "${#deleted[@]}" -eq 0 ]; then echo "Nothing to delete."; else printf -- '- %s\n' "${deleted[@]}"; fi
+            if [ "${#deleted[@]}" -eq 0 ] && [ "${#failed[@]}" -eq 0 ]; then echo "Nothing to delete."; fi
+            [ "${#deleted[@]}" -gt 0 ] && printf -- '- %s\n' "${deleted[@]}"
+            if [ "${#failed[@]}" -gt 0 ]; then
+              echo ""
+              echo "**Failed to delete:**"
+              printf -- '- %s\n' "${failed[@]}"
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
+          if [ "${#failed[@]}" -gt 0 ]; then
+            echo "::error::${#failed[@]} repo(s) could not be deleted."
+            exit 1
+          fi
 
       - name: Comment result
-        if: always() && github.event_name == 'issue_comment'
+        if: always() && github.event_name == 'issue_comment' && steps.opts.outputs.run == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
@@ -134,14 +174,21 @@ jobs:
           OUTCOME: ${{ steps.cleanup.outcome }}
           COUNT: ${{ steps.cleanup.outputs.count }}
           LIST: ${{ steps.cleanup.outputs.list }}
+          FAILED_COUNT: ${{ steps.cleanup.outputs.failed_count }}
+          FAILED_LIST: ${{ steps.cleanup.outputs.failed_list }}
           DRY_RUN: ${{ steps.opts.outputs.dry_run }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
+          verb="Deleted"
+          [ "$DRY_RUN" = "true" ] && verb="Would delete"
           if [ "$OUTCOME" = "success" ]; then
-            verb="Deleted"
-            [ "$DRY_RUN" = "true" ] && verb="Would delete"
             body="🧹 $verb ${COUNT:-0} demo repo(s)."
             [ "${COUNT:-0}" != "0" ] && body="$body"$'\n\n'"$LIST"
+            [ "$DRY_RUN" = "true" ] && body="$body"$'\n\n'"This was a dry run. Comment \`/cleanup [hours] --confirm\` to delete."
+          elif [ "${FAILED_COUNT:-0}" != "0" ]; then
+            body="⚠️ $verb ${COUNT:-0} demo repo(s), but ${FAILED_COUNT} could not be deleted. See $RUN_URL"
+            [ "${COUNT:-0}" != "0" ] && body="$body"$'\n\n'"Deleted:"$'\n'"$LIST"
+            body="$body"$'\n\n'"Failed:"$'\n'"$FAILED_LIST"
           else
             body="❌ Cleanup failed. See $RUN_URL"
           fi

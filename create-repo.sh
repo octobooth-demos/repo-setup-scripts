@@ -294,6 +294,28 @@ validate_pr_entries() {
     done
 }
 
+# Cleanup only ever deletes repos carrying $DEMO_TOPIC, so an untagged demo repo
+# would never be cleaned up. Retry, then delete the new repo rather than leave it.
+tag_demo_repo() {
+    local attempt
+    for attempt in 1 2 3; do
+        if gh repo edit "$FULL_REPO_NAME" --add-topic "$DEMO_TOPIC" > /dev/null; then
+            echo "🏷️  Added topic: $DEMO_TOPIC"
+            return 0
+        fi
+        [ "$attempt" -lt 3 ] && sleep 2
+    done
+    echo "❌ Could not add the '$DEMO_TOPIC' topic to $FULL_REPO_NAME, so cleanup would never find it."
+    if gh repo delete "$FULL_REPO_NAME" --yes; then
+        echo "🗑️  Deleted the untagged repo $FULL_REPO_NAME. Run the script again."
+    else
+        echo "   Could not delete it either. Tag or delete it by hand:"
+        echo "   gh repo edit $FULL_REPO_NAME --add-topic $DEMO_TOPIC"
+        echo "   gh repo delete $FULL_REPO_NAME --yes"
+    fi
+    exit 1
+}
+
 # Wait (bounded) until a repo generated from a template has its default branch.
 # Sets DEFAULT_BRANCH.
 wait_for_repo_ready() {
@@ -740,9 +762,7 @@ echo "✅ Repository created successfully: $FULL_REPO_NAME"
 set_output repo_name "$FULL_REPO_NAME"
 set_output repo_url "https://github.com/$FULL_REPO_NAME"
 
-# The cleanup workflow only ever deletes repos carrying this topic.
-gh repo edit "$FULL_REPO_NAME" --add-topic "$DEMO_TOPIC" > /dev/null
-echo "🏷️  Added topic: $DEMO_TOPIC"
+tag_demo_repo
 
 wait_for_repo_ready
 echo "📍 Default branch: $DEFAULT_BRANCH"

@@ -33,6 +33,14 @@ export function createCleanup({ repoRoot, scriptEnv, scriptCommand, broadcast, o
         return url.endsWith(`/${fullName.toLowerCase()}`) || url.endsWith(`:${fullName.toLowerCase()}`) ? path : null;
     }
 
+    // true/false for classic OAuth tokens; null when scopes can't be read (e.g. fine-grained tokens).
+    function hasDeleteScope() {
+        const out = spawnSync("gh", ["api", "-i", "user"], { env: scriptEnv(), encoding: "utf8", timeout: 15000 });
+        const header = (out.stdout || "").match(/^x-oauth-scopes:(.*)$/im);
+        if (!header) return null;
+        return header[1].split(",").map((x) => x.trim()).includes("delete_repo");
+    }
+
     function run(cmd, args, env) {
         return new Promise((done) => {
             const child = spawn(cmd, args, { cwd: repoRoot, env, stdio: ["ignore", "pipe", "pipe"] });
@@ -80,6 +88,8 @@ export function createCleanup({ repoRoot, scriptEnv, scriptCommand, broadcast, o
             createdAt: m[2],
             clonePath: localClone(m[1]),
         }));
+        state.canDelete = hasDeleteScope();
+        state.needsDeleteScope = state.canDelete === false;
         state.status = "preview";
         publish();
         return state;
@@ -91,6 +101,13 @@ export function createCleanup({ repoRoot, scriptEnv, scriptCommand, broadcast, o
         const selected = (repos ?? [...allowed.keys()]).filter((r) => allowed.has(r));
         if (!selected.length) throw new CanvasError("nothing_selected", "No repos from the preview were selected.");
 
+        state.canDelete = hasDeleteScope();
+        if (state.canDelete === false) {
+            state.needsDeleteScope = true;
+            publish();
+            throw new CanvasError("missing_scope", "Your gh login can't delete repos yet. Run: gh auth refresh -h github.com -s delete_repo");
+        }
+        state.needsDeleteScope = false;
         state.status = "deleting";
         state.deleted = [];
         state.failed = [];

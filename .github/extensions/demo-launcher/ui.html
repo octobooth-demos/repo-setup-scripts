@@ -246,7 +246,7 @@ function renderCleanup() {
     const cutoff = c.olderThanHours === 0 ? "of any age" : `older than ${c.olderThanHours}h`;
     if (c.deleted.length) html += `<div style="margin-top:8px">🗑️ Deleted ${c.deleted.length} repo(s).</div>`;
     if (c.failed.length) html += `<div class="warn">❌ ${c.failed.length} could not be deleted: ${c.failed.map(esc).join(", ")}</div>`;
-    if (c.needsDeleteScope) html += `<div class="warn">Deleting repos needs the <code>delete_repo</code> scope. In a terminal run <code>gh auth refresh -h github.com -s delete_repo</code>, then try again.</div>`;
+    if (c.needsDeleteScope) html += `<div class="warn">🔑 Your <code>gh</code> login can't delete repos yet. In a terminal run <code>gh auth refresh -h github.com -s delete_repo</code>, then click Delete again.</div>`;
     if (!c.candidates.length) html += `<div class="muted" style="margin-top:8px">✅ No demo repos owned by ${who} ${cutoff}${c.deleted.length ? " left" : ""}.</div>`;
     else {
       const sel = c.candidates.filter((x) => !unchecked.has(x.repo));

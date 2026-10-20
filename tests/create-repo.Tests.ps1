@@ -9,7 +9,7 @@ $homeRepos = Microsoft.PowerShell.Management\Join-Path $testRoot 'repos'
 $originalLocation = Get-Location
 $testState = [pscustomobject]@{
     Answers = $null; Calls = $null; NeedsLogin = $false; Failure = $null
-    NextPr = 1; StackNumbers = @(); StackMismatch = $false; GitEmail = $null
+    NextPr = 1; StackNumbers = @(); StackMismatch = $false; GitEmail = $null; ReviewApiFailure = $false
     CleanupRepos = @(); NpmCalls = $null; PagesDisabled = $false; Opened = $null
 }
 Remove-Item Env:DEMO_NO_BROWSER -ErrorAction SilentlyContinue
@@ -82,6 +82,10 @@ function gh {
         $testState.NextPr++
         return "https://github.com/$repo/pull/$number"
     }
+    if ($arguments[0] -eq 'api' -and $arguments[1] -eq '--method' -and $arguments[3] -like '*/requested_reviewers') {
+        if ($testState.ReviewApiFailure) { $global:LASTEXITCODE = 1 }
+        return
+    }
     if ($arguments[0] -eq 'api' -and $arguments[1] -eq '--method' -and $arguments[3] -like '*/stacks') {
         $testState.StackNumbers = @($arguments | Where-Object { $_ -like 'pull_requests`[`]=*' } |
             ForEach-Object { ($_ -split '=')[1] })
@@ -118,6 +122,7 @@ function git {
         Assert (Test-Path -LiteralPath './api/src/existing.txt') 'Copying resources removed an existing file.'
         Assert (-not (Test-Path -LiteralPath './pr-body.md')) 'PR body would be committed.'
         Assert (-not (Test-Path -LiteralPath './metadata/body.md')) 'Nested PR body would be committed.'
+        Assert (-not (Test-Path -LiteralPath './ANSWER_KEY.md')) 'Presenter answer key would be committed.'
         switch ($arguments[2]) {
             'feat: Adds terms of services download' {
                 Assert (Test-Path -LiteralPath './api/src/routes/legal.ts') 'TypeScript resources were not copied.'
@@ -133,6 +138,16 @@ function git {
             }
             'feat: add BINGO banner, confetti, and reset' {
                 Assert ((Get-Content -LiteralPath './index.html' -Raw).Contains('banner')) 'Stack layer 3 resources were not copied.'
+            }
+            'feat: support stacking promo codes and sale pricing' {
+                Assert ((Get-Content -LiteralPath './api/src/lib/pricing.ts' -Raw).Contains('applyPromoCodes')) 'Promo code overlay was not copied.'
+            }
+            'feat: add order history page with CSV export' {
+                Assert (Test-Path -LiteralPath './web/src/components/OrderHistory.tsx') 'Order export overlay was not copied.'
+            }
+            'feat: add a wishlist' {
+                Assert (Test-Path -LiteralPath './api/src/routes/wishlist.ts') 'Wishlist overlay was not copied.'
+                Assert (Test-Path -LiteralPath './web/src/components/Wishlist.tsx') 'Wishlist component was not copied.'
             }
             default {
                 Assert (Test-Path -LiteralPath './php/src/Controllers/NoteController.php') 'PHP resources were not copied.'
@@ -169,7 +184,8 @@ try {
         'stacked-prs', 'stack-one-layer', 'stack-missing-field', 'stack-api-failure', 'stack-verify-mismatch',
         'non-interactive', 'unknown-template', 'non-interactive-login', 'no-clone-branch',
         'owner-override', 'serve', 'serve-no-clone', 'pages-failure', 'bad-visibility', 'dry-run-without-cleanup', 'cleanup-with-template',
-        'cleanup', 'cleanup-dry-run', 'cleanup-cancel', 'cleanup-org'
+        'cleanup', 'cleanup-dry-run', 'cleanup-cancel', 'cleanup-org',
+        'code-review-prs', 'code-review-fallback', 'code-review-unsupported', 'code-review-no-clone'
     )) {
         $config = $originalConfig | ConvertFrom-Json
         $config.repos += $branchRepo
@@ -181,6 +197,7 @@ try {
         $testState.StackNumbers = @()
         $testState.StackMismatch = $false
         $testState.GitEmail = $null
+        $testState.ReviewApiFailure = $false
         $testState.PagesDisabled = $false
         $testState.Opened = New-Object 'System.Collections.Generic.List[string]'
         $testState.NpmCalls = New-Object 'System.Collections.Generic.List[object]'
@@ -196,7 +213,11 @@ try {
         switch ($scenario) {
             'security-prs' { $selection = '2' }
             'issue-codespace' { $selection = '3' }
-            'branch-codespace' { $selection = '6' }
+            'branch-codespace' { $selection = '7' }
+            'code-review-prs' { $selection = '6' }
+            'code-review-fallback' { $selection = '6'; $testState.Failure = 'pr edit' }
+            'code-review-unsupported' { $selection = '6'; $testState.Failure = 'pr edit'; $testState.ReviewApiFailure = $true }
+            'code-review-no-clone' { $selection = $null; $scriptArgs = @{ Template = 'octocart'; NoClone = $true } }
             'login' { $testState.NeedsLogin = $true }
             'no-machine' { $selection = '3'; $config.codespace_machine = $null }
             'nested-body' {
@@ -278,7 +299,7 @@ try {
         if ($scenario -eq 'invalid-json') { Set-Content -LiteralPath $configPath -Value '{' }
         $testState.Answers = New-Object 'System.Collections.Generic.Queue[string]'
         if ($scenario -eq 'invalid-selection') {
-            foreach ($answer in @('text', '0', '999999999999999999999', '7', '1')) { $testState.Answers.Enqueue($answer) }
+            foreach ($answer in @('text', '0', '999999999999999999999', '8', '1')) { $testState.Answers.Enqueue($answer) }
         }
         elseif ($selection) { $testState.Answers.Enqueue($selection) }
         $testState.Calls = New-Object 'System.Collections.Generic.List[object]'
@@ -411,18 +432,53 @@ try {
                     Assert (-not $clone.Arguments[3].StartsWith($homeRepos)) '-NoClone still cloned into ~/repos.'
                 }
             }
-            if ($selection -in @('3', '6')) {
+            if ($selection -in @('3', '7')) {
                 $codespace = @(Find-Calls 'gh' 'codespace create')[0]
                 Assert (($codespace.Arguments -contains '--machine') -eq ($scenario -ne 'no-machine')) 'Wrong machine arguments.'
-                Assert (($codespace.Arguments -contains '--branch') -eq ($selection -eq '6')) 'Wrong branch arguments.'
+                Assert (($codespace.Arguments -contains '--branch') -eq ($selection -eq '7')) 'Wrong branch arguments.'
             }
             if ($selection -eq '3') {
                 $issue = @(Find-Calls 'gh' 'issue create')[0]
                 Assert ($issue.Arguments -contains '@copilot') 'Issue assignee was not preserved.'
             }
-            if ($selection -eq '6') {
+            if ($selection -eq '7') {
                 Assert ((Find-Calls 'git' 'checkout trunk').Count -eq 1) 'Branch workflow did not checkout default branch.'
                 Assert ((Find-Calls 'git' 'push -u origin feature/demo').Count -eq 1) 'Branch was not pushed.'
+            }
+            if ($scenario -like 'code-review-*') {
+                $fullName = $create.Arguments[2]
+                Assert ($fullName -like 'demo-user/octocart-*') "Code review demo created '$fullName'."
+                $prCalls = @(Find-Calls 'gh' 'pr create')
+                Assert ($prCalls.Count -eq 3) 'Expected three code review PRs.'
+                $heads = @($prCalls | ForEach-Object { $_.Arguments[[array]::IndexOf($_.Arguments, '--head') + 1] })
+                Assert (($heads -join ',') -eq 'feature/stackable-promo-codes,feature/order-history-export,feature/wishlist') "PR heads were '$($heads -join ',')'."
+                foreach ($prCall in $prCalls) {
+                    Assert ($prCall.Arguments -contains 'trunk') 'Code review PR did not target the default branch.'
+                }
+                $edits = @(Find-Calls 'gh' 'pr edit')
+                Assert ($edits.Count -eq 3) 'Expected a Copilot review request per PR.'
+                for ($i = 0; $i -lt 3; $i++) {
+                    $expected = "pr edit $($i + 1) --repo $fullName --add-reviewer @copilot"
+                    Assert (($edits[$i].Arguments -join ' ') -eq $expected) "Review request was '$($edits[$i].Arguments -join ' ')'."
+                }
+                $rest = @(Find-Calls 'gh' 'api --method POST').Where({ $_.Arguments[3] -like '*/requested_reviewers' })
+                if ($scenario -eq 'code-review-prs' -or $scenario -eq 'code-review-no-clone') {
+                    Assert ($rest.Count -eq 0) 'Used the REST fallback although gh pr edit succeeded.'
+                }
+                else {
+                    Assert ($rest.Count -eq 3) 'REST fallback was not used for every PR.'
+                    Assert ($rest[0].Arguments[3] -eq "repos/$fullName/pulls/1/requested_reviewers") "Wrong fallback endpoint '$($rest[0].Arguments[3])'."
+                    Assert ($rest[0].Arguments -contains 'reviewers[]=copilot-pull-request-reviewer[bot]') 'Fallback did not request the Copilot reviewer bot.'
+                }
+                Assert ((Find-Calls 'gh' 'api repos/').Where({ $_.Arguments -contains 'PUT' }).Count -eq 0) 'Code review demo enabled security features.'
+                $fetch = @(Find-Calls 'git' '-C').Where({ ($_.Arguments -join ' ').Contains('fetch --quiet origin') })
+                if ($scenario -eq 'code-review-no-clone') {
+                    Assert ($fetch.Count -eq 0) 'Fetched PR branches without a local clone.'
+                }
+                else {
+                    Assert ($fetch.Count -eq 1 -and $fetch[0].Arguments[1].StartsWith($homeRepos)) 'PR branches were not fetched into the local clone.'
+                }
+                Assert ($testState.Opened -contains "https://github.com/$fullName/pulls") 'Pull request list was not opened.'
             }
             if ($scenario -eq 'login') {
                 Assert ((Find-Calls 'gh' 'auth login').Count -eq 1) 'Authentication failure did not trigger login.'

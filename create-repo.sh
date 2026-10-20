@@ -249,6 +249,26 @@ create_pr_from_resources() {
     echo "✅ PR #$CREATED_PR_NUMBER created: $CREATED_PR_URL"
 }
 
+# Request a Copilot Code Review on a PR. Never fails the setup: older gh
+# versions don't know "@copilot", and some tokens (e.g. GitHub App installation
+# tokens) can't request it, so fall back to the REST API and finally just warn.
+# Usage: request_copilot_review <pr_number>
+request_copilot_review() {
+    local pr_number="$1"
+    if gh pr edit "$pr_number" --repo "$FULL_REPO_NAME" --add-reviewer "@copilot" > /dev/null 2>&1; then
+        echo "🤖 Copilot Code Review requested on PR #$pr_number"
+        return 0
+    fi
+    if gh api --method POST "repos/$FULL_REPO_NAME/pulls/$pr_number/requested_reviewers" \
+        -f "reviewers[]=copilot-pull-request-reviewer[bot]" --silent > /dev/null 2>&1; then
+        echo "🤖 Copilot Code Review requested on PR #$pr_number (via REST API)"
+        return 0
+    fi
+    echo "⚠️  Could not request Copilot Code Review on PR #$pr_number."
+    echo "   Open the PR and pick Copilot under Reviewers to request it manually."
+    return 0
+}
+
 # Validate a list of PR entries (prs[] or stack[]) on the selected repo.
 # Usage: validate_pr_entries <field> <min_count>
 # Appends missing fields to the caller's `missing` array; exits on bad paths.
@@ -458,7 +478,7 @@ validate_selected_repo() {
                 exit 1
             fi
             ;;
-        security_prs)
+        security_prs|code_review_prs)
             validate_pr_entries prs 1
             ;;
         stacked_prs)
@@ -842,6 +862,40 @@ case $WORKFLOW in
         done
         ;;
 
+    "code_review_prs")
+        echo ""
+        echo "🔍 Setting up Copilot Code Review demo with PRs..."
+
+        clone_to_temp
+
+        PR_COUNT=$(jq ".repos[$SELECTED_INDEX].prs | length" "$CONFIG_FILE")
+        i=0
+        while [ "$i" -lt "$PR_COUNT" ]; do
+            pr_branch=$(jq -r ".repos[$SELECTED_INDEX].prs[$i].branch" "$CONFIG_FILE")
+            pr_resource_dir=$(jq -r ".repos[$SELECTED_INDEX].prs[$i].resource_dir" "$CONFIG_FILE")
+            pr_body_file=$(jq -r ".repos[$SELECTED_INDEX].prs[$i].body_file" "$CONFIG_FILE")
+            pr_commit_msg=$(jq -r ".repos[$SELECTED_INDEX].prs[$i].commit_message" "$CONFIG_FILE")
+            pr_title=$(jq -r ".repos[$SELECTED_INDEX].prs[$i].title" "$CONFIG_FILE")
+
+            create_pr_from_resources \
+                "$pr_branch" \
+                "$pr_resource_dir" \
+                "$pr_body_file" \
+                "$pr_commit_msg" \
+                "$pr_title"
+            request_copilot_review "$CREATED_PR_NUMBER"
+            i=$((i + 1))
+        done
+
+        # Make the PR branches visible in the local clone (Copilot app, editor).
+        if [ "$NO_CLONE" = false ]; then
+            git -C "$CLONE_PATH" fetch --quiet origin
+            echo "✅ PR branches fetched into $CLONE_PATH"
+        fi
+        PULLS_URL="https://github.com/$FULL_REPO_NAME/pulls"
+        set_output pulls_url "$PULLS_URL"
+        ;;
+
     "stacked_prs")
         echo ""
         echo "🥞 Setting up stacked PRs demo..."
@@ -894,6 +948,9 @@ echo "   User: $CURRENT_USER"
 if [ -n "${TOP_PR_URL:-}" ]; then
     echo "   Top of stack: $TOP_PR_URL"
 fi
+if [ -n "${PULLS_URL:-}" ]; then
+    echo "   Pull requests: $PULLS_URL"
+fi
 if [ -n "${PAGES_URL:-}" ]; then
     echo "   Game (GitHub Pages): $PAGES_URL"
 fi
@@ -913,6 +970,9 @@ echo "✨ All done!"
 if [ -n "${PAGES_URL:-}" ]; then
     [ -n "${TOP_PR_URL:-}" ] && open_url "$TOP_PR_URL"
     open_url "$PAGES_URL"
+fi
+if [ -n "${PULLS_URL:-}" ]; then
+    open_url "$PULLS_URL"
 fi
 
 # --- Optional local preview ---

@@ -626,7 +626,8 @@ setup_pages() {
 validate_selected_repo() {
     local missing=()
 
-    [ -z "$TEMPLATE_REPO" ] && missing+=("template")
+    # Only the blank workflow creates a repo without a template.
+    [ -z "$TEMPLATE_NAME" ] && [ "$WORKFLOW" != "blank" ] && missing+=("template")
     [ -z "$REPO_BASE_NAME" ] && missing+=("repo_base_name")
     [ -z "$REPO_DESCRIPTION" ] && missing+=("repo_description")
     [ -z "$WORKFLOW" ] && missing+=("workflow")
@@ -641,6 +642,14 @@ validate_selected_repo() {
 
     case "$WORKFLOW" in
         repo_only)
+            ;;
+        blank)
+            local seed_prompt
+            seed_prompt=$(repo_cfg '.seed_prompt_file')
+            if [ -n "$seed_prompt" ] && [ ! -f "$SCRIPT_DIR/$seed_prompt" ]; then
+                echo "❌ seed_prompt_file not found: $SCRIPT_DIR/$seed_prompt"
+                exit 1
+            fi
             ;;
         branch_and_codespace)
             local branch
@@ -880,12 +889,16 @@ else
     i=0
     while [ "$i" -lt "$REPO_COUNT" ]; do
         display=$(jq -r ".repos[$i].display_name // .repos[$i].key" "$CONFIG_FILE")
-        template=$(jq -r ".repos[$i].template" "$CONFIG_FILE")
+        template=$(jq -r ".repos[$i].template // empty" "$CONFIG_FILE")
         template_org=$(jq -r ".repos[$i].template_org // \"$ORG_NAME\"" "$CONFIG_FILE")
         description_short=$(jq -r ".repos[$i].description_short // empty" "$CONFIG_FILE")
         workflow_hint=$(jq -r ".repos[$i].workflow_hint // empty" "$CONFIG_FILE")
 
-        echo "$((i + 1)). $display ($template_org/$template)"
+        if [ -n "$template" ]; then
+            echo "$((i + 1)). $display ($template_org/$template)"
+        else
+            echo "$((i + 1)). $display (empty repo)"
+        fi
         [ -n "$description_short" ] && echo "   $description_short"
         [ -n "$workflow_hint" ] && echo "   → $workflow_hint"
         echo ""
@@ -908,7 +921,8 @@ REPO_KEY=$(repo_cfg '.key')
 TEMPLATE_NAME=$(repo_cfg '.template')
 TEMPLATE_ORG=$(repo_cfg '.template_org')
 [ -z "$TEMPLATE_ORG" ] && TEMPLATE_ORG="$ORG_NAME"
-TEMPLATE_REPO="$TEMPLATE_ORG/$TEMPLATE_NAME"
+TEMPLATE_REPO=""
+[ -n "$TEMPLATE_NAME" ] && TEMPLATE_REPO="$TEMPLATE_ORG/$TEMPLATE_NAME"
 REPO_BASE_NAME=$(repo_cfg '.repo_base_name')
 REPO_DESCRIPTION=$(repo_cfg '.repo_description')
 WORKFLOW=$(repo_cfg '.workflow')
@@ -958,12 +972,20 @@ FULL_REPO_NAME="${OWNER}/${REPO_NAME}"
 
 echo ""
 echo "📦 Creating repository: $FULL_REPO_NAME"
-echo "🏗️  Using template: $TEMPLATE_REPO"
-
-gh repo create "$FULL_REPO_NAME" \
-    --template="$TEMPLATE_REPO" \
-    "--$VISIBILITY" \
-    --description="$REPO_DESCRIPTION"
+if [ -n "$TEMPLATE_REPO" ]; then
+    echo "🏗️  Using template: $TEMPLATE_REPO"
+    gh repo create "$FULL_REPO_NAME" \
+        --template="$TEMPLATE_REPO" \
+        "--$VISIBILITY" \
+        --description="$REPO_DESCRIPTION"
+else
+    # No template: an empty repo with just a README, so it has a default branch to clone.
+    echo "🏗️  No template: creating an empty repo with a README"
+    gh repo create "$FULL_REPO_NAME" \
+        --add-readme \
+        "--$VISIBILITY" \
+        --description="$REPO_DESCRIPTION"
+fi
 
 echo "✅ Repository created successfully: $FULL_REPO_NAME"
 set_output repo_name "$FULL_REPO_NAME"
@@ -1032,6 +1054,15 @@ case $WORKFLOW in
     "repo_only")
         echo ""
         echo "✅ Repository creation complete (no additional actions needed)"
+        ;;
+
+    "blank")
+        echo ""
+        echo "✅ Empty repository ready for a blank-prompt demo"
+        SEED_PROMPT_FILE=$(repo_cfg '.seed_prompt_file')
+        if [ -n "$SEED_PROMPT_FILE" ]; then
+            echo "💬 Seed prompt: $SCRIPT_DIR/$SEED_PROMPT_FILE"
+        fi
         ;;
 
     "security_prs")
@@ -1227,7 +1258,7 @@ echo ""
 echo "📋 Summary:"
 echo "   Repository: https://github.com/$FULL_REPO_NAME"
 echo "   Cloned to: $CLONE_PATH"
-echo "   Template: $TEMPLATE_REPO"
+echo "   Template: ${TEMPLATE_REPO:-(none, empty repo)}"
 echo "   User: $CURRENT_USER"
 if [ -n "${TOP_PR_URL:-}" ]; then
     echo "   Top of stack: $TOP_PR_URL"

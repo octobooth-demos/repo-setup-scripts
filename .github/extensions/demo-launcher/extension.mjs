@@ -5,7 +5,7 @@ import { createServer } from "node:http";
 import { spawn, spawnSync } from "node:child_process";
 import { readFileSync, existsSync, mkdirSync, writeFileSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir, homedir } from "node:os";
-import { join, dirname } from "node:path";
+import { join, dirname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 import { joinSession, createCanvas, CanvasError } from "@github/copilot-sdk/extension";
@@ -30,11 +30,27 @@ function loadTemplates() {
         description: r.description_short || "",
         hint: r.workflow_hint || "",
         workflow: r.workflow,
-        template: `${r.template_org || config.org}/${r.template}`,
+        template: r.template ? `${r.template_org || config.org}/${r.template}` : null,
         owner: r.owner === "org" ? config.org : r.owner || null,
         requiresClone: r.workflow === "branch_and_codespace",
         answerKey: answerKeyPath(r.key),
+        seedPrompt: readSeedPrompt(r.seed_prompt_file),
     }));
+}
+
+// Optional "seed_prompt_file" (e.g. resources/ensemble-blank/seed-prompt.txt): the prompt the
+// presenter runs in the new repo. The canvas shows it with Copy and "Run with Ensemble".
+function readSeedPrompt(file) {
+    if (!file) return null;
+    const path = resolve(REPO_ROOT, String(file));
+    if (!path.startsWith(resolve(REPO_ROOT) + sep) || !existsSync(path)) return null;
+    return readFileSync(path, "utf8").trim() || null;
+}
+
+function seedPromptFor(run) {
+    const prompt = loadTemplates().find((t) => t.key === run.template)?.seedPrompt;
+    if (!prompt) throw new CanvasError("no_seed_prompt", "This demo has no seed prompt.");
+    return prompt;
 }
 
 // Presenter-only notes (e.g. resources/octocart/ANSWER_KEY.md). They stay in this repo
@@ -291,6 +307,10 @@ function sessionPrompt(run, kind, target) {
     if (kind === "issue") {
         return `[Demo Launcher] Open a Copilot app session for issue #${target} in ${r.repo}. ${where} First add it as a project in this app (create_project) if it isn't one already, then use open_issue_session (repo_full_name "${r.repo}", issue_number ${target}). Don't start any work in it (omit kickoff), then navigate me to it.`;
     }
+    if (kind === "ensemble") {
+        const kickoff = { prompt: seedPromptFor(run), mode: "autopilot", model: "auto", auto_tier: "hydrafusion" };
+        return `[Demo Launcher] Run the ${run.templateName} seed prompt with Ensemble in ${r.repo}. ${where} Add it as a project in this app (create_project) if it isn't one already, then call create_session with that project_id, detached: true, and exactly this kickoff object (don't change the prompt text): ${JSON.stringify(kickoff)}. Then navigate me to that session. Don't do any of the work yourself.`;
+    }
     return `[Demo Launcher] I just created the demo repo ${r.repo} (${run.templateName}). ${where} Add it as a project in this app (create_project) if it isn't one already, create a new idle session in it (create_session with that project_id, no kickoff, detached: true), then navigate me to that session.`;
 }
 
@@ -321,6 +341,18 @@ function openInVSCode(run) {
     child.on("error", () => {});
     child.unref();
     return { opened: r.clonePath };
+}
+
+// Fallback for when the canvas webview blocks navigator.clipboard.
+function copyToClipboard(text) {
+    const candidates = process.platform === "darwin" ? [["pbcopy", []]]
+        : process.platform === "win32" ? [["clip", []]]
+        : [["wl-copy", []], ["xclip", ["-selection", "clipboard"]], ["xsel", ["--clipboard", "--input"]]];
+    for (const [cmd, args] of candidates) {
+        const res = spawnSync(cmd, args, { input: text, timeout: 5000, shell: process.platform === "win32" });
+        if (res.status === 0) return { copied: true };
+    }
+    throw new CanvasError("no_clipboard", "Could not copy to the clipboard; select the prompt text and copy it by hand.");
 }
 
 function openAnswerKey(run) {
@@ -398,6 +430,7 @@ async function handle(req, res) {
                 await askAgent(sessionPrompt(run, body.kind || "repo", body.target));
                 return json(res, 200, { sent: true });
             }
+            if (url.pathname === "/api/copy-seed") return json(res, 200, copyToClipboard(seedPromptFor(findRun(body.id))));
             if (url.pathname === "/api/open-vscode") return json(res, 200, openInVSCode(findRun(body.id)));
             if (url.pathname === "/api/open-answer-key") return json(res, 200, openAnswerKey(findRun(body.id)));
             if (url.pathname === "/api/cleanup/preview") return json(res, 200, await cleanup.preview(body));
@@ -503,6 +536,17 @@ const session = await joinSession({
                         },
                     },
                     handler: async (ctx) => cleanup.remove(ctx.input || {}),
+                },
+                {
+                    name: "run_with_ensemble",
+                    description: "For demos with a seed prompt: open a new autopilot session in the demo repo that runs the seed prompt with the Ensemble model (latest run by default).",
+                    inputSchema: runIdInput,
+                    handler: async (ctx) => {
+                        const run = findRun(ctx.input?.runId);
+                        if (run.status !== "succeeded" || run.result.deleted) throw new CanvasError("not_ready", "That demo repo is not ready.");
+                        await askAgent(sessionPrompt(run, "ensemble"));
+                        return { sent: true, seedPrompt: seedPromptFor(run) };
+                    },
                 },
                 {
                     name: "cancel",

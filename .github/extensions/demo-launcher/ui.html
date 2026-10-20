@@ -70,6 +70,9 @@
   .warn { color: var(--true-color-orange, #bc4c00); font-size: 12.5px; margin-top: 8px; }
   button.danger { background: var(--true-color-red, #d1242f); border-color: var(--true-color-red, #d1242f); color: var(--color-white, #fff); }
   .run.deleted { opacity: .6; }
+  .seed { margin-top: 10px; border: 1px solid var(--border-color-default, #d1d9e0); border-radius: 6px; padding: 8px 10px; }
+  .seed-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 12px; color: var(--text-color-muted, #59636e); }
+  .seed-text { margin: 6px 0 0; white-space: pre-wrap; word-break: break-word; font-size: 13px; user-select: all; }
   @keyframes spin { to { transform: rotate(360deg); } }
 </style>
 </head>
@@ -133,7 +136,7 @@ function renderTemplates() {
       <span class="name">${esc(t.displayName)}</span>
       <span>${esc(t.description)}</span>
       <span class="hint">→ ${esc(t.hint)}</span>
-      <code class="muted">${esc(t.template)}${t.owner ? ` · owner: ${esc(t.owner)}` : ""}</code>
+      <code class="muted">${t.template ? esc(t.template) : "empty repo"}${t.seedPrompt ? " · seed prompt" : ""}${t.owner ? ` · owner: ${esc(t.owner)}` : ""}</code>
     </button>`).join("");
   const tpl = templates.find((t) => t.key === selected);
   $("noClone").disabled = !!tpl?.requiresClone;
@@ -178,6 +181,14 @@ function renderRun(r) {
     : canAct ? `
       <button class="btn primary" data-act="session" data-kind="repo" data-id="${r.id}">Open session in Copilot app</button>
       ${res.clonePath ? `<button class="btn" data-act="vscode" data-id="${r.id}">Open in VS Code</button>` : ""}` : "";
+  const seedPrompt = canAct ? templates.find((t) => t.key === r.template)?.seedPrompt : null;
+  const seed = seedPrompt ? `<div class="seed">
+      <div class="seed-head">💬 <strong>Seed prompt</strong>
+        <button class="btn" data-act="copy-seed" data-id="${r.id}">📋 Copy</button>
+        <button class="btn primary" data-act="ensemble" data-id="${r.id}" title="New autopilot session in this repo with the Ensemble model, already running the prompt">▶ Run with Ensemble</button>
+      </div>
+      <div class="seed-text">${esc(seedPrompt)}</div>
+    </div>` : "";
   const answerKey = res.answerKey && !res.deleted
     ? `<button class="btn" data-act="answer-key" data-id="${r.id}" title="${esc(res.answerKey)}">🔑 Presenter answer key</button>` : "";
 
@@ -190,6 +201,7 @@ function renderRun(r) {
     ${r.status !== "succeeded" && done && res.repo ? `<div class="muted" style="font-size:12px;margin-top:6px">⚠️ The repo was created but a later step failed; see the log.</div>` : ""}
     ${links.length ? `<div class="links">${links.join("")}</div>` : ""}
     ${actions || answerKey ? `<div class="actions">${actions}${answerKey}</div>` : ""}
+    ${seed}
     <details data-log="${r.id}" ${openLogs.has(r.id) || r.status === "running" || r.status === "failed" ? "open" : ""}>
       <summary>Log</summary>
       <pre class="log" id="log-${r.id}">${esc(r.logTail || "")}</pre>
@@ -233,6 +245,11 @@ $("runs").addEventListener("click", async (e) => {
   try {
     if (b.dataset.act === "cancel") { await post("/api/cancel", { id: b.dataset.id }); toast("Cancelling…"); }
     if (b.dataset.act === "answer-key") { await post("/api/open-answer-key", { id: b.dataset.id }); toast("Opening the answer key locally (don't share your screen!)"); }
+    if (b.dataset.act === "copy-seed") { await copySeed(b.dataset.id); toast("Seed prompt copied"); }
+    if (b.dataset.act === "ensemble") {
+      await post("/api/open-session", { id: b.dataset.id, kind: "ensemble" });
+      toast("Asked Copilot to start an Ensemble autopilot session — check the chat.");
+    }
     if (b.dataset.act === "vscode") { await post("/api/open-vscode", { id: b.dataset.id }); toast("Opening VS Code…"); }
     if (b.dataset.act === "session") {
       await post("/api/open-session", { id: b.dataset.id, kind: b.dataset.kind, target: b.dataset.target && Number(b.dataset.target) });
@@ -241,6 +258,13 @@ $("runs").addEventListener("click", async (e) => {
   } catch (err) { toast(err.message); }
   finally { b.disabled = false; }
 });
+
+async function copySeed(id) {
+  const run = runs.find((r) => r.id === id);
+  const text = templates.find((t) => t.key === run?.template)?.seedPrompt || "";
+  try { await navigator.clipboard.writeText(text); return; } catch {}
+  await post("/api/copy-seed", { id });
+}
 
 let cleanup = null;
 let armed = false;

@@ -113,6 +113,8 @@ function Assert-SelectedRepo {
 
     $missing = @()
     foreach ($field in @('template', 'repo_base_name', 'repo_description', 'workflow')) {
+        # Only the blank workflow creates a repo without a template.
+        if ($field -eq 'template' -and $Repo.workflow -eq 'blank') { continue }
         if ([string]::IsNullOrWhiteSpace($Repo.$field)) {
             $missing += $field
         }
@@ -124,6 +126,14 @@ function Assert-SelectedRepo {
 
     switch ($Repo.workflow) {
         'repo_only' {}
+        'blank' {
+            if ($Repo.seed_prompt_file) {
+                $seedPrompt = Join-Path $scriptDirectory $Repo.seed_prompt_file
+                if (-not (Test-Path -LiteralPath $seedPrompt -PathType Leaf)) {
+                    throw "seed_prompt_file not found: $seedPrompt"
+                }
+            }
+        }
         'branch_and_codespace' {
             if ([string]::IsNullOrWhiteSpace($Repo.branch_name)) {
                 $missing += 'branch_name'
@@ -654,7 +664,8 @@ try {
             if (-not $displayName) { $displayName = $repo.key }
             $templateOrg = $repo.template_org
             if (-not $templateOrg) { $templateOrg = $config.org }
-            Write-Host "$($index + 1). $displayName ($templateOrg/$($repo.template))"
+            if ($repo.template) { Write-Host "$($index + 1). $displayName ($templateOrg/$($repo.template))" }
+            else { Write-Host "$($index + 1). $displayName (empty repo)" }
             if ($repo.description_short) { Write-Host "   $($repo.description_short)" }
             if ($repo.workflow_hint) { Write-Host "   $($repo.workflow_hint)" }
             Write-Host ''
@@ -701,18 +712,28 @@ try {
 
     $templateOrg = $selectedRepo.template_org
     if (-not $templateOrg) { $templateOrg = $config.org }
-    $templateRepo = "$templateOrg/$($selectedRepo.template)"
+    $templateRepo = if ($selectedRepo.template) { "$templateOrg/$($selectedRepo.template)" } else { $null }
     $alphabet = 'abcdefghijklmnopqrstuvwxyz0123456789'.ToCharArray()
     $suffix = -join (1..4 | ForEach-Object { $alphabet[(Get-Random -Maximum $alphabet.Length)] })
     $repoName = "$($selectedRepo.repo_base_name)-$suffix"
     $fullRepoName = "$repoOwner/$repoName"
 
     Write-Host "Creating repository: $fullRepoName"
-    Write-Host "Using template: $templateRepo"
-    Invoke-Native 'gh' @(
-        'repo', 'create', $fullRepoName, "--template=$templateRepo",
-        "--$visibility", "--description=$($selectedRepo.repo_description)"
-    )
+    if ($templateRepo) {
+        Write-Host "Using template: $templateRepo"
+        Invoke-Native 'gh' @(
+            'repo', 'create', $fullRepoName, "--template=$templateRepo",
+            "--$visibility", "--description=$($selectedRepo.repo_description)"
+        )
+    }
+    else {
+        # No template: an empty repo with just a README, so it has a default branch to clone.
+        Write-Host 'No template: creating an empty repo with a README'
+        Invoke-Native 'gh' @(
+            'repo', 'create', $fullRepoName, '--add-readme',
+            "--$visibility", "--description=$($selectedRepo.repo_description)"
+        )
+    }
     Write-Host "Repository created successfully: $fullRepoName"
     Set-ActionOutput 'repo_name' $fullRepoName
     Set-ActionOutput 'repo_url' "https://github.com/$fullRepoName"
@@ -744,6 +765,12 @@ try {
     switch ($selectedRepo.workflow) {
         'repo_only' {
             Write-Host 'Repository creation complete (no additional actions needed).'
+        }
+        'blank' {
+            Write-Host 'Empty repository ready for a blank-prompt demo.'
+            if ($selectedRepo.seed_prompt_file) {
+                Write-Host "Seed prompt: $(Join-Path $scriptDirectory $selectedRepo.seed_prompt_file)"
+            }
         }
         'branch_and_codespace' {
             Set-Location -LiteralPath $clonePath
@@ -912,7 +939,7 @@ try {
     Write-Host 'Summary:'
     Write-Host "   Repository: https://github.com/$fullRepoName"
     Write-Host "   Cloned to: $clonePath"
-    Write-Host "   Template: $templateRepo"
+    Write-Host "   Template: $(if ($templateRepo) { $templateRepo } else { '(none, empty repo)' })"
     Write-Host "   User: $currentUser"
     if ($topPullRequestUrl) {
         Write-Host "   Top of stack: $topPullRequestUrl"

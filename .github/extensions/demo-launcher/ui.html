@@ -63,6 +63,13 @@
   .toast.show { opacity: .95; }
   .spinner { display: inline-block; width: 10px; height: 10px; border: 2px solid currentColor; border-right-color: transparent;
              border-radius: 50%; animation: spin .8s linear infinite; }
+  .cleanup { border: 1px solid var(--border-color-default, #d1d9e0); border-radius: 8px; padding: 12px; }
+  .cleanup input[type=number] { width: 70px; padding: 5px 8px; border-radius: 6px; border: 1px solid var(--border-color-default, #d1d9e0); background: transparent; color: inherit; font: inherit; }
+  .cand { display: flex; gap: 8px; align-items: center; padding: 3px 0; }
+  .cand code { font-size: 12px; }
+  .warn { color: var(--true-color-orange, #bc4c00); font-size: 12.5px; margin-top: 8px; }
+  button.danger { background: var(--true-color-red, #d1242f); border-color: var(--true-color-red, #d1242f); color: var(--color-white, #fff); }
+  .run.deleted { opacity: .6; }
   @keyframes spin { to { transform: rotate(360deg); } }
 </style>
 </head>
@@ -85,6 +92,18 @@
     <button class="btn" id="clear" style="text-transform:none;letter-spacing:0;font-weight:normal;font-size:12px;padding:2px 8px">Clear history</button>
   </h2>
   <div id="runs"><div class="muted">No demos created yet.</div></div>
+  <h2>Clean up</h2>
+  <div class="cleanup">
+    <div class="muted" style="font-size:12.5px">Deletes repos with the <code>demo-generated</code> topic, like <code>create-repo --cleanup</code>. You pick which ones before anything is deleted.</div>
+    <div class="options">
+      <label>Owner <input type="text" id="cOwner" list="ownerList" placeholder="you (logged-in account)" /></label>
+      <datalist id="ownerList"></datalist>
+      <label>Older than <input type="number" id="cHours" min="0" step="1" value="24" /> h</label>
+      <button class="btn" id="cAll" title="Ignore the age limit">Any age</button>
+      <button class="btn" id="cFind">Find demo repos</button>
+    </div>
+    <div id="cBody"></div>
+  </div>
   <div class="toast" id="toast"></div>
 
 <script>
@@ -134,27 +153,27 @@ function renderRun(r) {
   if (res.repoUrl) links.push(`<div class="link-row">📦 <a href="${esc(res.repoUrl)}" target="_blank">${esc(res.repo)}</a></div>`);
   for (const pr of res.prs || []) {
     links.push(`<div class="link-row">🔀 <a href="${esc(pr.url)}" target="_blank">PR #${pr.number}${pr.title ? ` · ${esc(pr.title)}` : ""}</a>
-      ${done ? `<button class="btn" data-act="session" data-kind="pr" data-target="${pr.number}" data-id="${r.id}">Open PR session</button>` : ""}</div>`);
+      ${done && !res.deleted ? `<button class="btn" data-act="session" data-kind="pr" data-target="${pr.number}" data-id="${r.id}">Open PR session</button>` : ""}</div>`);
   }
   for (const is of res.issues || []) {
     links.push(`<div class="link-row">🐛 <a href="${esc(is.url)}" target="_blank">Issue #${is.number}</a>
-      ${done ? `<button class="btn" data-act="session" data-kind="issue" data-target="${is.number}" data-id="${r.id}">Open issue session</button>` : ""}</div>`);
+      ${done && !res.deleted ? `<button class="btn" data-act="session" data-kind="issue" data-target="${is.number}" data-id="${r.id}">Open issue session</button>` : ""}</div>`);
   }
   if (res.pagesUrl) links.push(`<div class="link-row">🎮 <a href="${esc(res.pagesUrl)}" target="_blank">${esc(res.pagesUrl)}</a></div>`);
   if (res.clonePath) links.push(`<div class="link-row">📁 <code>${esc(res.clonePath)}</code></div>`);
   if (res.codespace) links.push(`<div class="link-row">☁️ Codespace created</div>`);
 
-  const canAct = done && res.repo;
+  const canAct = done && res.repo && !res.deleted;
   const actions = r.status === "running"
     ? `<button class="btn" data-act="cancel" data-id="${r.id}">Cancel</button>`
     : canAct ? `
       <button class="btn primary" data-act="session" data-kind="repo" data-id="${r.id}">Open session in Copilot app</button>
       ${res.clonePath ? `<button class="btn" data-act="vscode" data-id="${r.id}">Open in VS Code</button>` : ""}` : "";
 
-  return `<div class="run">
+  return `<div class="run ${res.deleted ? "deleted" : ""}">
     <div class="run-head">
       <strong>${esc(r.templateName)}</strong>
-      <span class="badge ${r.status}">${status}</span>
+      <span class="badge ${r.status}">${status}</span>${res.deleted ? ` <span class="badge muted">repo deleted</span>` : ""}
       <span class="muted" style="font-size:12px">${fmtTime(r.startedAt)}${r.options?.owner ? ` · ${esc(r.options.owner)}` : ""}</span>
     </div>
     ${r.status !== "succeeded" && done && res.repo ? `<div class="muted" style="font-size:12px;margin-top:6px">⚠️ The repo was created but a later step failed; see the log.</div>` : ""}
@@ -211,10 +230,70 @@ $("runs").addEventListener("click", async (e) => {
   finally { b.disabled = false; }
 });
 
+let cleanup = null;
+let armed = false;
+const unchecked = new Set();
+
+function renderCleanup() {
+  const c = cleanup; if (!c) return;
+  const busy = c.status === "previewing" || c.status === "deleting";
+  $("cFind").disabled = busy;
+  $("cFind").innerHTML = c.status === "previewing" ? `<span class="spinner"></span> Finding…` : "Find demo repos";
+  let html = "";
+  if (c.status === "error") html += `<div class="warn">❌ ${esc(c.error)}</div>`;
+  if (["preview", "deleting", "done"].includes(c.status)) {
+    const who = esc(c.owner || "you");
+    const cutoff = c.olderThanHours === 0 ? "of any age" : `older than ${c.olderThanHours}h`;
+    if (c.deleted.length) html += `<div style="margin-top:8px">🗑️ Deleted ${c.deleted.length} repo(s).</div>`;
+    if (c.failed.length) html += `<div class="warn">❌ ${c.failed.length} could not be deleted: ${c.failed.map(esc).join(", ")}</div>`;
+    if (c.needsDeleteScope) html += `<div class="warn">Deleting repos needs the <code>delete_repo</code> scope. In a terminal run <code>gh auth refresh -h github.com -s delete_repo</code>, then try again.</div>`;
+    if (!c.candidates.length) html += `<div class="muted" style="margin-top:8px">✅ No demo repos owned by ${who} ${cutoff}${c.deleted.length ? " left" : ""}.</div>`;
+    else {
+      const sel = c.candidates.filter((x) => !unchecked.has(x.repo));
+      const clones = sel.filter((x) => x.clonePath).length;
+      html += `<div style="margin:10px 0 4px"><strong>${c.candidates.length}</strong> demo repo(s) owned by ${who} ${cutoff}:</div>`;
+      if (c.isOrg) html += `<div class="warn">⚠️ ${who} is an organization: this list includes demos created by other booths and ChatOps.</div>`;
+      html += c.candidates.map((x) => `<label class="cand"><input type="checkbox" data-repo="${esc(x.repo)}" ${unchecked.has(x.repo) ? "" : "checked"} ${busy ? "disabled" : ""}/>
+        <a href="https://github.com/${esc(x.repo)}" target="_blank" style="color:var(--true-color-blue,#0969da);text-decoration:none">${esc(x.repo)}</a>
+        <span class="muted" style="font-size:12px">${new Date(x.createdAt).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}${x.clonePath ? " · local clone" : ""}</span></label>`).join("");
+      html += `<div class="options">
+        <label><input type="checkbox" id="cClones" ${busy ? "disabled" : ""}/> Also delete local clones (${clones})</label>
+        <button class="btn danger" id="cDelete" ${busy || !sel.length ? "disabled" : ""}>${c.status === "deleting" ? `<span class="spinner"></span> Deleting…` : armed ? `Click again to delete ${sel.length} repo(s)` : `Delete ${sel.length} repo(s)…`}</button>
+      </div>`;
+    }
+  }
+  if (c.log) html += `<details ${c.status === "error" || c.failed.length ? "open" : ""}><summary>Log</summary><pre class="log">${esc(c.log)}</pre></details>`;
+  const keepClones = $("cClones")?.checked;
+  $("cBody").innerHTML = html;
+  if ($("cClones") && keepClones) $("cClones").checked = true;
+}
+
+$("cAll").addEventListener("click", () => { $("cHours").value = 0; });
+$("cFind").addEventListener("click", async () => {
+  armed = false; unchecked.clear();
+  try { await post("/api/cleanup/preview", { owner: $("cOwner").value.trim() || undefined, olderThanHours: Number($("cHours").value || 0) }); }
+  catch (e) { toast(e.message); }
+});
+$("cBody").addEventListener("change", (e) => {
+  const repo = e.target.dataset?.repo; if (!repo) return;
+  e.target.checked ? unchecked.delete(repo) : unchecked.add(repo);
+  armed = false; renderCleanup();
+});
+$("cBody").addEventListener("click", async (e) => {
+  if (e.target.id !== "cDelete") return;
+  if (!armed) { armed = true; renderCleanup(); setTimeout(() => { if (armed) { armed = false; renderCleanup(); } }, 5000); return; }
+  armed = false;
+  const repos = cleanup.candidates.map((x) => x.repo).filter((r) => !unchecked.has(r));
+  try { await post("/api/cleanup/delete", { repos, removeClones: !!$("cClones")?.checked }); }
+  catch (err) { toast(err.message); }
+});
+
 async function load() {
   const res = await fetch("/api/state");
   const data = await res.json();
-  templates = data.templates; runs = data.runs;
+  templates = data.templates; runs = data.runs; cleanup = data.cleanup;
+  $("ownerList").innerHTML = [...new Set(templates.map((t) => t.owner).filter(Boolean))].map((o) => `<option value="${esc(o)}">`).join("");
+  renderCleanup();
   if (selected && !templates.some((t) => t.key === selected)) selected = null;
   renderRuns();
 }
@@ -233,6 +312,7 @@ function connect() {
     }
   });
   es.addEventListener("reset", load);
+  es.addEventListener("cleanup", (e) => { cleanup = JSON.parse(e.data); renderCleanup(); });
   es.onerror = () => { es.close(); setTimeout(() => { load().catch(() => {}); connect(); }, 2000); };
 }
 

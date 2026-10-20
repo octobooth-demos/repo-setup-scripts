@@ -44,9 +44,10 @@ Every repository the scripts create gets the `demo-generated` topic, which is wh
 
 - Lists every template in `config.json` and creates the one you pick in the background (runs `create-repo.sh --template <key>`, or `create-repo.ps1 -Template <key>` on Windows), with optional owner, `--no-clone`, and browser-tab settings.
 - Streams the script log live and, when it finishes, shows links to the repo, PRs, issues, Pages site, and local clone.
+- Cleans up like `--cleanup`: pick an owner and age cutoff (default 24 hours, or **Any age**), review the matching `demo-generated` repos, untick any you want to keep, then delete the rest and optionally their local clones in `~/repos`. Deleting needs the `delete_repo` scope (`gh auth refresh -h github.com -s delete_repo`).
 - Offers one-click follow-ups: **Open session in Copilot app** (Copilot adds the repo as a project and opens a fresh session), **Open PR/issue session**, and **Open in VS Code** (`code <clone>`).
 
-You can create several demos at once (each run gets its own repo, clone, and log card), so visitors can each get their own copy. Run history is kept in `~/.copilot/extensions/demo-launcher/artifacts/runs.json`. The agent can also drive it with canvas actions (`list_templates`, `launch`, `get_run`, `list_runs`, `cancel`). The panel is a plain loopback web page, so its URL also works in any browser, including VS Code's Simple Browser.
+You can create several demos at once (each run gets its own repo, clone, and log card), so visitors can each get their own copy. Run history is kept in `~/.copilot/extensions/demo-launcher/artifacts/runs.json`. The agent can also drive it with canvas actions (`list_templates`, `launch`, `get_run`, `list_runs`, `cancel`, `cleanup_preview`, `cleanup_delete`). Runs use your `gh auth login` rather than any `GH_TOKEN` the app sets, so they have the same scopes as a terminal run. The panel is a plain loopback web page, so its URL also works in any browser, including VS Code's Simple Browser.
 
 ## Where repos are created
 

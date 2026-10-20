@@ -9,6 +9,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 import { joinSession, createCanvas, CanvasError } from "@github/copilot-sdk/extension";
+import { createCleanup } from "./cleanup.mjs";
 
 const EXT_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(EXT_DIR, "..", "..", "..");
@@ -33,6 +34,27 @@ function loadTemplates() {
         owner: r.owner === "org" ? config.org : r.owner || null,
         requiresClone: r.workflow === "branch_and_codespace",
     }));
+}
+
+// The app may inject its own GH_TOKEN (without scopes like `codespace` or `delete_repo`),
+// which would override the user's `gh auth login`. Prefer the stored login, like a terminal run.
+function scriptEnv(extra = {}) {
+    const env = { ...process.env, NO_COLOR: "1", ...extra };
+    delete env.GITHUB_ACTIONS;
+    if (env.GH_TOKEN || env.GITHUB_TOKEN) {
+        const stored = { ...env };
+        delete stored.GH_TOKEN;
+        delete stored.GITHUB_TOKEN;
+        const probe = spawnSync("gh", ["auth", "token", "-h", "github.com"], { env: stored, stdio: "ignore", timeout: 10000 });
+        if (probe.status === 0) return stored;
+    }
+    return env;
+}
+
+function scriptCommand(args) {
+    return process.platform === "win32"
+        ? { cmd: "powershell.exe", args: ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", join(REPO_ROOT, "create-repo.ps1"), ...args.win] }
+        : { cmd: "bash", args: [join(REPO_ROOT, "create-repo.sh"), ...args.sh] };
 }
 
 // ---------- run store (durable across reloads) ----------
@@ -141,22 +163,9 @@ function startRun({ template, owner, noClone = false, openBrowser = false }) {
     runs.unshift(run);
     runs = runs.slice(0, MAX_RUNS);
 
-    const env = { ...process.env, GITHUB_OUTPUT: outFile, NO_COLOR: "1" };
+    const env = scriptEnv({ GITHUB_OUTPUT: outFile });
     if (!openBrowser) env.DEMO_NO_BROWSER = "1";
     else delete env.DEMO_NO_BROWSER;
-    delete env.GITHUB_ACTIONS;
-    // The app may inject its own GH_TOKEN (without scopes like `codespace`), which would
-    // override the user's `gh auth login`. Prefer the stored login, like a terminal run.
-    if (env.GH_TOKEN || env.GITHUB_TOKEN) {
-        const stored = { ...env };
-        delete stored.GH_TOKEN;
-        delete stored.GITHUB_TOKEN;
-        const probe = spawnSync("gh", ["auth", "token", "-h", "github.com"], { env: stored, stdio: "ignore", timeout: 10000 });
-        if (probe.status === 0) {
-            delete env.GH_TOKEN;
-            delete env.GITHUB_TOKEN;
-        }
-    }
 
     const child = spawn(cmd, args, { cwd: REPO_ROOT, env, stdio: ["ignore", "pipe", "pipe"] });
     processes.set(run.id, child);
@@ -223,6 +232,25 @@ function findRun(id) {
     if (!run) throw new CanvasError("not_found", id ? `No run '${id}'.` : "No runs yet.");
     return run;
 }
+
+// ---------- cleanup ----------
+
+const cleanup = createCleanup({
+    repoRoot: REPO_ROOT,
+    scriptEnv,
+    scriptCommand,
+    broadcast,
+    onRepoDeleted(repo) {
+        for (const r of runs) {
+            if (r.result.repo?.toLowerCase() === repo.toLowerCase()) {
+                r.result.deleted = true;
+                broadcast("run", summary(r));
+            }
+        }
+        persist();
+    },
+    log: (message, level) => session?.log(message, { level }),
+});
 
 // ---------- follow-ups ----------
 
@@ -304,7 +332,7 @@ async function handle(req, res) {
             return res.end(readFileSync(UI_FILE, "utf8"));
         }
         if (req.method === "GET" && url.pathname === "/api/state") {
-            return json(res, 200, { templates: loadTemplates(), runs: runs.map((r) => summary(r)) });
+            return json(res, 200, { templates: loadTemplates(), runs: runs.map((r) => summary(r)), cleanup: cleanup.state });
         }
         if (req.method === "GET" && url.pathname.startsWith("/api/runs/")) {
             return json(res, 200, findRun(url.pathname.split("/")[3]));
@@ -332,6 +360,9 @@ async function handle(req, res) {
                 return json(res, 200, { sent: true });
             }
             if (url.pathname === "/api/open-vscode") return json(res, 200, openInVSCode(findRun(body.id)));
+            if (url.pathname === "/api/cleanup/preview") return json(res, 200, await cleanup.preview(body));
+            if (url.pathname === "/api/cleanup/delete") return json(res, 200, await cleanup.remove(body));
+            if (url.pathname === "/api/cleanup/reset") return json(res, 200, cleanup.reset());
             if (url.pathname === "/api/clear") {
                 runs = runs.filter((r) => r.status === "running");
                 persist();
@@ -408,6 +439,30 @@ const session = await joinSession({
                     name: "list_runs",
                     description: "List recent demo runs with their status and links.",
                     handler: async () => runs.map((r) => summary(r)).map(({ logTail, ...r }) => r),
+                },
+                {
+                    name: "cleanup_preview",
+                    description: "List demo-generated repos older than the cutoff that cleanup would delete (shown in the canvas).",
+                    inputSchema: {
+                        type: "object",
+                        properties: {
+                            owner: { type: "string", description: "Account or org; defaults to the logged-in account." },
+                            olderThanHours: { type: "integer", minimum: 0, description: "Age cutoff in hours (default 24; 0 = all)." },
+                        },
+                    },
+                    handler: async (ctx) => cleanup.preview(ctx.input || {}),
+                },
+                {
+                    name: "cleanup_delete",
+                    description: "Delete repos from the current cleanup preview. Only call after the user confirmed the list.",
+                    inputSchema: {
+                        type: "object",
+                        properties: {
+                            repos: { type: "array", items: { type: "string" }, description: "owner/name repos from the preview; defaults to all of them." },
+                            removeClones: { type: "boolean", description: "Also delete matching local clones in ~/repos." },
+                        },
+                    },
+                    handler: async (ctx) => cleanup.remove(ctx.input || {}),
                 },
                 {
                     name: "cancel",

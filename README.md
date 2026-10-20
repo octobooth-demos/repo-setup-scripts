@@ -40,6 +40,7 @@ Each entry in [`config.json`](config.json) is one demo. Pass its key to `--templ
 | --- | --- | --- | --- |
 | `securing-your-code` | Secure Code | Repo only, from `github-samples/securing-your-code` | Labs live in the repo |
 | `security-octo-supply` | Security Supply Chain | Repo in the `octobooth-demos` org with Dependabot, autofix, and CodeQL turned on, plus two vulnerable PRs (TypeScript and PHP) | Pinned to the org for code scanning |
+| `security-octo-supply-v4` | Security Supply Chain (v4) | Same as `security-octo-supply`, but built on the v4 OctoCAT Supply template (Express 5, React 19, Vite 8) | Pinned to the org. PHP findings need AI Code Scanning ([details](#security-supply-chain-v4)) |
 | `tailspin-toys` | Tailspin Toys | Repo, an issue assigned to Copilot coding agent, and a Codespace | Needs coding agent and Codespaces on the owner ([note](#where-repos-are-created)) |
 | `ctrl-slash` | Ctrl Slash | Repo only | |
 | `booth-bingo` | Booth Bingo (stacked PRs) | Public repo, 3 stacked PRs registered as a native stack, and GitHub Pages | [Details](#booth-bingo-stacked-prs); talk track in the template's README |
@@ -174,7 +175,7 @@ If you change what the scripts print (repo, clone, `PR #N created: <url>`, Copil
 By default, repos are created in **the account that is logged in** (`gh api user`), so each booth machine (`octobooth-1`, `octobooth-2`, …) gets its own copies. The owner is resolved in this order:
 
 1. `--owner <name>` / `-Owner <name>`
-2. The config entry's `owner` field. `"owner": "org"` means the top-level `org`; any other value is used as-is. `security-octo-supply` is pinned to the org because it needs code scanning.
+2. The config entry's `owner` field. `"owner": "org"` means the top-level `org`; any other value is used as-is. `security-octo-supply` and `security-octo-supply-v4` are pinned to the org because they need code scanning.
 3. The logged-in account.
 4. The top-level `org` (only when there is no user account, such as a GitHub App token in Actions).
 
@@ -224,7 +225,7 @@ Deleting repos needs the `delete_repo` scope. The scripts request it when they l
 | Where the demo repo lives | How it gets cleaned up |
 | --- | --- |
 | A booth account (`octobooth-1`, `octobooth-2`, …), the default | Run `--cleanup` / `-Cleanup` **on that machine**. Nothing else can reach it, because the [ChatOps App](#chatops) is only installed on the org. |
-| The `octobooth-demos` org (`--owner octobooth-demos`, ChatOps, `security-octo-supply`) | Automatic: the [nightly cleanup](.github/workflows/cleanup-demos.yml) deletes them at 08:00 UTC. To clean up sooner, comment `/cleanup [hours] --confirm` or run the workflow from the Actions tab. After an event, `/cleanup --all --confirm` deletes them all regardless of age. |
+| The `octobooth-demos` org (`--owner octobooth-demos`, ChatOps, `security-octo-supply`, `security-octo-supply-v4`) | Automatic: the [nightly cleanup](.github/workflows/cleanup-demos.yml) deletes them at 08:00 UTC. To clean up sooner, comment `/cleanup [hours] --confirm` or run the workflow from the Actions tab. After an event, `/cleanup --all --confirm` deletes them all regardless of age. |
 
 **Recommended booth routine (repos in each booth account):**
 
@@ -251,7 +252,7 @@ Each `repos[]` entry needs `key`, `display_name`, `template`, `repo_base_name`, 
 | --- | --- | --- |
 | `repo_only` | — | Creates the repo. |
 | `issue_and_codespace` | `issue` | Creates an issue and a Codespace. |
-| `security_prs` | `prs[]` | Enables security features and opens one PR per entry against the default branch. |
+| `security_prs` | `prs[]` | Enables security features (Dependabot alerts, automated security fixes, CodeQL default setup), disables the template's `codeql-advanced.yml` workflow if it has one, and opens one PR per entry against the default branch. |
 | `branch_and_codespace` | `branch` | Creates a branch and a Codespace on it. |
 | `code_review_prs` | `prs[]` | Opens one PR per entry against the default branch and requests a Copilot Code Review on each, except entries with `"request_review": false`, which are left for the presenter to request live. No security features are enabled. |
 | `stacked_prs` | `stack[]` | Opens a chain of dependent PRs and registers them as a native [stacked PR](https://docs.github.com/en/pull-requests/reference/stacked-pull-requests-apis-and-webhooks). |
@@ -267,6 +268,19 @@ Each `repos[]` entry needs `key`, `display_name`, `template`, `repo_base_name`, 
 3. `bingo/3-celebration` → layer 2: banner, confetti, reset
 
 Each overlay holds the cumulative files for its layer. The booth talk track is in the template's README. The game is served from [GitHub Pages](#showing-the-game) and updates itself after the stack is merged. Merge stacks from the GitHub UI, not `gh pr merge`.
+
+### Security Supply Chain (v4)
+
+`security-octo-supply-v4` creates a repo from [`octobooth-demos/security-octo-supply-v4`](https://github.com/octobooth-demos/security-octo-supply-v4), which is the v4 [OctoCAT Supply](https://github.com/octodemo-framework/demo_octocat_supply) template (Node.js API) plus the vulnerable PHP app from `security-octo-supply`. The older `security-octo-supply` option is still available. The script opens two PRs:
+
+1. `feature-add-tos-download` (from [`resources/security-octo-supply-v4/pr-typescript`](resources/security-octo-supply-v4/pr-typescript)): a terms-of-service download with a path traversal for CodeQL and Copilot Autofix. It matches upstream's `feature-add-tos-download` branch and includes intentional code-quality issues in `userDetailsRepo.ts`, so the API build fails on that PR.
+2. `feature/supplier-notes` (reuses [`resources/security-octo-supply/pr-php`](resources/security-octo-supply/pr-php)): supplier notes in the PHP app. CodeQL doesn't analyze PHP, so these findings come from AI Code Scanning.
+
+Before the demo:
+
+- **Turn on AI Code Scanning (preview) for the org:** **Settings → Advanced Security → Global settings → AI findings**. Without it, the PHP PR gets no findings.
+- **Trigger AI findings by pushing an edit to the PHP PR.** It doesn't run when the PR is opened, so push a small commit to `feature/supplier-notes` (for example, from the github.com editor) and wait for the results.
+- The script turns on CodeQL default setup and disables the template's `codeql-advanced.yml`. Otherwise its SARIF uploads are rejected and every PR shows a failing check.
 
 ### OctoCart (Copilot Code Review)
 

@@ -881,6 +881,12 @@ case $WORKFLOW in
             gh api "repos/$FULL_REPO_NAME/code-scanning/default-setup" -X PATCH \
                 -f state=configured -f query_suite=default --silent
             echo "✅ Dependabot alerts, security updates, and Code Scanning enabled"
+            # Default setup rejects advanced-setup SARIF uploads, which would fail a check on every PR.
+            if gh workflow disable codeql-advanced.yml -R "$FULL_REPO_NAME" >/dev/null 2>&1; then
+                echo "✅ Disabled codeql-advanced.yml (default setup is on)"
+            else
+                echo "ℹ️  codeql-advanced.yml not found or already disabled"
+            fi
         fi
 
         clone_to_temp

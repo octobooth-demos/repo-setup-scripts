@@ -38,6 +38,16 @@ With no arguments the scripts behave exactly as before. In non-interactive mode 
 
 Every repository the scripts create gets the `demo-generated` topic, which is what [cleanup](#cleaning-up) uses to find demo repos.
 
+## Demo Launcher canvas
+
+[`.github/extensions/demo-launcher/`](.github/extensions/demo-launcher/) is a Copilot extension that adds a **Demo Launcher** canvas to the GitHub Copilot app (and Copilot CLI sessions in this repo). Ask Copilot to "open the demo launcher" to get a side panel that:
+
+- Lists every template in `config.json` and creates the one you pick in the background (runs `create-repo.sh --template <key>`, or `create-repo.ps1 -Template <key>` on Windows), with optional owner, `--no-clone`, and browser-tab settings.
+- Streams the script log live and, when it finishes, shows links to the repo, PRs, issues, Pages site, and local clone.
+- Offers one-click follow-ups: **Open session in Copilot app** (Copilot adds the repo as a project and opens a fresh session), **Open PR/issue session**, and **Open in VS Code** (`code <clone>`).
+
+Only one demo runs at a time. Run history is kept in `~/.copilot/extensions/demo-launcher/artifacts/runs.json`. The agent can also drive it with canvas actions (`list_templates`, `launch`, `get_run`, `list_runs`, `cancel`). The panel is a plain loopback web page, so its URL also works in any browser, including VS Code's Simple Browser.
+
 ## Where repos are created
 
 By default, repos are created in **the account that is logged in** (`gh api user`), so each booth machine (`octobooth-1`, `octobooth-2`, …) gets its own copies. The owner is resolved in this order:

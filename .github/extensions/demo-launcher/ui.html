@@ -1,0 +1,238 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>Demo Launcher</title>
+<style>
+  :root { color-scheme: light dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 16px;
+    background: var(--background-color-default, #fff);
+    color: var(--text-color-default, #1f2328);
+    font-family: var(--font-sans, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
+    font-size: var(--text-body-medium, 14px);
+    line-height: var(--leading-body-medium, 20px);
+  }
+  h1 { font-size: var(--text-title-medium, 20px); font-weight: var(--font-weight-semibold, 600); margin: 0 0 4px; }
+  h2 { font-size: 13px; font-weight: var(--font-weight-semibold, 600); text-transform: uppercase; letter-spacing: .04em;
+       color: var(--text-color-muted, #59636e); margin: 20px 0 8px; }
+  .muted { color: var(--text-color-muted, #59636e); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; }
+  .card {
+    border: 1px solid var(--border-color-default, #d1d9e0); border-radius: 8px; padding: 12px;
+    cursor: pointer; background: transparent; color: inherit; text-align: left; font: inherit;
+    display: flex; flex-direction: column; gap: 4px;
+  }
+  .card:hover { border-color: var(--true-color-blue, #0969da); }
+  .card.selected { border-color: var(--true-color-blue, #0969da); box-shadow: 0 0 0 1px var(--true-color-blue, #0969da); }
+  .card .name { font-weight: var(--font-weight-semibold, 600); }
+  .card .hint { font-size: 12px; color: var(--text-color-muted, #59636e); }
+  .card code { font-size: 11px; }
+  .options { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; margin-top: 12px; }
+  input[type=text] {
+    padding: 5px 8px; border-radius: 6px; border: 1px solid var(--border-color-default, #d1d9e0);
+    background: transparent; color: inherit; font: inherit; width: 180px;
+  }
+  button.btn {
+    padding: 5px 12px; border-radius: 6px; border: 1px solid var(--border-color-default, #d1d9e0);
+    background: transparent; color: inherit; font: inherit; cursor: pointer;
+  }
+  button.btn:hover:not(:disabled) { border-color: var(--true-color-blue, #0969da); }
+  button.primary { background: var(--true-color-blue, #0969da); border-color: var(--true-color-blue, #0969da); color: var(--color-white, #fff); }
+  button:disabled { opacity: .5; cursor: default; }
+  .run { border: 1px solid var(--border-color-default, #d1d9e0); border-radius: 8px; padding: 12px; margin-bottom: 10px; }
+  .run-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .badge { font-size: 11px; padding: 1px 8px; border-radius: 999px; border: 1px solid currentColor; }
+  .running { color: var(--true-color-blue, #0969da); }
+  .succeeded { color: var(--true-color-green, #1a7f37); }
+  .failed, .interrupted, .cancelled { color: var(--true-color-red, #d1242f); }
+  .links { display: flex; flex-direction: column; gap: 6px; margin: 10px 0 4px; }
+  .link-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .link-row a { color: var(--true-color-blue, #0969da); text-decoration: none; }
+  .link-row a:hover { text-decoration: underline; }
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+  details summary { cursor: pointer; color: var(--text-color-muted, #59636e); margin-top: 8px; font-size: 12px; }
+  pre.log {
+    font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 11.5px;
+    max-height: 280px; overflow: auto; white-space: pre-wrap; word-break: break-word;
+    background: var(--background-color-muted, rgba(127,127,127,.08)); padding: 8px; border-radius: 6px; margin: 6px 0 0;
+  }
+  .toast { position: fixed; bottom: 12px; right: 12px; padding: 8px 12px; border-radius: 6px; font-size: 13px;
+           background: var(--text-color-default, #1f2328); color: var(--background-color-default, #fff); opacity: 0; transition: opacity .2s; }
+  .toast.show { opacity: .95; }
+  .spinner { display: inline-block; width: 10px; height: 10px; border: 2px solid currentColor; border-right-color: transparent;
+             border-radius: 50%; animation: spin .8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+  <h1>🚀 Demo Launcher</h1>
+  <div class="muted">Pick a demo, create it in the background, then jump straight in.</div>
+
+  <h2>Demos</h2>
+  <div class="grid" id="templates"></div>
+  <div class="options">
+    <label>Owner <input type="text" id="owner" placeholder="default (from config / you)" /></label>
+    <label><input type="checkbox" id="noClone" /> Skip local clone</label>
+    <label><input type="checkbox" id="openBrowser" /> Let script open browser tabs</label>
+    <button class="btn primary" id="launch" disabled>Create demo</button>
+  </div>
+
+  <h2 style="display:flex;justify-content:space-between;align-items:center">
+    <span>Runs</span>
+    <button class="btn" id="clear" style="text-transform:none;letter-spacing:0;font-weight:normal;font-size:12px;padding:2px 8px">Clear history</button>
+  </h2>
+  <div id="runs"><div class="muted">No demos created yet.</div></div>
+  <div class="toast" id="toast"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+let templates = [];
+let runs = [];
+let selected = new URLSearchParams(location.search).get("template");
+const openLogs = new Set();
+
+function toast(msg) {
+  const t = $("toast"); t.textContent = msg; t.classList.add("show");
+  clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove("show"), 3000);
+}
+
+async function post(path, body) {
+  const res = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || res.statusText);
+  return data;
+}
+
+function renderTemplates() {
+  const busy = runs.some((r) => r.status === "running");
+  $("templates").innerHTML = templates.map((t) => `
+    <button class="card ${t.key === selected ? "selected" : ""}" data-key="${esc(t.key)}">
+      <span class="name">${esc(t.displayName)}</span>
+      <span>${esc(t.description)}</span>
+      <span class="hint">→ ${esc(t.hint)}</span>
+      <code class="muted">${esc(t.template)}${t.owner ? ` · owner: ${esc(t.owner)}` : ""}</code>
+    </button>`).join("");
+  const tpl = templates.find((t) => t.key === selected);
+  $("noClone").disabled = !!tpl?.requiresClone;
+  if (tpl?.requiresClone) $("noClone").checked = false;
+  $("launch").disabled = !tpl || busy;
+  $("launch").textContent = busy ? "A demo is being created…" : tpl ? `Create ${tpl.displayName}` : "Select a demo";
+}
+
+function fmtTime(iso) { return iso ? new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : ""; }
+
+function renderRun(r) {
+  const res = r.result || {};
+  const status = r.status === "running" ? `<span class="spinner"></span> creating…` : r.status;
+  const links = [];
+  if (res.repoUrl) links.push(`<div class="link-row">📦 <a href="${esc(res.repoUrl)}" target="_blank">${esc(res.repo)}</a></div>`);
+  for (const pr of res.prs || []) {
+    links.push(`<div class="link-row">🔀 <a href="${esc(pr.url)}" target="_blank">PR #${pr.number}${pr.title ? ` · ${esc(pr.title)}` : ""}</a>
+      ${r.status === "succeeded" ? `<button class="btn" data-act="session" data-kind="pr" data-target="${pr.number}" data-id="${r.id}">Open PR session</button>` : ""}</div>`);
+  }
+  for (const is of res.issues || []) {
+    links.push(`<div class="link-row">🐛 <a href="${esc(is.url)}" target="_blank">Issue #${is.number}</a>
+      ${r.status === "succeeded" ? `<button class="btn" data-act="session" data-kind="issue" data-target="${is.number}" data-id="${r.id}">Open issue session</button>` : ""}</div>`);
+  }
+  if (res.pagesUrl) links.push(`<div class="link-row">🎮 <a href="${esc(res.pagesUrl)}" target="_blank">${esc(res.pagesUrl)}</a></div>`);
+  if (res.clonePath) links.push(`<div class="link-row">📁 <code>${esc(res.clonePath)}</code></div>`);
+  if (res.codespace) links.push(`<div class="link-row">☁️ Codespace created</div>`);
+
+  const canAct = r.status === "succeeded" && res.repo;
+  const actions = r.status === "running"
+    ? `<button class="btn" data-act="cancel" data-id="${r.id}">Cancel</button>`
+    : canAct ? `
+      <button class="btn primary" data-act="session" data-kind="repo" data-id="${r.id}">Open session in Copilot app</button>
+      ${res.clonePath ? `<button class="btn" data-act="vscode" data-id="${r.id}">Open in VS Code</button>` : ""}` : "";
+
+  return `<div class="run">
+    <div class="run-head">
+      <strong>${esc(r.templateName)}</strong>
+      <span class="badge ${r.status}">${status}</span>
+      <span class="muted" style="font-size:12px">${fmtTime(r.startedAt)}${r.options?.owner ? ` · ${esc(r.options.owner)}` : ""}</span>
+    </div>
+    ${links.length ? `<div class="links">${links.join("")}</div>` : ""}
+    ${actions ? `<div class="actions">${actions}</div>` : ""}
+    <details data-log="${r.id}" ${openLogs.has(r.id) || r.status === "running" || r.status === "failed" ? "open" : ""}>
+      <summary>Log</summary>
+      <pre class="log" id="log-${r.id}">${esc(r.logTail || "")}</pre>
+    </details>
+  </div>`;
+}
+
+function renderRuns() {
+  $("runs").innerHTML = runs.length ? runs.map(renderRun).join("") : `<div class="muted">No demos created yet.</div>`;
+  for (const pre of document.querySelectorAll("pre.log")) pre.scrollTop = pre.scrollHeight;
+  renderTemplates();
+}
+
+$("templates").addEventListener("click", (e) => {
+  const card = e.target.closest(".card"); if (!card) return;
+  selected = card.dataset.key; renderTemplates();
+});
+
+$("launch").addEventListener("click", async () => {
+  try {
+    await post("/api/launch", {
+      template: selected,
+      owner: $("owner").value.trim() || undefined,
+      noClone: $("noClone").checked,
+      openBrowser: $("openBrowser").checked,
+    });
+    toast("Creating demo in the background…");
+  } catch (e) { toast(e.message); }
+});
+
+$("clear").addEventListener("click", async () => { try { await post("/api/clear"); runs = runs.filter((r) => r.status === "running"); renderRuns(); } catch (e) { toast(e.message); } });
+
+$("runs").addEventListener("toggle", (e) => {
+  const id = e.target.dataset?.log; if (!id) return;
+  e.target.open ? openLogs.add(id) : openLogs.delete(id);
+}, true);
+
+$("runs").addEventListener("click", async (e) => {
+  const b = e.target.closest("button[data-act]"); if (!b) return;
+  b.disabled = true;
+  try {
+    if (b.dataset.act === "cancel") { await post("/api/cancel", { id: b.dataset.id }); toast("Cancelling…"); }
+    if (b.dataset.act === "vscode") { await post("/api/open-vscode", { id: b.dataset.id }); toast("Opening VS Code…"); }
+    if (b.dataset.act === "session") {
+      await post("/api/open-session", { id: b.dataset.id, kind: b.dataset.kind, target: b.dataset.target && Number(b.dataset.target) });
+      toast("Asked Copilot to open the session — check the chat.");
+    }
+  } catch (err) { toast(err.message); }
+  finally { b.disabled = false; }
+});
+
+async function load() {
+  const res = await fetch("/api/state");
+  const data = await res.json();
+  templates = data.templates; runs = data.runs;
+  if (selected && !templates.some((t) => t.key === selected)) selected = null;
+  renderRuns();
+}
+
+function connect() {
+  const es = new EventSource("/events");
+  es.addEventListener("run", (e) => {
+    const r = JSON.parse(e.data);
+    const i = runs.findIndex((x) => x.id === r.id);
+    const statusChanged = i < 0 || runs[i].status !== r.status || JSON.stringify(runs[i].result) !== JSON.stringify(r.result);
+    if (i < 0) runs.unshift(r); else runs[i] = r;
+    if (statusChanged) renderRuns();
+    else {
+      const pre = $(`log-${r.id}`);
+      if (pre) { const atBottom = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 30; pre.textContent = r.logTail; if (atBottom) pre.scrollTop = pre.scrollHeight; }
+    }
+  });
+  es.addEventListener("reset", load);
+  es.onerror = () => { es.close(); setTimeout(() => { load().catch(() => {}); connect(); }, 2000); };
+}
+
+load().then(connect);
+</script>
+</body>
+</html>

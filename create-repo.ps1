@@ -24,6 +24,7 @@ $configFile = Join-Path $scriptDirectory 'config.json'
 $originalLocation = Get-Location
 $tempDirectory = $null
 $demoTopic = 'demo-generated'
+$pagesWorkflow = 'pages.yml'
 $nonInteractive = -not [string]::IsNullOrWhiteSpace($Template)
 
 if ($Cleanup -and ($nonInteractive -or $Serve -or $NoClone)) {
@@ -104,6 +105,10 @@ function Assert-SelectedRepo {
         if ([string]::IsNullOrWhiteSpace($Repo.$field)) {
             $missing += $field
         }
+    }
+
+    if ($Repo.visibility -and $Repo.visibility -notin @('public', 'private', 'internal')) {
+        throw "Invalid visibility '$($Repo.visibility)' (use public, private, or internal)."
     }
 
     switch ($Repo.workflow) {
@@ -326,6 +331,72 @@ function Set-ActionOutput {
     }
 }
 
+# Run gh with stderr hidden. Windows PowerShell 5.1 turns redirected native stderr into
+# terminating errors under ErrorActionPreference=Stop, so relax it for this call only.
+function Invoke-GhQuiet {
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try { & gh @args 2>$null }
+    finally { $ErrorActionPreference = $previous }
+}
+
+# Open a URL in the default browser (skipped in CI or when DEMO_NO_BROWSER is set).
+function Open-Url {
+    param([string]$Url)
+    if ($env:GITHUB_ACTIONS -or $env:DEMO_NO_BROWSER) { return }
+    try { Start-Process $Url } catch { Write-Host "Open $Url in your browser." }
+}
+
+# Turn on GitHub Pages (built by the template's pages.yml workflow), run the first
+# deploy of the default branch, and wait (bounded) for it. Returns the site URL.
+# Failures only warn: the repo and PRs are still usable without Pages.
+function Enable-DemoPages {
+    Write-Host ''
+    Write-Host 'Turning on GitHub Pages...'
+    Invoke-GhQuiet api --method POST "repos/$fullRepoName/pages" -f build_type=workflow --silent | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Invoke-GhQuiet api "repos/$fullRepoName/pages" --silent | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "Could not turn on GitHub Pages for $fullRepoName."
+            Write-Host '   Free accounts need a public repo; check Settings -> Pages on GitHub.'
+            return $null
+        }
+    }
+    $url = "$(@(Invoke-GhQuiet api "repos/$fullRepoName/pages" --jq '.html_url')[-1])".Trim()
+    if ($LASTEXITCODE -ne 0 -or -not $url) { $url = "https://$($repoOwner.ToLower()).github.io/$repoName/" }
+    Set-ActionOutput 'pages_url' $url
+
+    $started = $false
+    for ($attempt = 1; $attempt -le 5; $attempt++) {
+        Invoke-GhQuiet workflow run $pagesWorkflow --repo $fullRepoName --ref $defaultBranch | Out-Null
+        if ($LASTEXITCODE -eq 0) { $started = $true; break }
+        Start-Sleep -Seconds 3
+    }
+    if (-not $started) {
+        Write-Host "Could not start the Pages deploy. Run it from the Actions tab: $pagesWorkflow"
+        return $url
+    }
+
+    Write-Host "Deploying $defaultBranch to $url (usually under a minute)..."
+    for ($attempt = 1; $attempt -le 60; $attempt++) {
+        # One field per line; avoids embedded quotes that PowerShell 5.1 mangles.
+        $fields = @(Invoke-GhQuiet run list --repo $fullRepoName --workflow $pagesWorkflow --event workflow_dispatch `
+            --limit 1 --json status,conclusion --jq '.[0].status, .[0].conclusion')
+        $state = (($fields | ForEach-Object { "$_".Trim() }) -join ' ').Trim()
+        if ($state -eq 'completed success') {
+            Write-Host "Game is live: $url"
+            return $url
+        }
+        if ($state -like 'completed *') {
+            Write-Host "The Pages deploy finished with '$($state.Substring(10))'. Check the Actions tab of $fullRepoName."
+            return $url
+        }
+        Start-Sleep -Seconds 5
+    }
+    Write-Host "The Pages deploy is still running; the site will appear at $url shortly."
+    return $url
+}
+
 try {
     Write-Host 'GitHub demo repository creation tool'
     Write-Host '======================================='
@@ -419,6 +490,8 @@ try {
         }
     }
 
+    $visibility = if ($selectedRepo.visibility) { $selectedRepo.visibility } else { 'private' }
+
     $templateOrg = $selectedRepo.template_org
     if (-not $templateOrg) { $templateOrg = $config.org }
     $templateRepo = "$templateOrg/$($selectedRepo.template)"
@@ -431,7 +504,7 @@ try {
     Write-Host "Using template: $templateRepo"
     Invoke-Native 'gh' @(
         'repo', 'create', $fullRepoName, "--template=$templateRepo",
-        '--private', "--description=$($selectedRepo.repo_description)"
+        "--$visibility", "--description=$($selectedRepo.repo_description)"
     )
     Write-Host "Repository created successfully: $fullRepoName"
     Set-ActionOutput 'repo_name' $fullRepoName
@@ -526,6 +599,11 @@ try {
         }
     }
 
+    $pagesUrl = $null
+    if ($selectedRepo.pages -eq $true) {
+        $pagesUrl = Enable-DemoPages
+    }
+
     Write-Host ''
     Write-Host 'Setup complete!'
     Write-Host 'Summary:'
@@ -536,11 +614,20 @@ try {
     if ($topPullRequestUrl) {
         Write-Host "   Top of stack: $topPullRequestUrl"
     }
+    if ($pagesUrl) {
+        Write-Host "   Game (GitHub Pages): $pagesUrl"
+    }
     foreach ($line in $selectedRepo.summary_lines) {
         if ($line) { Write-Host "   $line" }
     }
     if ($selectedRepo.workflow -in @('branch_and_codespace', 'issue_and_codespace')) {
         Write-Host 'You can access your codespace at: https://github.com/codespaces'
+    }
+
+    # Open the PR first and the game last so the game is the tab in front.
+    if ($pagesUrl) {
+        if ($topPullRequestUrl) { Open-Url $topPullRequestUrl }
+        Open-Url $pagesUrl
     }
 
     if ($Serve) {

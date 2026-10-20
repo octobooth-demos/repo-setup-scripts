@@ -1,6 +1,6 @@
 # Demo repository setup
 
-Create private demo repositories from the templates in [`config.json`](config.json), with optional branches, issues, demo pull requests, security features, and Codespaces.
+Create demo repositories (private unless a template says otherwise) from the templates in [`config.json`](config.json), with optional branches, issues, demo pull requests, security features, and Codespaces.
 
 ## PowerShell
 
@@ -10,7 +10,7 @@ Run [`create-repo.ps1`](create-repo.ps1) with Windows PowerShell 5.1 or [PowerSh
 .\create-repo.ps1
 ```
 
-Select a template when prompted. The script offers GitHub login if needed, creates a private repository in the [target owner](#where-repos-are-created), clones it into `$HOME/repos`, and runs the selected workflow. You need permission to create repositories in that organization and any permissions required for the selected security or Codespaces features.
+Select a template when prompted. The script offers GitHub login if needed, creates a repository in the [target owner](#where-repos-are-created), clones it into `$HOME/repos`, and runs the selected workflow. You need permission to create repositories in that organization and any permissions required for the selected security or Codespaces features.
 
 Configuration and resource paths are resolved relative to the script, so it can be invoked from another directory. The script restores your working directory and removes its temporary security-demo clone even if a command fails. The permanent clone and any already-created GitHub resources are retained on failure; errors stop the script rather than continuing with incomplete setup.
 
@@ -52,27 +52,25 @@ The script prints `Target owner:` before creating anything. Templates in `octobo
 > [!NOTE]
 > `tailspin-toys` assigns an issue to `@copilot` and starts a Codespace. In a personal account those need Copilot coding agent and Codespaces access on that account. If they are not available, run it with `--owner octobooth-demos`.
 
-## Showing it locally
+## Showing the game
 
-Booth Bingo starts the app automatically after setup, whether you pick it from the menu or pass `--template booth-bingo` (it is skipped with `--no-clone` or when Node.js is missing). For other templates, pass `--serve` / `-Serve`. The script checks out `main` in `~/repos/<repo>` (so the audience sees the game before the stack lands) and runs `npm start -- --open`, which serves it on http://localhost:8080 and opens the browser. Starting a new Booth Bingo server stops the one from the previous demo repo, so 8080 always shows the latest repo; `npm run stop` stops it. It needs Node.js 18+ and cannot be combined with `--no-clone`. Press Ctrl+C to stop.
+Booth Bingo is published to **GitHub Pages**. After creating the stack, the script turns Pages on, deploys `main`, waits for the deploy (usually under a minute), and opens two browser tabs: the top PR and the game (in front). Nothing runs locally.
 
 ```bash
-bash ./create-repo.sh --template booth-bingo --serve
+bash ./create-repo.sh --template booth-bingo
 ```
 
 ```powershell
-.\create-repo.ps1 -Template booth-bingo -Serve
+.\create-repo.ps1 -Template booth-bingo
 ```
 
-While it is running, switch the code to any layer from a second terminal and reload the browser:
+The game page checks for a new deploy every few seconds and swaps it in by itself, so after you merge the stack, just switch back to the game tab: about a minute later the corner badge says **Updated from main** and the finished game is there. No terminal and no refresh. The deploy comes from the template's `.github/workflows/pages.yml`, which runs on every push to `main`.
 
-```bash
-cd ~/repos/booth-bingo-xxxx
-npm run layer -- 3   # preview the full stack: win detection + celebration
-npm run layer -- 0   # back to main; after merging the stack this pulls the merged code
-```
+Pages on free personal accounts only works for public repos, so Booth Bingo repos are created **public** (`"visibility": "public"` in `config.json`). If Pages can't be turned on, the script warns and still finishes; the repo and stack are usable without it.
 
-`npm run layer` refuses to run if you have uncommitted changes, and falls back to `main` once a layer branch has been merged and deleted.
+### Running it locally instead (optional)
+
+`--serve` / `-Serve` checks out `main` in `~/repos/<repo>` and runs `npm start -- --open` (http://localhost:8080, Node.js 18+, not combinable with `--no-clone`). Only one Booth Bingo server runs at a time, and `npm run stop` stops it. Locally, you switch code yourself: `npm run layer -- 1`..`3` previews a layer and `npm run layer -- 0` pulls the merged `main`.
 
 ## Cleaning up
 
@@ -90,7 +88,7 @@ Deleting repos needs the `delete_repo` scope. The scripts request it when they l
 
 ## Workflows and config fields
 
-Each `repos[]` entry needs `key`, `display_name`, `template`, `repo_base_name`, and `workflow`. Optional `template_org` overrides the top-level `org` for the template source, optional `owner` pins where the repo is created (see [above](#where-repos-are-created)), optional `"serve": true` starts the [local preview](#showing-it-locally) automatically whenever the repo is cloned (Booth Bingo sets this), and `summary_lines` are printed at the end.
+Each `repos[]` entry needs `key`, `display_name`, `template`, `repo_base_name`, and `workflow`. Optional `template_org` overrides the top-level `org` for the template source, optional `owner` pins where the repo is created (see [above](#where-repos-are-created)), optional `visibility` (`private` by default, or `public` / `internal`) sets the new repo's visibility, optional `"pages": true` turns on GitHub Pages and deploys it with the template's `pages.yml` workflow (see [Showing the game](#showing-the-game); Booth Bingo sets both), optional `"serve": true` starts the [local preview](#running-it-locally-instead-optional) whenever the repo is cloned, and `summary_lines` are printed at the end.
 
 | `workflow` | Extra fields | What it does |
 | --- | --- | --- |
@@ -110,13 +108,13 @@ Each `repos[]` entry needs `key`, `display_name`, `template`, `repo_base_name`, 
 2. `bingo/2-wire-ui` → layer 1: highlight the winning line
 3. `bingo/3-celebration` → layer 2: banner, confetti, reset
 
-Each overlay holds the cumulative files for its layer. The booth talk track is in the template's README; use [`--serve`](#showing-it-locally) and `npm run layer` to show each layer running. Merge stacks from the GitHub UI, not `gh pr merge`.
+Each overlay holds the cumulative files for its layer. The booth talk track is in the template's README. The game is served from [GitHub Pages](#showing-the-game) and updates itself after the stack is merged. Merge stacks from the GitHub UI, not `gh pr merge`.
 
 ## ChatOps
 
 Two workflows in this repo let you create and clean up demos without a booth machine running the script.
 
-- **[New demo](.github/workflows/new-demo.yml)**: run it from the Actions tab and pick a template, or comment `/new-demo <key>` on any issue or PR in this repo. Repos are always created in `octobooth-demos`, because App tokens cannot create repos in personal accounts. It replies with the repo URL and, for stacks, the top PR URL. Only `repo_only`, `security_prs`, and `stacked_prs` templates are allowed, because Codespaces need a user token.
+- **[New demo](.github/workflows/new-demo.yml)**: run it from the Actions tab and pick a template, or comment `/new-demo <key>` on any issue or PR in this repo. Repos are always created in `octobooth-demos`, because App tokens cannot create repos in personal accounts. It replies with the repo URL and, for stacks, the top PR URL and the game URL. Only `repo_only`, `security_prs`, and `stacked_prs` templates are allowed, because Codespaces need a user token.
 - **[Clean up demos](.github/workflows/cleanup-demos.yml)**: runs nightly, from the Actions tab (`max_age_hours`, default 24; `dry_run`, default on), or by comment: `/cleanup [hours] [--dry-run]`. It only deletes repos in `octobooth-demos` that have the `demo-generated` topic **and** are older than the cutoff.
 
 Comment commands only run for users with write, maintain, or admin access to this repository.
@@ -131,6 +129,8 @@ The workflows authenticate as a GitHub App so they can create and delete org rep
    - Pull requests: Read and write (open PRs, register stacks)
    - Issues: Read and write (issue-based templates)
    - Workflows: Read and write (templates contain `.github/workflows`)
+   - Pages: Read and write (turn on GitHub Pages for Booth Bingo)
+   - Actions: Read and write (start the first Pages deploy)
    - Metadata: Read-only (required)
 2. Install it on the `octobooth-demos` org with access to **All repositories** (new demo repos must be covered automatically).
 3. In this repo's **Settings → Secrets and variables → Actions**, add `APP_ID` (the App ID) and `APP_PRIVATE_KEY` (the full contents of a generated `.pem` private key).

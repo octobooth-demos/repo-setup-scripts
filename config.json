@@ -84,12 +84,13 @@
       "key": "booth-bingo",
       "display_name": "Booth Bingo (Stacked PRs)",
       "description_short": "Tiny bingo web game with one feature shipped as a stack of 3 PRs",
-      "workflow_hint": "Creates repo + 3 stacked PRs registered as a native stack, then opens the game locally",
+      "workflow_hint": "Creates a public repo + 3 stacked PRs registered as a native stack, then publishes the game to GitHub Pages and opens it",
       "template": "booth-bingo",
       "repo_base_name": "booth-bingo",
       "repo_description": "Booth Bingo stacked pull requests demo",
       "workflow": "stacked_prs",
-      "serve": true,
+      "visibility": "public",
+      "pages": true,
       "stack": [
         {
           "branch": "bingo/1-game-logic",
@@ -115,7 +116,8 @@
       ],
       "summary_lines": [
         "Stack: 3 PRs registered as a native stack",
-        "Next: open the top PR and use the stack navigator"
+        "Next: open the top PR and use the stack navigator",
+        "After you merge the stack, the game tab updates by itself in about a minute"
       ]
     }
   ]

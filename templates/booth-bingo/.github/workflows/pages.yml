@@ -1,0 +1,55 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      enabled: ${{ steps.pages.outputs.enabled }}
+    steps:
+      # The repo's first push happens before the setup script turns Pages on; skip quietly then.
+      - id: pages
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh api "repos/$GITHUB_REPOSITORY/pages" --silent 2>/dev/null; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::GitHub Pages is not turned on for this repo yet, so there is nothing to deploy."
+          fi
+
+  deploy:
+    needs: check
+    if: needs.check.outputs.enabled == 'true'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      # Each deploy lives under its commit SHA so browsers never mix cached files from
+      # different versions. The root page loads the newest one and swaps it in live.
+      - name: Build site
+        run: |
+          mkdir -p "_site/$GITHUB_SHA"
+          cp index.html app.js styles.css "_site/$GITHUB_SHA/"
+          cp -R src "_site/$GITHUB_SHA/"
+          cp .github/pages/index.html _site/index.html
+          printf '{"sha":"%s"}\n' "$GITHUB_SHA" > _site/version.json
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+      - id: deployment
+        uses: actions/deploy-pages@v4

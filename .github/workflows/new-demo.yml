@@ -106,12 +106,16 @@ jobs:
           TEMPLATE_KEY: ${{ steps.key.outputs.key }}
           REPO_URL: ${{ steps.create.outputs.repo_url }}
           TOP_PR_URL: ${{ steps.create.outputs.top_pr_url }}
+          PAGES_URL: ${{ steps.create.outputs.pages_url }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           if [ "$OUTCOME" = "success" ]; then
             body="✅ Created \`$TEMPLATE_KEY\` demo: $REPO_URL"
             if [ -n "$TOP_PR_URL" ]; then
               body="$body"$'\n\n'"Top of stack: $TOP_PR_URL"
+            fi
+            if [ -n "$PAGES_URL" ]; then
+              body="$body"$'\n\n'"Game: $PAGES_URL"
             fi
           else
             body="❌ Demo creation failed. See $RUN_URL"
@@ -123,10 +127,12 @@ jobs:
         env:
           REPO_URL: ${{ steps.create.outputs.repo_url }}
           TOP_PR_URL: ${{ steps.create.outputs.top_pr_url }}
+          PAGES_URL: ${{ steps.create.outputs.pages_url }}
         run: |
           {
             echo "### New demo"
             echo "- Repository: ${REPO_URL:-not created}"
             [ -n "$TOP_PR_URL" ] && echo "- Top of stack: $TOP_PR_URL"
+            [ -n "$PAGES_URL" ] && echo "- Game: $PAGES_URL"
             true
           } >> "$GITHUB_STEP_SUMMARY"

@@ -10,6 +10,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 CONFIG_FILE="$SCRIPT_DIR/config.json"
 DEMO_TOPIC="demo-generated"
+PAGES_WORKFLOW="pages.yml"
 
 # --- Arguments ---
 
@@ -353,6 +354,66 @@ set_output() {
     fi
 }
 
+# Open a URL in the default browser (skipped in CI or when DEMO_NO_BROWSER is set).
+open_url() {
+    if [ -n "${GITHUB_ACTIONS:-}" ] || [ -n "${DEMO_NO_BROWSER:-}" ]; then
+        return 0
+    fi
+    if command -v open &> /dev/null; then
+        open "$1" 2>/dev/null || true
+    elif command -v xdg-open &> /dev/null; then
+        xdg-open "$1" > /dev/null 2>&1 || true
+    fi
+}
+
+# Turn on GitHub Pages (built by the template's pages.yml workflow), run the first
+# deploy of the default branch, and wait (bounded) for it. Sets PAGES_URL.
+# Failures only warn: the repo and PRs are still usable without Pages.
+setup_pages() {
+    echo ""
+    echo "🌐 Turning on GitHub Pages..."
+    if ! gh api --method POST "repos/$FULL_REPO_NAME/pages" -f build_type=workflow --silent 2>/dev/null \
+        && ! gh api "repos/$FULL_REPO_NAME/pages" --silent 2>/dev/null; then
+        echo "⚠️  Could not turn on GitHub Pages for $FULL_REPO_NAME."
+        echo "   Free accounts need a public repo; check Settings → Pages on GitHub."
+        return 0
+    fi
+    PAGES_URL=$(gh api "repos/$FULL_REPO_NAME/pages" --jq '.html_url' 2>/dev/null || true)
+    [ -z "$PAGES_URL" ] && PAGES_URL="https://$(echo "$OWNER" | tr '[:upper:]' '[:lower:]').github.io/$REPO_NAME/"
+    set_output pages_url "$PAGES_URL"
+
+    local attempt=1
+    until gh workflow run "$PAGES_WORKFLOW" --repo "$FULL_REPO_NAME" --ref "$DEFAULT_BRANCH" > /dev/null 2>&1; do
+        if [ "$attempt" -ge 5 ]; then
+            echo "⚠️  Could not start the Pages deploy. Run it from the Actions tab: $PAGES_WORKFLOW"
+            return 0
+        fi
+        sleep 3
+        attempt=$((attempt + 1))
+    done
+
+    echo "🚀 Deploying $DEFAULT_BRANCH to $PAGES_URL (usually under a minute)..."
+    local state=""
+    attempt=1
+    while [ "$attempt" -le 60 ]; do
+        state=$(gh run list --repo "$FULL_REPO_NAME" --workflow "$PAGES_WORKFLOW" --event workflow_dispatch \
+            --limit 1 --json status,conclusion --jq '.[0] | "\(.status) \(.conclusion)"' 2>/dev/null || true)
+        case "$state" in
+            "completed success")
+                echo "✅ Game is live: $PAGES_URL"
+                return 0
+                ;;
+            completed\ *)
+                echo "⚠️  The Pages deploy finished with '${state#completed }'. Check the Actions tab of $FULL_REPO_NAME."
+                return 0
+                ;;
+        esac
+        sleep 5
+        attempt=$((attempt + 1))
+    done
+    echo "⚠️  The Pages deploy is still running; the site will appear at $PAGES_URL shortly."
+}
+
 # Validate required fields and referenced files for the selected workflow.
 # Fails before any remote side effect so a config typo cannot strand a
 # half-created repo on GitHub.
@@ -363,6 +424,14 @@ validate_selected_repo() {
     [ -z "$REPO_BASE_NAME" ] && missing+=("repo_base_name")
     [ -z "$REPO_DESCRIPTION" ] && missing+=("repo_description")
     [ -z "$WORKFLOW" ] && missing+=("workflow")
+
+    case "$VISIBILITY" in
+        public|private|internal) ;;
+        *)
+            echo "❌ Invalid visibility '$VISIBILITY' (use public, private, or internal)"
+            exit 1
+            ;;
+    esac
 
     case "$WORKFLOW" in
         repo_only)
@@ -613,6 +682,9 @@ TEMPLATE_REPO="$TEMPLATE_ORG/$TEMPLATE_NAME"
 REPO_BASE_NAME=$(repo_cfg '.repo_base_name')
 REPO_DESCRIPTION=$(repo_cfg '.repo_description')
 WORKFLOW=$(repo_cfg '.workflow')
+VISIBILITY=$(repo_cfg '.visibility')
+[ -z "$VISIBILITY" ] && VISIBILITY="private"
+PAGES=$(repo_cfg '.pages')
 
 # Owner precedence: --owner, then the entry's "owner" ("org" = top-level org),
 # then the logged-in account. App tokens have no account, so they use the org.
@@ -660,7 +732,7 @@ echo "🏗️  Using template: $TEMPLATE_REPO"
 
 gh repo create "$FULL_REPO_NAME" \
     --template="$TEMPLATE_REPO" \
-    --private \
+    "--$VISIBILITY" \
     --description="$REPO_DESCRIPTION"
 
 echo "✅ Repository created successfully: $FULL_REPO_NAME"
@@ -804,6 +876,10 @@ case $WORKFLOW in
         ;;
 esac
 
+if [ "$PAGES" = "true" ]; then
+    setup_pages
+fi
+
 # --- Summary ---
 
 echo ""
@@ -817,6 +893,9 @@ echo "   User: $CURRENT_USER"
 if [ -n "${TOP_PR_URL:-}" ]; then
     echo "   Top of stack: $TOP_PR_URL"
 fi
+if [ -n "${PAGES_URL:-}" ]; then
+    echo "   Game (GitHub Pages): $PAGES_URL"
+fi
 for line in "${SUMMARY_LINES[@]}"; do
     echo "   $line"
 done
@@ -828,6 +907,12 @@ fi
 
 echo ""
 echo "✨ All done!"
+
+# Open the PR first and the game last so the game is the tab in front.
+if [ -n "${PAGES_URL:-}" ]; then
+    [ -n "${TOP_PR_URL:-}" ] && open_url "$TOP_PR_URL"
+    open_url "$PAGES_URL"
+fi
 
 # --- Optional local preview ---
 

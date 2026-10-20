@@ -10,8 +10,9 @@ $originalLocation = Get-Location
 $testState = [pscustomobject]@{
     Answers = $null; Calls = $null; NeedsLogin = $false; Failure = $null
     NextPr = 1; StackNumbers = @(); StackMismatch = $false; GitEmail = $null
-    CleanupRepos = @(); NpmCalls = $null
+    CleanupRepos = @(); NpmCalls = $null; PagesDisabled = $false; Opened = $null
 }
+Remove-Item Env:DEMO_NO_BROWSER -ErrorAction SilentlyContinue
 
 function Assert {
     param([bool]$Condition, [string]$Message)
@@ -36,6 +37,11 @@ function Start-Sleep {
     param([int]$Seconds)
 }
 
+function Start-Process {
+    param([string]$FilePath)
+    $testState.Opened.Add($FilePath)
+}
+
 function npm {
     $testState.NpmCalls.Add([pscustomobject]@{ Arguments = @($args); Location = (Get-Location).Path })
     $global:LASTEXITCODE = 0
@@ -52,6 +58,14 @@ function gh {
     if ($testState.Failure -and ($arguments[0..1] -join ' ') -eq $testState.Failure) {
         $global:LASTEXITCODE = 42
         return
+    }
+    if ($arguments[0] -eq 'api' -and ($arguments -join ' ') -like '*/pages*') {
+        if ($testState.PagesDisabled) { $global:LASTEXITCODE = 1; return }
+        if ($arguments -contains '.html_url') { return 'https://demo-user.github.io/booth-bingo-test/' }
+        return
+    }
+    if ($arguments[0] -eq 'run' -and $arguments[1] -eq 'list') {
+        return @('completed', 'success')
     }
     if ($arguments[0] -eq 'api' -and $arguments[1] -eq 'user') {
         return 'demo-user'
@@ -154,7 +168,7 @@ try {
         'create-failure', 'push-failure', 'login-failure',
         'stacked-prs', 'stack-one-layer', 'stack-missing-field', 'stack-api-failure', 'stack-verify-mismatch',
         'non-interactive', 'unknown-template', 'non-interactive-login', 'no-clone-branch',
-        'owner-override', 'serve', 'serve-no-clone', 'dry-run-without-cleanup', 'cleanup-with-template',
+        'owner-override', 'serve', 'serve-no-clone', 'pages-failure', 'bad-visibility', 'dry-run-without-cleanup', 'cleanup-with-template',
         'cleanup', 'cleanup-dry-run', 'cleanup-cancel', 'cleanup-org'
     )) {
         $config = $originalConfig | ConvertFrom-Json
@@ -167,6 +181,8 @@ try {
         $testState.StackNumbers = @()
         $testState.StackMismatch = $false
         $testState.GitEmail = $null
+        $testState.PagesDisabled = $false
+        $testState.Opened = New-Object 'System.Collections.Generic.List[string]'
         $testState.NpmCalls = New-Object 'System.Collections.Generic.List[object]'
         $old = '2020-01-01T00:00:00Z'
         $fresh = [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ')
@@ -232,6 +248,8 @@ try {
             }
             'owner-override' { $selection = $null; $scriptArgs = @{ Template = 'booth-bingo'; NoClone = $true; Owner = 'other-org' } }
             'serve' { $selection = $null; $scriptArgs = @{ Template = 'booth-bingo'; Serve = $true } }
+            'pages-failure' { $selection = '5'; $testState.PagesDisabled = $true }
+            'bad-visibility' { $selection = '5'; $config.repos[4].visibility = 'secret'; $expectedFailure = "Invalid visibility 'secret'" }
             'serve-no-clone' {
                 $selection = $null
                 $scriptArgs = @{ Template = 'booth-bingo'; Serve = $true; NoClone = $true }
@@ -317,7 +335,25 @@ try {
                 default { 'demo-user' }
             }
             Assert ($create.Arguments[2] -match "^$expectedOwner/[a-z-]+-[a-z0-9]{4}$") "Invalid repository name '$($create.Arguments[2])'."
-            Assert ($create.Arguments -contains '--private') 'Repository is not private.'
+            $isBingo = $create.Arguments[2] -like '*/booth-bingo-*'
+            $expectedVisibility = if ($isBingo) { '--public' } else { '--private' }
+            Assert ($create.Arguments -contains $expectedVisibility) "Repository was not created with $expectedVisibility."
+            $pagesPost = @(Find-Calls 'gh' 'api --method POST repos/').Where({ $_.Arguments[3] -like '*/pages' })
+            $deploy = @(Find-Calls 'gh' 'workflow run pages.yml')
+            if ($isBingo -and $scenario -ne 'pages-failure') {
+                Assert ($pagesPost.Count -eq 1 -and ($pagesPost[0].Arguments -join ' ').Contains('-f build_type=workflow')) 'Pages was not enabled for workflow builds.'
+                Assert ($deploy.Count -eq 1 -and ($deploy[0].Arguments -join ' ').Contains('--ref trunk')) 'Pages deploy was not started on the default branch.'
+                Assert ((Find-Calls 'gh' 'run list').Count -ge 1) 'Did not wait for the Pages deploy.'
+                $expectedOpened = "https://github.com/$($create.Arguments[2])/pull/3,https://demo-user.github.io/booth-bingo-test/"
+                Assert (($testState.Opened -join ',') -eq $expectedOpened) "Opened '$($testState.Opened -join ',')' (want PR, then game)."
+            }
+            elseif ($scenario -eq 'pages-failure') {
+                Assert ($deploy.Count -eq 0) 'Started a Pages deploy without Pages.'
+                Assert ($testState.Opened.Count -eq 0) 'Opened a browser without a Pages site.'
+            }
+            else {
+                Assert ($pagesPost.Count -eq 0 -and $deploy.Count -eq 0) "$scenario touched GitHub Pages."
+            }
             $topic = @(Find-Calls 'gh' 'repo edit')[0]
             Assert ($null -ne $topic -and $topic.Arguments -contains 'demo-generated') 'demo-generated topic was not added.'
             if ($selection -eq '1') {
@@ -333,7 +369,7 @@ try {
                     Assert ($prCall.Arguments -contains 'trunk') 'PR did not use the default branch.'
                 }
             }
-            if ($scenario -in @('serve', 'stacked-prs')) {
+            if ($scenario -eq 'serve') {
                 Assert ($testState.NpmCalls.Count -eq 1) 'Serve did not start npm.'
                 Assert (($testState.NpmCalls[0].Arguments -join ' ') -eq 'start -- --open') 'Serve ran the wrong npm command.'
                 Assert ($testState.NpmCalls[0].Location.StartsWith($homeRepos)) 'Serve did not run in the local clone.'
@@ -357,7 +393,7 @@ try {
                     $checkout = @(Find-Calls 'git' "checkout --quiet -b $($expectedChain[$i][0]) $($expectedChain[$i][1])")
                     Assert ($checkout.Count -eq 1) "Layer $($i + 1) was not branched from the layer below."
                 }
-                $stackCalls = @(Find-Calls 'gh' 'api --method POST repos/')
+                $stackCalls = @(Find-Calls 'gh' 'api --method POST repos/').Where({ $_.Arguments[3] -like '*/stacks' })
                 Assert ($stackCalls.Count -eq 1) 'Expected one stack registration.'
                 Assert ($stackCalls[0].Arguments[3] -match '^repos/demo-user/booth-bingo-[a-z0-9]{4}/stacks$') 'Wrong stacks endpoint.'
                 $numbers = @($stackCalls[0].Arguments | Where-Object { $_ -like 'pull_requests`[`]=*' })

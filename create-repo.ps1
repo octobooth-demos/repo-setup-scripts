@@ -143,6 +143,9 @@ function Assert-SelectedRepo {
         'security_prs' {
             $missing += @(Assert-PullRequestEntries $Repo.prs 'prs' 1)
         }
+        'code_review_prs' {
+            $missing += @(Assert-PullRequestEntries $Repo.prs 'prs' 1)
+        }
         'stacked_prs' {
             $missing += @(Assert-PullRequestEntries $Repo.stack 'stack' 2)
         }
@@ -305,6 +308,26 @@ function New-ResourcePullRequest {
     }
     Write-Host "PR #$number created: $url"
     [pscustomobject]@{ Number = $number; Url = $url }
+}
+
+# Request a Copilot Code Review on a PR. Never fails the setup: older gh
+# versions don't know "@copilot", and some tokens (e.g. GitHub App installation
+# tokens) can't request it, so fall back to the REST API and finally just warn.
+function Request-CopilotReview {
+    param([int]$Number)
+
+    Invoke-GhQuiet pr edit $Number --repo $fullRepoName --add-reviewer '@copilot' | Out-Null
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "Copilot Code Review requested on PR #$Number"
+        return
+    }
+    Invoke-GhQuiet api --method POST "repos/$fullRepoName/pulls/$Number/requested_reviewers" `
+        -f 'reviewers[]=copilot-pull-request-reviewer[bot]' --silent | Out-Null
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "Copilot Code Review requested on PR #$Number (via REST API)"
+        return
+    }
+    Write-Warning "Could not request Copilot Code Review on PR #$Number. Open the PR and pick Copilot under Reviewers to request it manually."
 }
 
 # Wait (bounded) until a repo generated from a template has its default branch.
@@ -563,6 +586,7 @@ try {
         Invoke-Native 'gh' @('repo', 'clone', $fullRepoName, $clonePath, '--', '--quiet')
     }
     $topPullRequestUrl = $null
+    $pullsUrl = $null
 
     switch ($selectedRepo.workflow) {
         'repo_only' {
@@ -613,6 +637,32 @@ try {
                 New-ResourcePullRequest $pr | Out-Null
             }
         }
+        'code_review_prs' {
+            Write-Host 'Setting up Copilot Code Review demo with PRs...'
+            $tempDirectory = Join-Path ([IO.Path]::GetTempPath()) ([IO.Path]::GetRandomFileName())
+            New-Item -ItemType Directory -Path $tempDirectory | Out-Null
+            Set-Location -LiteralPath $tempDirectory
+            $tempClonePath = Join-Path $tempDirectory $repoName
+            Invoke-Native 'gh' @('repo', 'clone', $fullRepoName, $tempClonePath, '--', '--quiet')
+            Set-Location -LiteralPath $tempClonePath
+            Set-GitIdentity
+            foreach ($pr in $selectedRepo.prs) {
+                $created = New-ResourcePullRequest $pr
+                # "request_review": false leaves the PR for the presenter to request live.
+                if ($pr.request_review -eq $false) {
+                    Write-Host "Copilot Code Review not requested on PR #$($created.Number): request it live from the PR (Reviewers -> Copilot)."
+                } else {
+                    Request-CopilotReview $created.Number
+                }
+            }
+            # Make the PR branches visible in the local clone (Copilot app, editor).
+            if (-not $NoClone) {
+                Invoke-Native 'git' @('-C', $clonePath, 'fetch', '--quiet', 'origin') | Out-Host
+                Write-Host "PR branches fetched into $clonePath"
+            }
+            $pullsUrl = "https://github.com/$fullRepoName/pulls"
+            Set-ActionOutput 'pulls_url' $pullsUrl
+        }
         'stacked_prs' {
             Write-Host 'Setting up stacked PRs demo...'
             $tempDirectory = Join-Path ([IO.Path]::GetTempPath()) ([IO.Path]::GetRandomFileName())
@@ -650,6 +700,9 @@ try {
     if ($topPullRequestUrl) {
         Write-Host "   Top of stack: $topPullRequestUrl"
     }
+    if ($pullsUrl) {
+        Write-Host "   Pull requests: $pullsUrl"
+    }
     if ($pagesUrl) {
         Write-Host "   Game (GitHub Pages): $pagesUrl"
     }
@@ -665,6 +718,7 @@ try {
         if ($topPullRequestUrl) { Open-Url $topPullRequestUrl }
         Open-Url $pagesUrl
     }
+    if ($pullsUrl) { Open-Url $pullsUrl }
 
     if ($Serve) {
         Set-Location -LiteralPath $clonePath

@@ -44,6 +44,7 @@ Every repository the scripts create gets the `demo-generated` topic, which is wh
 
 - Lists every template in `config.json` and creates the one you pick in the background (runs `create-repo.sh --template <key>`, or `create-repo.ps1 -Template <key>` on Windows), with optional owner, `--no-clone`, and browser-tab settings.
 - Streams the script log live and, when it finishes, shows links to the repo, PRs, issues, Pages site, and local clone.
+- For Copilot Code Review demos (OctoCart), marks each PR with whether Copilot Code Review was requested (✓, ✓ via REST, ⚠️ with a reminder to pick Copilot under **Reviewers** on the PR, or 👋 for PRs deliberately left for a live review), links to the repo's pull request list, and adds a **🔑 Presenter answer key** button that opens `resources/<key>/ANSWER_KEY.md` from this repo locally (in VS Code if available). The answer key is never copied into the demo repo, so keep it off the shared screen.
 - Cleans up like `--cleanup`: pick an owner and age cutoff (default 24 hours, or **Any age**), review the matching `demo-generated` repos, untick any you want to keep, then delete the rest and optionally their local clones in `~/repos`. Deleting needs the `delete_repo` scope (`gh auth refresh -h github.com -s delete_repo`).
 - Offers one-click follow-ups: **Open session in Copilot app** (Copilot adds the repo as a project and opens a fresh session), **Open PR/issue session**, and **Open in VS Code** (`code <clone>`).
 
@@ -147,6 +148,7 @@ Each `repos[]` entry needs `key`, `display_name`, `template`, `repo_base_name`, 
 | `issue_and_codespace` | `issue` | Creates an issue and a Codespace. |
 | `security_prs` | `prs[]` | Enables security features and opens one PR per entry against the default branch. |
 | `branch_and_codespace` | `branch` | Creates a branch and a Codespace on it. |
+| `code_review_prs` | `prs[]` | Opens one PR per entry against the default branch and requests a Copilot Code Review on each, except entries with `"request_review": false`, which are left for the presenter to request live. No security features are enabled. |
 | `stacked_prs` | `stack[]` | Opens a chain of dependent PRs and registers them as a native [stacked PR](https://docs.github.com/en/pull-requests/reference/stacked-pull-requests-apis-and-webhooks). |
 
 `prs[]` and `stack[]` entries share the same shape: `branch`, `resource_dir`, `commit_message`, `title`, and `body_file` (a path inside `resource_dir`; it is used as the PR body and never committed). `stack[]` must have at least 2 entries, listed bottom to top. Each layer is branched from the one below, its `resource_dir` is copied over the tree, and the PR targets the branch below it. After all PRs are open the scripts call `POST /repos/{owner}/{repo}/stacks` and verify the order. If registration fails, the PR chain still exists and the script exits non-zero.
@@ -161,11 +163,26 @@ Each `repos[]` entry needs `key`, `display_name`, `template`, `repo_base_name`, 
 
 Each overlay holds the cumulative files for its layer. The booth talk track is in the template's README. The game is served from [GitHub Pages](#showing-the-game) and updates itself after the stack is merged. Merge stacks from the GitHub UI, not `gh pr merge`.
 
+### OctoCart (Copilot Code Review)
+
+`octocart` creates a repo from [`octobooth-demos/octocart`](https://github.com/octobooth-demos/octocart). It's a small TypeScript store (Express API + React/Vite) whose `.github/copilot-instructions.md` and `.github/instructions/*.instructions.md` define house rules. The script then opens four feature PRs from [`resources/octocart`](resources/octocart):
+
+1. `feature/stackable-promo-codes`: stackable promo codes and sale pricing, with subtle correctness bugs (a boundary error, float money math, missing `await`s)
+2. `feature/order-history-export`: order history and a CSV export, with security, performance, and robustness issues (IDOR, token in the URL, CSV injection, N+1)
+3. `feature/wishlist`: a wishlist that works, but breaks most of the repo's custom instructions, which makes it the custom-instructions showcase
+4. `feature/product-reviews`: a small product reviews feature with stored XSS, unauthenticated impersonation, and missing validation. Its config entry sets `"request_review": false`, so no review is requested. Request it live from the PR on github.com (**Reviewers → Copilot**) or from a PR session in the Copilot app.
+
+The overlays are written against the template's app (introduced in [octobooth-demos/octocart#1](https://github.com/octobooth-demos/octocart/pull/1)), so that PR must be merged before the demo is used. All four PRs pass the template's CI (lint, typecheck, tests, build), and the PR descriptions don't hint at the problems. After each of the first three PRs is opened, the script requests a review from Copilot with `gh pr edit --add-reviewer @copilot`. If that fails (for example, with an older `gh`), it falls back to `POST /pulls/{n}/requested_reviewers` with `copilot-pull-request-reviewer[bot]`. If both fail, it warns and keeps going, and you can request the review from the PR page instead.
+
+Like every other template, the repo is created under `--owner` / `-Owner` or the signed-in booth account, and cloned to `~/repos/<repo>` unless you pass `--no-clone`. The PR branches are fetched into that clone, so the PRs show up in the Copilot app as well as on github.com. The script opens the repo's pull request list in the browser at the end.
+
+The **presenter answer key**, [`resources/octocart/ANSWER_KEY.md`](resources/octocart/ANSWER_KEY.md), lists every planted issue with its file, line, and the rule it breaks. It stays in this repo and is never copied into the demo repo.
+
 ## ChatOps
 
 Two workflows in this repo let you create and clean up demos without a booth machine running the script.
 
-- **[New demo](.github/workflows/new-demo.yml)**: run it from the Actions tab and pick a template, or comment `/new-demo <key>` on any issue or PR in this repo. Repos are always created in `octobooth-demos`, because App tokens cannot create repos in personal accounts. It replies with the repo URL and, for stacks, the top PR URL and the game URL. Only `repo_only`, `security_prs`, and `stacked_prs` templates are allowed, because Codespaces need a user token.
+- **[New demo](.github/workflows/new-demo.yml)**: run it from the Actions tab and pick a template, or comment `/new-demo <key>` on any issue or PR in this repo. Repos are always created in `octobooth-demos`, because App tokens cannot create repos in personal accounts. It replies with the repo URL and, for stacks, the top PR URL and the game URL (for OctoCart, the pull request list). Only `repo_only`, `security_prs`, `stacked_prs`, and `code_review_prs` templates are allowed, because Codespaces need a user token.
 - **[Clean up demos](.github/workflows/cleanup-demos.yml)**: runs nightly, from the Actions tab (`max_age_hours`, default 24; `dry_run`, default on), or by comment: `/cleanup [hours | --all] [--dry-run | --confirm]`. Comment runs are dry runs unless they include `--confirm`; only the nightly run deletes without opting in. Manual and comment runs need a cutoff of at least 1 hour unless they use the end-of-event override (`--all` in a comment, or the `all` input on the Actions tab), which deletes every demo repo in the org regardless of age and adds a warning to the reply, and the comment must start with exactly `/cleanup`. If some deletions fail, the run continues with the rest, then fails and lists what was and was not deleted. It only deletes repos in `octobooth-demos` that have the `demo-generated` topic **and** are older than the cutoff. It cannot see repos in booth accounts; see [Which cleanup covers which repos](#which-cleanup-covers-which-repos).
 
 Comment commands only run for users with write, maintain, or admin access to this repository.

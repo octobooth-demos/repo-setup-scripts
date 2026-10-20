@@ -13,6 +13,7 @@ on:
           - securing-your-code
           - security-octo-supply
           - ctrl-slash
+          - octocart
   issue_comment:
     types: [created]
 
@@ -67,9 +68,9 @@ jobs:
           fi
           # Codespace workflows need a user token, so ChatOps only allows these.
           if ! jq -e --arg key "$key" \
-            '.repos[] | select(.key == $key and (.workflow | IN("repo_only", "security_prs", "stacked_prs")))' \
+            '.repos[] | select(.key == $key and (.workflow | IN("repo_only", "security_prs", "stacked_prs", "code_review_prs")))' \
             config.json > /dev/null; then
-            valid=$(jq -r '[.repos[] | select(.workflow | IN("repo_only", "security_prs", "stacked_prs")) | .key] | join(", ")' config.json)
+            valid=$(jq -r '[.repos[] | select(.workflow | IN("repo_only", "security_prs", "stacked_prs", "code_review_prs")) | .key] | join(", ")' config.json)
             echo "::error::Unknown or unsupported template key '$key'. Valid keys: $valid"
             exit 1
           fi
@@ -107,6 +108,7 @@ jobs:
           REPO_URL: ${{ steps.create.outputs.repo_url }}
           TOP_PR_URL: ${{ steps.create.outputs.top_pr_url }}
           PAGES_URL: ${{ steps.create.outputs.pages_url }}
+          PULLS_URL: ${{ steps.create.outputs.pulls_url }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           if [ "$OUTCOME" = "success" ]; then
@@ -116,6 +118,9 @@ jobs:
             fi
             if [ -n "$PAGES_URL" ]; then
               body="$body"$'\n\n'"Game: $PAGES_URL"
+            fi
+            if [ -n "$PULLS_URL" ]; then
+              body="$body"$'\n\n'"Pull requests for Copilot Code Review: $PULLS_URL"
             fi
           else
             body="❌ Demo creation failed. See $RUN_URL"
@@ -128,11 +133,13 @@ jobs:
           REPO_URL: ${{ steps.create.outputs.repo_url }}
           TOP_PR_URL: ${{ steps.create.outputs.top_pr_url }}
           PAGES_URL: ${{ steps.create.outputs.pages_url }}
+          PULLS_URL: ${{ steps.create.outputs.pulls_url }}
         run: |
           {
             echo "### New demo"
             echo "- Repository: ${REPO_URL:-not created}"
             [ -n "$TOP_PR_URL" ] && echo "- Top of stack: $TOP_PR_URL"
             [ -n "$PAGES_URL" ] && echo "- Game: $PAGES_URL"
+            [ -n "$PULLS_URL" ] && echo "- Pull requests: $PULLS_URL"
             true
           } >> "$GITHUB_STEP_SUMMARY"

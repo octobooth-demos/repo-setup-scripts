@@ -127,21 +127,22 @@ function fmtTime(iso) { return iso ? new Date(iso).toLocaleTimeString([], { hour
 function renderRun(r) {
   const res = r.result || {};
   const status = r.status === "running" ? `<span class="spinner"></span> creating…` : r.status;
+  const done = r.status !== "running";
   const links = [];
   if (res.repoUrl) links.push(`<div class="link-row">📦 <a href="${esc(res.repoUrl)}" target="_blank">${esc(res.repo)}</a></div>`);
   for (const pr of res.prs || []) {
     links.push(`<div class="link-row">🔀 <a href="${esc(pr.url)}" target="_blank">PR #${pr.number}${pr.title ? ` · ${esc(pr.title)}` : ""}</a>
-      ${r.status === "succeeded" ? `<button class="btn" data-act="session" data-kind="pr" data-target="${pr.number}" data-id="${r.id}">Open PR session</button>` : ""}</div>`);
+      ${done ? `<button class="btn" data-act="session" data-kind="pr" data-target="${pr.number}" data-id="${r.id}">Open PR session</button>` : ""}</div>`);
   }
   for (const is of res.issues || []) {
     links.push(`<div class="link-row">🐛 <a href="${esc(is.url)}" target="_blank">Issue #${is.number}</a>
-      ${r.status === "succeeded" ? `<button class="btn" data-act="session" data-kind="issue" data-target="${is.number}" data-id="${r.id}">Open issue session</button>` : ""}</div>`);
+      ${done ? `<button class="btn" data-act="session" data-kind="issue" data-target="${is.number}" data-id="${r.id}">Open issue session</button>` : ""}</div>`);
   }
   if (res.pagesUrl) links.push(`<div class="link-row">🎮 <a href="${esc(res.pagesUrl)}" target="_blank">${esc(res.pagesUrl)}</a></div>`);
   if (res.clonePath) links.push(`<div class="link-row">📁 <code>${esc(res.clonePath)}</code></div>`);
   if (res.codespace) links.push(`<div class="link-row">☁️ Codespace created</div>`);
 
-  const canAct = r.status === "succeeded" && res.repo;
+  const canAct = done && res.repo;
   const actions = r.status === "running"
     ? `<button class="btn" data-act="cancel" data-id="${r.id}">Cancel</button>`
     : canAct ? `
@@ -154,6 +155,7 @@ function renderRun(r) {
       <span class="badge ${r.status}">${status}</span>
       <span class="muted" style="font-size:12px">${fmtTime(r.startedAt)}${r.options?.owner ? ` · ${esc(r.options.owner)}` : ""}</span>
     </div>
+    ${r.status !== "succeeded" && done && res.repo ? `<div class="muted" style="font-size:12px;margin-top:6px">⚠️ The repo was created but a later step failed; see the log.</div>` : ""}
     ${links.length ? `<div class="links">${links.join("")}</div>` : ""}
     ${actions ? `<div class="actions">${actions}</div>` : ""}
     <details data-log="${r.id}" ${openLogs.has(r.id) || r.status === "running" || r.status === "failed" ? "open" : ""}>

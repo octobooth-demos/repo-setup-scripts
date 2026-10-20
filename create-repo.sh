@@ -1044,15 +1044,15 @@ case $WORKFLOW in
             # Private repos need Advanced Security before Code Scanning default setup.
             gh api "repos/$FULL_REPO_NAME" -X PATCH \
                 -f 'security_and_analysis[advanced_security][status]=enabled' --silent
-            # "codeql": "advanced" means the template ships its own CodeQL workflow;
-            # default setup would make GitHub reject that workflow's uploads.
-            if [ "$(repo_cfg '.codeql')" = "advanced" ]; then
-                echo "ℹ️  Using the template's CodeQL workflow (advanced setup)"
-            else
-                gh api "repos/$FULL_REPO_NAME/code-scanning/default-setup" -X PATCH \
-                    -f state=configured -f query_suite=default --silent
-            fi
+            gh api "repos/$FULL_REPO_NAME/code-scanning/default-setup" -X PATCH \
+                -f state=configured -f query_suite=default --silent
             echo "✅ Dependabot alerts, security updates, and Code Scanning enabled"
+            # Default setup rejects advanced-setup SARIF uploads, which would fail a check on every PR.
+            if gh workflow disable codeql-advanced.yml -R "$FULL_REPO_NAME" >/dev/null 2>&1; then
+                echo "✅ Disabled codeql-advanced.yml (default setup is on)"
+            else
+                echo "ℹ️  codeql-advanced.yml not found or already disabled"
+            fi
         fi
 
         clone_to_temp

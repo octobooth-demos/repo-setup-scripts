@@ -773,18 +773,19 @@ try {
                     'api', "repos/$fullRepoName", '-X', 'PATCH',
                     '-f', 'security_and_analysis[advanced_security][status]=enabled', '--silent'
                 )
-                # "codeql": "advanced" means the template ships its own CodeQL workflow;
-                # default setup would make GitHub reject that workflow's uploads.
-                if ($selectedRepo.codeql -eq 'advanced') {
-                    Write-Host "Using the template's CodeQL workflow (advanced setup)."
+                Invoke-Native 'gh' @(
+                    'api', "repos/$fullRepoName/code-scanning/default-setup", '-X', 'PATCH',
+                    '-f', 'state=configured', '-f', 'query_suite=default', '--silent'
+                )
+                Write-Host 'Dependabot alerts, security updates, and Code Scanning enabled.'
+                # Default setup rejects advanced-setup SARIF uploads, which would fail a check on every PR.
+                Invoke-GhQuiet workflow disable codeql-advanced.yml -R $fullRepoName | Out-Null
+                if ($LASTEXITCODE -eq 0) {
+                    Write-Host 'Disabled codeql-advanced.yml (default setup is on).'
                 }
                 else {
-                    Invoke-Native 'gh' @(
-                        'api', "repos/$fullRepoName/code-scanning/default-setup", '-X', 'PATCH',
-                        '-f', 'state=configured', '-f', 'query_suite=default', '--silent'
-                    )
+                    Write-Host 'codeql-advanced.yml not found or already disabled.'
                 }
-                Write-Host 'Dependabot alerts, security updates, and Code Scanning enabled.'
             }
             $tempDirectory = Join-Path ([IO.Path]::GetTempPath()) ([IO.Path]::GetRandomFileName())
             New-Item -ItemType Directory -Path $tempDirectory | Out-Null

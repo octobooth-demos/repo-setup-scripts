@@ -171,51 +171,36 @@
       ]
     },
     {
-      "key": "ai-scan",
+      "key": "ai-security",
       "owner": "org",
-      "display_name": "AI Scan for Pull Requests",
-      "description_short": "Infra PR (Dockerfile, shell, Terraform, PHP) that AI Scan reviews with AI-labeled findings",
-      "workflow_hint": "Creates repo, waits for code scanning to turn on (~2-4 min), then opens an infra PR for AI Scan",
+      "display_name": "AI Security (AI Scan + agentic autofix)",
+      "description_short": "Infra PR with AI Scan findings, plus CodeQL alerts on main with one already assigned to Copilot",
+      "workflow_hint": "Takes ~5-10 min, then ~10 more for AI findings and Copilot's fix PR. Create it before the booth opens",
       "template": "security-octo-supply",
-      "repo_base_name": "ai-scan",
-      "repo_description": "AI Scan for pull requests demo",
+      "repo_base_name": "ai-security",
+      "repo_description": "AI Scan and agentic autofix demo",
       "workflow": "ai_security",
       "ai_scan": true,
-      "prs": [
-        {
-          "branch": "feature/containerize-supplier-portal",
-          "resource_dir": "resources/ai-scan/pr-infra",
-          "commit_message": "feat: containerize the supplier portal and deploy it to staging",
-          "title": "Containerize the supplier portal and deploy it to staging",
-          "body_file": "resources/ai-scan/pr-infra/pr-body.md"
-        }
-      ],
-      "summary_lines": [
-        "AI Scan: enabled; findings appear on the PR with an \"AI\" label in a few minutes",
-        "Presenter notes: resources/ai-scan/ANSWER_KEY.md in repo-setup-scripts"
-      ]
-    },
-    {
-      "key": "agentic-autofix",
-      "owner": "org",
-      "display_name": "Agentic Autofix",
-      "description_short": "CodeQL alerts on main, one already assigned to Copilot, the rest to assign live",
-      "workflow_hint": "Creates repo, waits for CodeQL on main, and assigns one alert to Copilot (takes ~5-10 min)",
-      "template": "security-octo-supply",
-      "repo_base_name": "agentic-autofix",
-      "repo_description": "Agentic autofix for code scanning alerts demo",
-      "workflow": "ai_security",
       "seed": {
-        "resource_dir": "resources/agentic-autofix/seed",
+        "resource_dir": "resources/ai-security/seed",
         "commit_message": "feat: add supplier portal document center"
       },
       "autofix": {
         "preassign_rule": "js/sql-injection"
       },
+      "prs": [
+        {
+          "branch": "feature/containerize-supplier-portal",
+          "resource_dir": "resources/ai-security/pr-infra",
+          "commit_message": "feat: containerize the supplier portal and deploy it to staging",
+          "title": "Containerize the supplier portal and deploy it to staging",
+          "body_file": "resources/ai-security/pr-infra/pr-body.md"
+        }
+      ],
       "summary_lines": [
+        "AI Scan: findings appear on the PR with an \"AI\" label, usually within 10 minutes",
         "Agentic autofix: one alert assigned to Copilot; its draft PR appears in about 10 minutes",
-        "Next: select more alerts in Security -> Code scanning and choose Assign to Copilot",
-        "Presenter notes: resources/agentic-autofix/ANSWER_KEY.md in repo-setup-scripts"
+        "Presenter notes: resources/ai-security/ANSWER_KEY.md in repo-setup-scripts"
       ]
     }
   ]

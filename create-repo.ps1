@@ -862,7 +862,8 @@ try {
             }
 
             $aiScanPrs = @($selectedRepo.prs | Where-Object { $null -ne $_ })
-            if ($aiScanPrs.Count -gt 0 -and $selectedRepo.ai_scan -eq $true) { Wait-CodeScanningEnabled }
+            # Waiting for CodeQL above already guarantees code scanning is on.
+            if ($aiScanPrs.Count -gt 0 -and $selectedRepo.ai_scan -eq $true -and -not $alertsUrl) { Wait-CodeScanningEnabled }
             foreach ($pr in $aiScanPrs) {
                 New-ResourcePullRequest $pr | Out-Null
             }

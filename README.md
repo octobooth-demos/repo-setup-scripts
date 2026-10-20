@@ -44,8 +44,7 @@ Each entry in [`config.json`](config.json) is one demo. Pass its key to `--templ
 | `ctrl-slash` | Ctrl Slash | Repo only | |
 | `booth-bingo` | Booth Bingo (stacked PRs) | Public repo, 3 stacked PRs registered as a native stack, and GitHub Pages | [Details](#booth-bingo-stacked-prs); talk track in the template's README |
 | `octocart` | OctoCart (Copilot Code Review) | Repo with 4 feature PRs. Copilot Code Review is requested on 3 of them; the 4th is left for you to request live | [Details](#octocart-copilot-code-review); [answer key](resources/octocart/ANSWER_KEY.md) (presenters only) |
-| `ai-scan` | AI Scan for Pull Requests | Repo in the `octobooth-demos` org with an infra PR (Dockerfile, shell, Terraform, PHP) that AI Scan reviews | [Details](#ai-scan-for-pull-requests); [presenter notes](resources/ai-scan/ANSWER_KEY.md). Takes 2–4 minutes; check the AI findings before visitors arrive |
-| `agentic-autofix` | Agentic Autofix | Repo in the `octobooth-demos` org with CodeQL alerts on `main`, one already assigned to Copilot | [Details](#agentic-autofix); [presenter notes](resources/agentic-autofix/ANSWER_KEY.md). Takes 5–10 minutes |
+| `ai-security` | AI Security (AI Scan + agentic autofix) | Repo in the `octobooth-demos` org with an infra PR that AI Scan reviews, plus CodeQL alerts on `main` with one already assigned to Copilot | [Details](#ai-security-ai-scan--agentic-autofix); [presenter notes](resources/ai-security/ANSWER_KEY.md). **Pre-bake it:** it takes about 20 minutes to be fully ready |
 
 ## PowerShell
 
@@ -257,7 +256,7 @@ Each `repos[]` entry needs `key`, `display_name`, `template`, `repo_base_name`, 
 | `branch_and_codespace` | `branch` | Creates a branch and a Codespace on it. |
 | `code_review_prs` | `prs[]` | Opens one PR per entry against the default branch and requests a Copilot Code Review on each, except entries with `"request_review": false`, which are left for the presenter to request live. No security features are enabled. |
 | `stacked_prs` | `stack[]` | Opens a chain of dependent PRs and registers them as a native [stacked PR](https://docs.github.com/en/pull-requests/reference/stacked-pull-requests-apis-and-webhooks). |
-| `ai_security` | `prs[]` and/or `autofix`; optional `ai_scan`, `seed`, `codeql_workflow` | Enables Advanced Security, and AI Scan when `"ai_scan": true`. With `ai_scan` and `prs[]`, it waits for the first code scanning analysis before opening PRs. With `autofix`, it commits `seed.resource_dir` to the default branch (or dispatches `codeql_workflow`, default `codeql-advanced.yml`), waits for CodeQL alerts, and assigns the `autofix.preassign_rule` alert to Copilot. Then it opens one PR per `prs[]` entry. It doesn't enable CodeQL default setup. |
+| `ai_security` | `prs[]` and/or `autofix`; optional `ai_scan`, `seed`, `codeql_workflow` | Enables Advanced Security, and AI Scan when `"ai_scan": true`. With `autofix`, it commits `seed.resource_dir` to the default branch (or dispatches `codeql_workflow`, default `codeql-advanced.yml`), waits for CodeQL alerts, and assigns the `autofix.preassign_rule` alert to Copilot. Then it opens one PR per `prs[]` entry; when `ai_scan` is on, it first makes sure code scanning has an analysis. It doesn't enable CodeQL default setup. |
 
 `prs[]` and `stack[]` entries share the same shape: `branch`, `resource_dir`, `commit_message`, `title`, and `body_file` (a path inside `resource_dir`; it is used as the PR body and never committed). `stack[]` must have at least 2 entries, listed bottom to top. Each layer is branched from the one below, its `resource_dir` is copied over the tree, and the PR targets the branch below it. After all PRs are open the scripts call `POST /repos/{owner}/{repo}/stacks` and verify the order. If registration fails, the PR chain still exists and the script exits non-zero.
 
@@ -286,29 +285,24 @@ Like every other template, the repo is created under `--owner` / `-Owner` or the
 
 The **presenter answer key**, [`resources/octocart/ANSWER_KEY.md`](resources/octocart/ANSWER_KEY.md), lists every planted issue with its file, line, and the rule it breaks. It stays in this repo and is never copied into the demo repo.
 
-### AI Scan for pull requests
+### AI Security (AI Scan + agentic autofix)
 
-`ai-scan` creates a repo in `octobooth-demos` from [`octobooth-demos/security-octo-supply`](https://github.com/octobooth-demos/security-octo-supply) to show [AI Scan for pull requests](https://docs.github.com/en/enterprise-cloud@latest/code-security/concepts/code-scanning/ai-powered-security-detections), which became generally available on 2026-10-15. The script turns on Advanced Security and sets AI Scan to enabled with `PATCH /repos/{owner}/{repo}/code-scanning/ai-scan`. The repo normally inherits that setting from the org already, so the script only warns if the call fails. It then opens "Containerize the supplier portal and deploy it to staging" from [`resources/ai-scan/pr-infra`](resources/ai-scan/pr-infra): a Dockerfile, a deploy shell script, Terraform, and a PHP health check, none of which CodeQL analyzes. AI Scan doesn't use CodeQL results, but it only reviews PRs opened after code scanning is on for the repo. So the script first waits for the template's CodeQL workflow to upload its first analysis (from the template's initial commit, usually 2–4 minutes). In testing, a PR opened before that got no AI findings until a new commit was pushed.
+`ai-security` creates a repo in `octobooth-demos` from [`octobooth-demos/security-octo-supply`](https://github.com/octobooth-demos/security-octo-supply). It shows two features that became generally available on 2026-10-15: [AI Scan for pull requests](https://docs.github.com/en/enterprise-cloud@latest/code-security/concepts/code-scanning/ai-powered-security-detections) and [agentic autofix for code scanning alerts](https://docs.github.com/en/enterprise-cloud@latest/code-security/concepts/code-scanning/autofix-for-code-scanning). The script:
 
-**Presenter script** (full version in [`resources/ai-scan/ANSWER_KEY.md`](resources/ai-scan/ANSWER_KEY.md)):
+1. Turns on Advanced Security for the repo and sets AI Scan to enabled with `PATCH /repos/{owner}/{repo}/code-scanning/ai-scan`. The repo normally inherits that setting from the org already, so this is a safety net that warns rather than fails.
+2. Commits [`resources/ai-security/seed`](resources/ai-security/seed) to `main`: a TypeScript route file that gives CodeQL four more alerts on the default branch (about six in total).
+3. Waits (up to 15 minutes; override with `CODEQL_WAIT_SECONDS`) for the template's `codeql-advanced.yml` run on that commit. Then it waits up to 5 more minutes for the alerts to be processed, which can lag the run. If CodeQL fails or times out, it stops with a link to the run.
+4. Assigns the `js/sql-injection` alert to Copilot with `PATCH /repos/{owner}/{repo}/code-scanning/alerts/{n}`, so a draft fix PR is ready by demo time. It assigns `github-agentic-autofix[bot]`, the account the UI's **Assign to Copilot** uses, and falls back to `copilot-swe-agent[bot]`. If both fail, it warns, and you can assign the alert yourself.
+5. Opens "Containerize the supplier portal and deploy it to staging" from [`resources/ai-security/pr-infra`](resources/ai-security/pr-infra): a Dockerfile, a deploy shell script, Terraform, and a PHP health check, none of which CodeQL analyzes. AI Scan doesn't use CodeQL results, but it only reviews PRs opened after code scanning is on. Opening the PR after step 3 guarantees that.
 
-1. **Before visitors arrive**, open the PR. AI Scan findings are nondeterministic, so check which ones actually appeared and read them first.
-2. On the PR, show the findings labeled **AI** on **Conversation** and **Files changed**. They cover Dockerfile, shell, Terraform, and PHP code, which CodeQL doesn't analyze. They're advisory, need no workflow, and may include Copilot Autofix suggestions.
+**Pre-bake this demo.** The script takes about 5–10 minutes. AI Scan findings and Copilot's draft PR each take about 10 more minutes, and longer when GitHub is busy. Create it from the launcher before the booth opens, then work through the checklist in the [presenter notes](resources/ai-security/ANSWER_KEY.md). One repo can serve the whole day; the nightly cleanup deletes it after 24 hours.
 
-### Agentic autofix
+The script doesn't turn on CodeQL default setup, because default setup can't run alongside the template's advanced workflow. Everything it does needs only admin on the repo it creates, so booth accounts that are org members (not owners) can run it. The org must already allow and enable AI Scan and agentic autofix; `octobooth-demos` does both. Each run uses Code Security AI credits and Actions minutes.
 
-`agentic-autofix` creates a separate repo from the same template to show [agentic autofix for code scanning alerts](https://docs.github.com/en/enterprise-cloud@latest/code-security/concepts/code-scanning/autofix-for-code-scanning), which also became generally available on 2026-10-15. The script:
+**Presenter script** (full version and pre-bake checklist in [`resources/ai-security/ANSWER_KEY.md`](resources/ai-security/ANSWER_KEY.md)):
 
-1. Turns on Advanced Security and commits [`resources/agentic-autofix/seed`](resources/agentic-autofix/seed) to `main`: a TypeScript route file that gives CodeQL four more alerts on the default branch (about six in total).
-2. Waits (up to 15 minutes; override with `CODEQL_WAIT_SECONDS`) for the template's `codeql-advanced.yml` run on that commit and for open alerts. If CodeQL fails or times out, it stops with a link to the run.
-3. Assigns the `js/sql-injection` alert to Copilot with `PATCH /repos/{owner}/{repo}/code-scanning/alerts/{n}`, so a draft fix PR is ready by demo time. It assigns `github-agentic-autofix[bot]`, the account the UI's **Assign to Copilot** uses, and falls back to `copilot-swe-agent[bot]`. If both fail, it warns, and you can assign the alert yourself.
-
-**Presenter script** (full version in [`resources/agentic-autofix/ANSWER_KEY.md`](resources/agentic-autofix/ANSWER_KEY.md)):
-
-1. **Before visitors arrive**, confirm Copilot has opened (or is working on) the draft PR for the pre-assigned alert.
-2. In **Security → Code scanning**, open the pre-assigned alert and Copilot's draft PR: the fix summary, plus the CodeQL rerun that validates it. Then select several of the remaining alerts and choose **Assign to Copilot** to fix them together in one PR. Show the session in the **Agents** tab.
-
-Neither demo turns on CodeQL default setup, because default setup can't run alongside the template's advanced workflow. Both need only admin on the repo the script creates, so booth accounts that are org members (not owners) can run them. The org must already allow and enable AI Scan and agentic autofix; `octobooth-demos` does both. Both demos use Code Security AI credits, and agentic autofix also uses Actions minutes.
+1. **AI Scan:** on the PR, show the findings labeled **AI** on **Conversation** and **Files changed**. They cover Dockerfile, shell, Terraform, and PHP code, which CodeQL doesn't analyze. They're advisory, need no workflow, and may include Copilot Autofix suggestions. AI findings vary from run to run, so read them before visitors arrive.
+2. **Agentic autofix:** in **Security → Code scanning**, open the pre-assigned alert and Copilot's draft PR: the fix summary, plus the CodeQL rerun that validates it. Optionally, select a few more alerts and choose **Assign to Copilot** to show a session starting in the **Agents** tab.
 
 ## ChatOps
 
@@ -331,12 +325,12 @@ The workflows authenticate as a GitHub App so they can create and delete org rep
    - Workflows: Read and write (templates contain `.github/workflows`)
    - Pages: Read and write (turn on GitHub Pages for Booth Bingo)
    - Actions: Read and write (start the first Pages deploy, wait for CodeQL)
-   - Code scanning alerts: Read and write (read the agentic autofix demo's alerts and assign one to Copilot)
+   - Code scanning alerts: Read and write (read the AI Security demo's alerts and assign one to Copilot)
    - Metadata: Read-only (required)
 2. Install it on the `octobooth-demos` org with access to **All repositories** (new demo repos must be covered automatically).
 3. In this repo's **Settings → Secrets and variables → Actions**, add `APP_ID` (the App ID) and `APP_PRIVATE_KEY` (the full contents of a generated `.pem` private key).
 
-The security features enabled by `security_prs` (Dependabot alerts, automated security fixes, CodeQL default setup unless `"codeql": "advanced"`) and `ai_security` (Advanced Security, AI Scan) are covered by Administration write. If the App token can't assign the alert to Copilot, ChatOps `agentic-autofix` demos skip that step with a warning, and you can assign the alert yourself from the alert page.
+The security features enabled by `security_prs` (Dependabot alerts, automated security fixes, CodeQL default setup unless `"codeql": "advanced"`) and `ai_security` (Advanced Security, AI Scan) are covered by Administration write. If the App token can't assign the alert to Copilot, ChatOps `ai-security` demos skip that step with a warning, and you can assign the alert yourself from the alert page.
 
 ## Local checks
 

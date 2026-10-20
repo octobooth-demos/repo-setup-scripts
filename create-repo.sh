@@ -1108,7 +1108,8 @@ case $WORKFLOW in
         fi
 
         PR_COUNT=$(jq ".repos[$SELECTED_INDEX].prs // [] | length" "$CONFIG_FILE")
-        if [ "$PR_COUNT" -gt 0 ] && [ "$(repo_cfg '.ai_scan')" = "true" ]; then
+        # Waiting for CodeQL above already guarantees code scanning is on.
+        if [ "$PR_COUNT" -gt 0 ] && [ "$(repo_cfg '.ai_scan')" = "true" ] && [ -z "${ALERTS_URL:-}" ]; then
             wait_for_code_scanning
         fi
         i=0

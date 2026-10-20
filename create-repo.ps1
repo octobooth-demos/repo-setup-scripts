@@ -591,6 +591,11 @@ try {
                 Write-Host 'Enabling security features...'
                 Invoke-Native 'gh' @('api', "repos/$fullRepoName/vulnerability-alerts", '-X', 'PUT', '--silent')
                 Invoke-Native 'gh' @('api', "repos/$fullRepoName/automated-security-fixes", '-X', 'PUT', '--silent')
+                # Private repos need Advanced Security before Code Scanning default setup.
+                Invoke-Native 'gh' @(
+                    'api', "repos/$fullRepoName", '-X', 'PATCH',
+                    '-f', 'security_and_analysis[advanced_security][status]=enabled', '--silent'
+                )
                 Invoke-Native 'gh' @(
                     'api', "repos/$fullRepoName/code-scanning/default-setup", '-X', 'PATCH',
                     '-f', 'state=configured', '-f', 'query_suite=default', '--silent'

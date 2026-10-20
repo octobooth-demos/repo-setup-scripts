@@ -855,8 +855,11 @@ case $WORKFLOW in
             echo "🛡️  Enabling security features..."
             gh api "repos/$FULL_REPO_NAME/vulnerability-alerts" -X PUT --silent 2>/dev/null
             gh api "repos/$FULL_REPO_NAME/automated-security-fixes" -X PUT --silent 2>/dev/null
+            # Private repos need Advanced Security before Code Scanning default setup.
+            gh api "repos/$FULL_REPO_NAME" -X PATCH \
+                -f 'security_and_analysis[advanced_security][status]=enabled' --silent
             gh api "repos/$FULL_REPO_NAME/code-scanning/default-setup" -X PATCH \
-                -f state=configured -f query_suite=default --silent 2>/dev/null
+                -f state=configured -f query_suite=default --silent
             echo "✅ Dependabot alerts, security updates, and Code Scanning enabled"
         fi
 

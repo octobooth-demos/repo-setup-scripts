@@ -175,7 +175,7 @@ ensure_git_identity() {
         return
     fi
     local user_id
-    user_id=$(gh api user --jq '.id' 2>/dev/null || true)
+    user_id=$(gh api user --jq '.id' 2>/dev/null) || user_id=""
     local email="${CURRENT_USER}@users.noreply.github.com"
     [ -n "$user_id" ] && email="${user_id}+${CURRENT_USER}@users.noreply.github.com"
     echo "ℹ️  No git identity configured; committing as $CURRENT_USER <$email> in this clone only"
@@ -598,7 +598,8 @@ else
 fi
 
 echo "👤 Getting current GitHub username..."
-CURRENT_USER=$(gh api user --jq '.login' 2>/dev/null || true)
+# On failure gh prints the error JSON to stdout, so discard output unless the call succeeds.
+CURRENT_USER=$(gh api user --jq '.login' 2>/dev/null) || CURRENT_USER=""
 USER_TOKEN=true
 if [ -z "$CURRENT_USER" ] && [ "$NON_INTERACTIVE" = true ]; then
     # GitHub App installation tokens cannot read /user.

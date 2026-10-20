@@ -626,7 +626,7 @@ try {
                 )
                 Write-Host 'Dependabot alerts, security updates, and Code Scanning enabled.'
                 # Default setup rejects advanced-setup SARIF uploads, which would fail a check on every PR.
-                & gh workflow disable codeql-advanced.yml -R $fullRepoName 2>$null | Out-Null
+                Invoke-GhQuiet workflow disable codeql-advanced.yml -R $fullRepoName | Out-Null
                 if ($LASTEXITCODE -eq 0) {
                     Write-Host 'Disabled codeql-advanced.yml (default setup is on).'
                 }

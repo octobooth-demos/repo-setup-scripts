@@ -1,0 +1,148 @@
+name: Clean up demos
+
+on:
+  schedule:
+    - cron: "0 8 * * *"
+  workflow_dispatch:
+    inputs:
+      max_age_hours:
+        description: Delete demo-generated repos older than this many hours
+        type: number
+        default: 24
+      dry_run:
+        description: List repos that would be deleted without deleting them
+        type: boolean
+        default: true
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: cleanup-demos
+  cancel-in-progress: false
+
+env:
+  ORG: octobooth-demos
+  TOPIC: demo-generated
+
+jobs:
+  cleanup:
+    if: >-
+      github.event_name != 'issue_comment' ||
+      startsWith(github.event.comment.body, '/cleanup')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check commenter permission
+        if: github.event_name == 'issue_comment'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ACTOR: ${{ github.event.comment.user.login }}
+          REPO: ${{ github.repository }}
+        run: |
+          permission=$(gh api "repos/$REPO/collaborators/$ACTOR/permission" --jq '.permission')
+          case "$permission" in
+            admin|maintain|write) echo "$ACTOR has $permission permission." ;;
+            *) echo "::error::$ACTOR does not have write access ($permission)."; exit 1 ;;
+          esac
+
+      - name: Resolve options
+        id: opts
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_HOURS: ${{ inputs.max_age_hours }}
+          INPUT_DRY_RUN: ${{ inputs.dry_run }}
+          COMMENT_BODY: ${{ github.event.comment.body }}
+        run: |
+          hours=24
+          dry_run=false
+          case "$EVENT_NAME" in
+            workflow_dispatch)
+              hours="${INPUT_HOURS:-24}"
+              dry_run="${INPUT_DRY_RUN:-true}"
+              ;;
+            issue_comment)
+              # Accepts: /cleanup [hours] [--dry-run]
+              first_line=$(printf '%s\n' "$COMMENT_BODY" | head -n 1 | tr -d '\r')
+              for word in $(printf '%s' "$first_line" | awk '$1 == "/cleanup" { $1 = ""; print }'); do
+                case "$word" in
+                  --dry-run) dry_run=true ;;
+                  *) hours="$word" ;;
+                esac
+              done
+              ;;
+          esac
+          if ! [[ "$hours" =~ ^[0-9]+$ ]]; then
+            echo "::error::max age must be a whole number of hours, got '$hours'."
+            exit 1
+          fi
+          echo "hours=$hours" >> "$GITHUB_OUTPUT"
+          echo "dry_run=$dry_run" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: octobooth-demos
+
+      - name: Delete old demo repositories
+        id: cleanup
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          HOURS: ${{ steps.opts.outputs.hours }}
+          DRY_RUN: ${{ steps.opts.outputs.dry_run }}
+        run: |
+          cutoff=$(date -u -d "-$HOURS hours" +%Y-%m-%dT%H:%M:%SZ)
+          echo "Deleting $ORG repos with topic '$TOPIC' created before $cutoff (dry run: $DRY_RUN)"
+          # Re-check topics per repo so a search index lag can never widen the match.
+          mapfile -t repos < <(gh api --paginate "orgs/$ORG/repos?per_page=100" \
+            --jq ".[] | select((.topics // []) | index(\"$TOPIC\")) | select(.created_at < \"$cutoff\") | .full_name")
+          deleted=()
+          for repo in "${repos[@]}"; do
+            [ -z "$repo" ] && continue
+            if [ "$DRY_RUN" = "true" ]; then
+              echo "Would delete $repo"
+            else
+              echo "Deleting $repo"
+              gh repo delete "$repo" --yes
+            fi
+            deleted+=("$repo")
+          done
+          {
+            echo "count=${#deleted[@]}"
+            echo "list<<EOF"
+            printf -- '- %s\n' "${deleted[@]}"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+          {
+            echo "### Demo cleanup (dry run: $DRY_RUN, older than ${HOURS}h)"
+            if [ "${#deleted[@]}" -eq 0 ]; then echo "Nothing to delete."; else printf -- '- %s\n' "${deleted[@]}"; fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Comment result
+        if: always() && github.event_name == 'issue_comment'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          ISSUE: ${{ github.event.issue.number }}
+          OUTCOME: ${{ steps.cleanup.outcome }}
+          COUNT: ${{ steps.cleanup.outputs.count }}
+          LIST: ${{ steps.cleanup.outputs.list }}
+          DRY_RUN: ${{ steps.opts.outputs.dry_run }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          if [ "$OUTCOME" = "success" ]; then
+            verb="Deleted"
+            [ "$DRY_RUN" = "true" ] && verb="Would delete"
+            body="🧹 $verb ${COUNT:-0} demo repo(s)."
+            [ "${COUNT:-0}" != "0" ] && body="$body"$'\n\n'"$LIST"
+          else
+            body="❌ Cleanup failed. See $RUN_URL"
+          fi
+          gh issue comment "$ISSUE" --repo "$REPO" --body "$body"

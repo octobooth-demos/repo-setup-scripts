@@ -18,6 +18,7 @@
     },
     {
       "key": "security-octo-supply",
+      "owner": "org",
       "display_name": "Security Supply Chain",
       "description_short": "Security demo with TypeScript and PHP vulnerabilities",
       "workflow_hint": "Creates repo + two demo PRs",
@@ -77,6 +78,46 @@
       "workflow": "repo_only",
       "summary_lines": [
         "Status: Repository ready for use"
+      ]
+    },
+    {
+      "key": "booth-bingo",
+      "display_name": "Booth Bingo (Stacked PRs)",
+      "description_short": "Tiny bingo web game with one feature shipped as a stack of 3 PRs",
+      "workflow_hint": "Creates a public repo + 3 stacked PRs registered as a native stack, then publishes the game to GitHub Pages and opens it",
+      "template": "booth-bingo",
+      "repo_base_name": "booth-bingo",
+      "repo_description": "Booth Bingo stacked pull requests demo",
+      "workflow": "stacked_prs",
+      "visibility": "public",
+      "pages": true,
+      "stack": [
+        {
+          "branch": "bingo/1-game-logic",
+          "resource_dir": "resources/booth-bingo/layer-1",
+          "commit_message": "feat: add checkWin game logic with tests",
+          "title": "Bingo 1/3: Game logic",
+          "body_file": "resources/booth-bingo/layer-1/pr-body.md"
+        },
+        {
+          "branch": "bingo/2-wire-ui",
+          "resource_dir": "resources/booth-bingo/layer-2",
+          "commit_message": "feat: highlight the winning line on the card",
+          "title": "Bingo 2/3: Wire up the UI",
+          "body_file": "resources/booth-bingo/layer-2/pr-body.md"
+        },
+        {
+          "branch": "bingo/3-celebration",
+          "resource_dir": "resources/booth-bingo/layer-3",
+          "commit_message": "feat: add BINGO banner, confetti, and reset",
+          "title": "Bingo 3/3: Celebration",
+          "body_file": "resources/booth-bingo/layer-3/pr-body.md"
+        }
+      ],
+      "summary_lines": [
+        "Stack: 3 PRs registered as a native stack",
+        "Next: open the top PR and use the stack navigator",
+        "After you merge the stack, the game tab updates by itself in about a minute"
       ]
     }
   ]

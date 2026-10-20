@@ -1,6 +1,6 @@
 # Demo repository setup
 
-Create private demo repositories from the templates in [`config.json`](config.json), with optional branches, issues, demo pull requests, security features, and Codespaces.
+Create demo repositories (private unless a template says otherwise) from the templates in [`config.json`](config.json), with optional branches, issues, demo pull requests, security features, and Codespaces.
 
 ## PowerShell
 
@@ -10,7 +10,7 @@ Run [`create-repo.ps1`](create-repo.ps1) with Windows PowerShell 5.1 or [PowerSh
 .\create-repo.ps1
 ```
 
-Select a template when prompted. The script offers GitHub login if needed, creates a private repository in the configured organization, clones it into `$HOME/repos`, and runs the selected workflow. You need permission to create repositories in that organization and any permissions required for the selected security or Codespaces features.
+Select a template when prompted. The script offers GitHub login if needed, creates a repository in the [target owner](#where-repos-are-created), clones it into `$HOME/repos`, and runs the selected workflow. You need permission to create repositories in that organization and any permissions required for the selected security or Codespaces features.
 
 Configuration and resource paths are resolved relative to the script, so it can be invoked from another directory. The script restores your working directory and removes its temporary security-demo clone even if a command fails. The permanent clone and any already-created GitHub resources are retained on failure; errors stop the script rather than continuing with incomplete setup.
 
@@ -21,6 +21,121 @@ Configuration and resource paths are resolved relative to the script, so it can 
 ```bash
 bash ./create-repo.sh
 ```
+
+## Non-interactive mode
+
+Both scripts accept a template key (the `key` field in `config.json`) to skip the menu:
+
+```bash
+bash ./create-repo.sh --template booth-bingo [--no-clone]
+```
+
+```powershell
+.\create-repo.ps1 -Template booth-bingo [-NoClone]
+```
+
+With no arguments the scripts behave exactly as before. In non-interactive mode they never start `gh auth login`; authenticate first (or set `GH_TOKEN`), otherwise the script fails. `--no-clone` / `-NoClone` skips the permanent clone into `~/repos` and is rejected for `branch_and_codespace`. Unknown keys fail before anything is created and list the valid keys.
+
+Every repository the scripts create gets the `demo-generated` topic, which is what [cleanup](#cleaning-up) uses to find demo repos.
+
+## Where repos are created
+
+By default, repos are created in **the account that is logged in** (`gh api user`), so each booth machine (`octobooth-1`, `octobooth-2`, …) gets its own copies. The owner is resolved in this order:
+
+1. `--owner <name>` / `-Owner <name>`
+2. The config entry's `owner` field. `"owner": "org"` means the top-level `org`; any other value is used as-is. `security-octo-supply` is pinned to the org because it needs code scanning.
+3. The logged-in account.
+4. The top-level `org` (only when there is no user account, such as a GitHub App token in Actions).
+
+The script prints `Target owner:` before creating anything. Templates in `octobooth-demos` are internal, so the booth account must be an org member to use them.
+
+> [!NOTE]
+> `tailspin-toys` assigns an issue to `@copilot` and starts a Codespace. In a personal account those need Copilot coding agent and Codespaces access on that account. If they are not available, run it with `--owner octobooth-demos`.
+
+## Showing the game
+
+Booth Bingo is published to **GitHub Pages**. After creating the stack, the script turns Pages on, deploys `main`, waits for the deploy (usually under a minute), and opens two browser tabs: the top PR and the game (in front). Nothing runs locally.
+
+```bash
+bash ./create-repo.sh --template booth-bingo
+```
+
+```powershell
+.\create-repo.ps1 -Template booth-bingo
+```
+
+The game page checks for a new deploy every few seconds and swaps it in by itself, so after you merge the stack, just switch back to the game tab: about a minute later the corner badge says **Updated from main** and the finished game is there. No terminal and no refresh. The deploy comes from the template's `.github/workflows/pages.yml`, which runs on every push to `main`.
+
+Pages on free personal accounts only works for public repos, so Booth Bingo repos are created **public** (`"visibility": "public"` in `config.json`). If Pages can't be turned on, the script warns and still finishes; the repo and stack are usable without it.
+
+### Running it locally instead (optional)
+
+`--serve` / `-Serve` checks out `main` in `~/repos/<repo>` and runs `npm start -- --open` (http://localhost:8080, Node.js 18+, not combinable with `--no-clone`). Only one Booth Bingo server runs at a time, and `npm run stop` stops it. Locally, you switch code yourself: `npm run layer -- 1`..`3` previews a layer and `npm run layer -- 0` pulls the merged `main`.
+
+## Cleaning up
+
+Delete old demo repos from the logged-in account (or `--owner` / `-Owner`). Only repos with the `demo-generated` topic that are older than the cutoff (default 24 hours) are considered; everything else is left alone. The script lists matches and asks before deleting.
+
+```bash
+bash ./create-repo.sh --cleanup [--older-than 24] [--dry-run] [--yes] [--owner <name>]
+```
+
+```powershell
+.\create-repo.ps1 -Cleanup [-OlderThanHours 24] [-DryRun] [-Yes] [-Owner <name>]
+```
+
+Deleting repos needs the `delete_repo` scope. The scripts request it when they log in; for an existing login run `gh auth refresh -h github.com -s delete_repo`.
+
+## Workflows and config fields
+
+Each `repos[]` entry needs `key`, `display_name`, `template`, `repo_base_name`, and `workflow`. Optional `template_org` overrides the top-level `org` for the template source, optional `owner` pins where the repo is created (see [above](#where-repos-are-created)), optional `visibility` (`private` by default, or `public` / `internal`) sets the new repo's visibility, optional `"pages": true` turns on GitHub Pages and deploys it with the template's `pages.yml` workflow (see [Showing the game](#showing-the-game); Booth Bingo sets both), optional `"serve": true` starts the [local preview](#running-it-locally-instead-optional) whenever the repo is cloned, and `summary_lines` are printed at the end.
+
+| `workflow` | Extra fields | What it does |
+| --- | --- | --- |
+| `repo_only` | — | Creates the repo. |
+| `issue_and_codespace` | `issue` | Creates an issue and a Codespace. |
+| `security_prs` | `prs[]` | Enables security features and opens one PR per entry against the default branch. |
+| `branch_and_codespace` | `branch` | Creates a branch and a Codespace on it. |
+| `stacked_prs` | `stack[]` | Opens a chain of dependent PRs and registers them as a native [stacked PR](https://docs.github.com/en/pull-requests/reference/stacked-pull-requests-apis-and-webhooks). |
+
+`prs[]` and `stack[]` entries share the same shape: `branch`, `resource_dir`, `commit_message`, `title`, and `body_file` (a path inside `resource_dir`; it is used as the PR body and never committed). `stack[]` must have at least 2 entries, listed bottom to top. Each layer is branched from the one below, its `resource_dir` is copied over the tree, and the PR targets the branch below it. After all PRs are open the scripts call `POST /repos/{owner}/{repo}/stacks` and verify the order. If registration fails, the PR chain still exists and the script exits non-zero.
+
+### Booth Bingo (stacked PRs)
+
+`booth-bingo` creates a repo from [`octobooth-demos/booth-bingo`](https://github.com/octobooth-demos/booth-bingo) (a template repo whose source lives in [`templates/booth-bingo`](templates/booth-bingo)) and opens three small stacked PRs from [`resources/booth-bingo`](resources/booth-bingo):
+
+1. `bingo/1-game-logic` → `main`: `checkWin()` plus `node --test` tests
+2. `bingo/2-wire-ui` → layer 1: highlight the winning line
+3. `bingo/3-celebration` → layer 2: banner, confetti, reset
+
+Each overlay holds the cumulative files for its layer. The booth talk track is in the template's README. The game is served from [GitHub Pages](#showing-the-game) and updates itself after the stack is merged. Merge stacks from the GitHub UI, not `gh pr merge`.
+
+## ChatOps
+
+Two workflows in this repo let you create and clean up demos without a booth machine running the script.
+
+- **[New demo](.github/workflows/new-demo.yml)**: run it from the Actions tab and pick a template, or comment `/new-demo <key>` on any issue or PR in this repo. Repos are always created in `octobooth-demos`, because App tokens cannot create repos in personal accounts. It replies with the repo URL and, for stacks, the top PR URL and the game URL. Only `repo_only`, `security_prs`, and `stacked_prs` templates are allowed, because Codespaces need a user token.
+- **[Clean up demos](.github/workflows/cleanup-demos.yml)**: runs nightly, from the Actions tab (`max_age_hours`, default 24; `dry_run`, default on), or by comment: `/cleanup [hours] [--dry-run]`. It only deletes repos in `octobooth-demos` that have the `demo-generated` topic **and** are older than the cutoff.
+
+Comment commands only run for users with write, maintain, or admin access to this repository.
+
+### GitHub App setup (one-time, org owner)
+
+The workflows authenticate as a GitHub App so they can create and delete org repos.
+
+1. Create a GitHub App owned by `octobooth-demos` (no webhook needed) with these **repository** permissions:
+   - Administration: Read and write (create from template, add topics, delete repos)
+   - Contents: Read and write (push branches)
+   - Pull requests: Read and write (open PRs, register stacks)
+   - Issues: Read and write (issue-based templates)
+   - Workflows: Read and write (templates contain `.github/workflows`)
+   - Pages: Read and write (turn on GitHub Pages for Booth Bingo)
+   - Actions: Read and write (start the first Pages deploy)
+   - Metadata: Read-only (required)
+2. Install it on the `octobooth-demos` org with access to **All repositories** (new demo repos must be covered automatically).
+3. In this repo's **Settings → Secrets and variables → Actions**, add `APP_ID` (the App ID) and `APP_PRIVATE_KEY` (the full contents of a generated `.pem` private key).
+
+The security features enabled by `security_prs` (Dependabot alerts, automated security fixes, CodeQL default setup) are covered by Administration write.
 
 ## Local checks
 

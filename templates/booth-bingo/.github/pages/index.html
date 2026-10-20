@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Booth Bingo</title>
+  <style>
+    html, body { margin: 0; height: 100%; }
+    iframe { display: block; width: 100%; height: 100%; border: 0; }
+    #status {
+      position: fixed; right: 12px; bottom: 12px;
+      padding: 6px 10px; border-radius: 999px;
+      font: 13px/1.2 system-ui, sans-serif; color: #fff; background: rgb(13 17 23 / 0.75);
+      transition: background 0.3s;
+    }
+    #status.updated { background: #1f883d; }
+  </style>
+</head>
+<body>
+  <iframe id="app" title="Booth Bingo"></iframe>
+  <div id="status" role="status">Loading…</div>
+  <script>
+    // Deployed by .github/workflows/pages.yml. Polls for a new deploy of main and swaps it in,
+    // so the booth screen updates by itself after the stack is merged.
+    const app = document.getElementById('app');
+    const status = document.getElementById('status');
+    let current;
+
+    async function check() {
+      try {
+        const res = await fetch(`version.json?t=${Date.now()}`, { cache: 'no-store' });
+        if (!res.ok) return;
+        const { sha } = await res.json();
+        if (!sha || sha === current) return;
+        const firstLoad = current === undefined;
+        current = sha;
+        app.src = `${sha}/`;
+        status.textContent = `${firstLoad ? 'Live from' : '✨ Updated from'} main · ${sha.slice(0, 7)}`;
+        if (!firstLoad) {
+          status.classList.add('updated');
+          setTimeout(() => status.classList.remove('updated'), 5000);
+        }
+      } catch {
+        // Offline or mid-deploy; try again on the next tick.
+      }
+    }
+
+    check();
+    setInterval(check, 5000);
+  </script>
+</body>
+</html>

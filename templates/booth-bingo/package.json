@@ -1,0 +1,13 @@
+{
+  "name": "booth-bingo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A tiny booth bingo card used to demo stacked pull requests.",
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "start": "node scripts/serve.js",
+    "stop": "node scripts/serve.js --stop",
+    "layer": "node scripts/layer.js"
+  }
+}

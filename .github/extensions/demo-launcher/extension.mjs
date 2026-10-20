@@ -349,7 +349,8 @@ function copyToClipboard(text) {
         : process.platform === "win32" ? [["clip", []]]
         : [["wl-copy", []], ["xclip", ["-selection", "clipboard"]], ["xsel", ["--clipboard", "--input"]]];
     for (const [cmd, args] of candidates) {
-        const res = spawnSync(cmd, args, { input: text, timeout: 5000, shell: process.platform === "win32" });
+        // Ignore stdout/stderr: xclip forks a clipboard owner that keeps them open, which would block until the timeout.
+        const res = spawnSync(cmd, args, { input: text, stdio: ["pipe", "ignore", "ignore"], timeout: 5000, shell: process.platform === "win32" });
         if (res.status === 0) return { copied: true };
     }
     throw new CanvasError("no_clipboard", "Could not copy to the clipboard; select the prompt text and copy it by hand.");

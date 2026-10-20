@@ -71,13 +71,16 @@
       "key": "ctrl-slash",
       "display_name": "Ctrl Slash",
       "description_short": "Fruit Ninja-style slicer game starring VS Code's Buddy pet",
-      "workflow_hint": "Creates repo only",
+      "workflow_hint": "Creates a public repo, then publishes the game to GitHub Pages and opens it",
       "template": "ctrl-slash",
       "repo_base_name": "ctrl-slash",
       "repo_description": "Fruit Ninja-style slicer starring VS Code's Buddy pet",
       "workflow": "repo_only",
+      "visibility": "public",
+      "pages": true,
       "summary_lines": [
-        "Status: Repository ready for use"
+        "Status: Repository ready for use",
+        "Game: published to GitHub Pages"
       ]
     },
     {

@@ -11,6 +11,8 @@ $testState = [pscustomobject]@{
     Answers = $null; Calls = $null; NeedsLogin = $false; Failure = $null
     NextPr = 1; StackNumbers = @(); StackMismatch = $false; GitEmail = $null; ReviewApiFailure = $false
     CleanupRepos = @(); NpmCalls = $null; PagesDisabled = $false; Opened = $null
+    CodeqlConclusion = 'success'; AssignFailure = $false; AutofixBotMissing = $false; AnalysesCount = '2'; LateRulePolls = 0
+    StalePushRun = $false
 }
 Remove-Item Env:DEMO_NO_BROWSER -ErrorAction SilentlyContinue
 
@@ -51,6 +53,12 @@ function gh {
     $arguments = @($args)
     $testState.Calls.Add([pscustomobject]@{ Command = 'gh'; Arguments = $arguments; Location = (Get-Location).Path })
     $global:LASTEXITCODE = 0
+    $jsonIndex = [array]::IndexOf($arguments, '--json')
+    if ($jsonIndex -ge 0 -and $arguments[$jsonIndex + 1] -isnot [string]) {
+        # PowerShell splits an unquoted comma list into separate native args, which gh rejects.
+        $global:LASTEXITCODE = 1
+        return
+    }
     if ($arguments[0] -eq 'auth' -and $arguments[1] -eq 'status' -and $testState.NeedsLogin) {
         $global:LASTEXITCODE = 1
         return
@@ -65,7 +73,32 @@ function gh {
         return
     }
     if ($arguments[0] -eq 'run' -and $arguments[1] -eq 'list') {
+        if ($arguments -contains 'databaseId') {
+            # An older failed push run on the same commit, visible before the dispatched run.
+            if ($testState.StalePushRun -and ($arguments -join ' ') -notlike '*--event workflow_dispatch*') { return '999' }
+            return '123'
+        }
         return @('completed', 'success')
+    }
+    if ($arguments[0] -eq 'run' -and $arguments[1] -eq 'view') {
+        if ($arguments[2] -eq '999') { return @('completed', 'failure') }
+        return @('completed', $testState.CodeqlConclusion)
+    }
+    if ($arguments[0] -eq 'api' -and $arguments[1] -like '*/code-scanning/analyses?*') {
+        return $testState.AnalysesCount
+    }
+    if ($arguments[0] -eq 'api' -and $arguments[1] -like '*/code-scanning/alerts?*') {
+        if ($testState.LateRulePolls -gt 0) {
+            $testState.LateRulePolls--
+            return '[{"number":1,"rule":{"id":"actions/missing-workflow-permissions"}}]'
+        }
+        return '[{"number":3,"rule":{"id":"js/path-injection"}},{"number":4,"rule":{"id":"js/sql-injection"}}]'
+    }
+    if ($arguments[0] -eq 'api' -and $arguments[1] -eq '--method' -and $arguments[3] -like '*/code-scanning/alerts/*') {
+        $assignee = (@($arguments | Where-Object { $_ -like 'assignees`[`]=*' })[0] -split '=', 2)[1]
+        if ($testState.AssignFailure) { $global:LASTEXITCODE = 1; return }
+        if ($testState.AutofixBotMissing -and $assignee -eq 'github-agentic-autofix[bot]') { $global:LASTEXITCODE = 1; return }
+        return $assignee
     }
     if ($arguments[0] -eq 'api' -and $arguments[1] -eq 'user') {
         return 'demo-user'
@@ -113,6 +146,9 @@ function git {
         $global:LASTEXITCODE = 42
         return
     }
+    if ($arguments[0] -eq 'rev-parse') {
+        return 'abc1234'
+    }
     if ($arguments[0] -eq 'config' -and $arguments.Count -eq 2) {
         if ($testState.GitEmail) { return $testState.GitEmail }
         $global:LASTEXITCODE = 1
@@ -153,6 +189,14 @@ function git {
             'feat: add product reviews' {
                 Assert (Test-Path -LiteralPath './api/src/routes/reviews.ts') 'Product reviews overlay was not copied.'
                 Assert (Test-Path -LiteralPath './web/src/components/ProductReviews.tsx') 'Product reviews component was not copied.'
+            }
+            'feat: add supplier portal document center' {
+                Assert (Test-Path -LiteralPath './api/src/routes/supplierPortal.ts') 'AI Security seed was not copied.'
+            }
+            'feat: containerize the supplier portal and deploy it to staging' {
+                Assert (Test-Path -LiteralPath './php/Dockerfile') 'AI Scan PR Dockerfile was not copied.'
+                Assert (Test-Path -LiteralPath './scripts/deploy-staging.sh') 'AI Scan PR shell script was not copied.'
+                Assert (Test-Path -LiteralPath './infra/terraform/main.tf') 'AI Scan PR Terraform was not copied.'
             }
             default {
                 Assert (Test-Path -LiteralPath './php/src/Controllers/NoteController.php') 'PHP resources were not copied.'
@@ -202,11 +246,17 @@ try {
         'owner-override', 'serve', 'serve-no-clone', 'pages-failure', 'bad-visibility', 'dry-run-without-cleanup', 'cleanup-with-template',
         'cleanup', 'cleanup-dry-run', 'cleanup-cancel', 'cleanup-org',
         'cleanup-all', 'cleanup-all-with-age',
-        'code-review-prs', 'code-review-fallback', 'code-review-unsupported', 'code-review-no-clone'
+        'code-review-prs', 'code-review-fallback', 'code-review-unsupported', 'code-review-no-clone',
+        'ai-security', 'ai-security-no-clone', 'ai-security-not-enabled', 'ai-security-late-rule',
+        'ai-security-assign-failure', 'ai-security-assign-fallback', 'ai-security-codeql-failure',
+        'ai-security-missing-seed', 'ai-security-no-seed', 'ai-security-scan-only', 'ai-security-autofix-only',
+        'ai-security-missing-prs'
     )) {
         $config = $originalConfig | ConvertFrom-Json
         $config.repos += $branchRepo
         $branchSelection = [string]@($config.repos).Count
+        $aiIndex = [array]::IndexOf(@($config.repos | ForEach-Object { $_.key }), 'ai-security')
+        $aiSelection = [string]($aiIndex + 1)
         $selection = '1'
         $scriptArgs = @{}
         $testState.NeedsLogin = $false
@@ -217,6 +267,12 @@ try {
         $testState.GitEmail = $null
         $testState.ReviewApiFailure = $false
         $testState.PagesDisabled = $false
+        $testState.CodeqlConclusion = 'success'
+        $testState.AssignFailure = $false
+        $testState.AutofixBotMissing = $false
+        $testState.AnalysesCount = '2'
+        $testState.LateRulePolls = 0
+        $testState.StalePushRun = $false
         $testState.Opened = New-Object 'System.Collections.Generic.List[string]'
         $testState.NpmCalls = New-Object 'System.Collections.Generic.List[object]'
         $old = '2020-01-01T00:00:00Z'
@@ -237,6 +293,36 @@ try {
             'code-review-fallback' { $selection = '6'; $testState.Failure = 'pr edit' }
             'code-review-unsupported' { $selection = '6'; $testState.Failure = 'pr edit'; $testState.ReviewApiFailure = $true }
             'code-review-no-clone' { $selection = $null; $scriptArgs = @{ Template = 'octocart'; NoClone = $true } }
+            'ai-security' { $selection = $aiSelection }
+            'ai-security-no-clone' { $selection = $null; $scriptArgs = @{ Template = 'ai-security'; NoClone = $true } }
+            'ai-security-not-enabled' {
+                $selection = $aiSelection
+                $testState.AnalysesCount = '0'
+                $config.repos[$aiIndex].PSObject.Properties.Remove('autofix')
+                $config.repos[$aiIndex].PSObject.Properties.Remove('seed')
+            }
+            'ai-security-late-rule' { $selection = $aiSelection; $testState.LateRulePolls = 3 }
+            'ai-security-assign-failure' { $selection = $aiSelection; $testState.AssignFailure = $true }
+            'ai-security-assign-fallback' { $selection = $aiSelection; $testState.AutofixBotMissing = $true }
+            'ai-security-codeql-failure' { $selection = $aiSelection; $testState.CodeqlConclusion = 'failure'; $expectedFailure = "CodeQL finished with 'failure'" }
+            'ai-security-missing-seed' { $selection = $aiSelection; $config.repos[$aiIndex].seed.commit_message = ''; $expectedFailure = 'seed.commit_message' }
+            'ai-security-no-seed' { $selection = $aiSelection; $config.repos[$aiIndex].PSObject.Properties.Remove('seed'); $testState.StalePushRun = $true }
+            'ai-security-scan-only' {
+                $selection = $aiSelection
+                $config.repos[$aiIndex].PSObject.Properties.Remove('autofix')
+                $config.repos[$aiIndex].PSObject.Properties.Remove('seed')
+            }
+            'ai-security-autofix-only' {
+                $selection = $aiSelection
+                $config.repos[$aiIndex].PSObject.Properties.Remove('prs')
+                $config.repos[$aiIndex].PSObject.Properties.Remove('ai_scan')
+            }
+            'ai-security-missing-prs' {
+                $selection = $aiSelection
+                $config.repos[$aiIndex].PSObject.Properties.Remove('prs')
+                $config.repos[$aiIndex].PSObject.Properties.Remove('autofix')
+                $expectedFailure = 'prs[]'
+            }
             'login' { $testState.NeedsLogin = $true }
             'no-machine' { $selection = '3'; $config.codespace_machine = $null }
             'nested-body' {
@@ -336,7 +422,7 @@ try {
         Assert ((Get-Location).Path -eq $originalLocation.Path) "$scenario did not restore location."
         if ($expectedFailure) {
             Assert ($null -ne $caught -and $caught.Contains($expectedFailure)) "$scenario expected '$expectedFailure', got '$caught'."
-            if ($scenario -notin @('create-failure', 'topic-failure', 'push-failure', 'login-failure', 'stack-api-failure', 'stack-verify-mismatch', 'non-interactive-login')) {
+            if ($scenario -notin @('create-failure', 'topic-failure', 'push-failure', 'login-failure', 'stack-api-failure', 'stack-verify-mismatch', 'non-interactive-login', 'ai-security-codeql-failure')) {
                 Assert ($testState.Calls.Count -eq 0) "$scenario invoked a remote command before validation."
             }
             if ($scenario -eq 'non-interactive-login') {
@@ -355,6 +441,10 @@ try {
                 $created = @(Find-Calls 'gh' 'repo create')[0].Arguments[2]
                 Assert (($deleted -join ',') -eq $created) "Untagged repo was not deleted (deleted '$($deleted -join ',')')."
                 Assert ((Find-Calls 'gh' 'repo clone').Count -eq 0) 'Cloned an untagged repository.'
+            }
+            if ($scenario -eq 'ai-security-codeql-failure') {
+                Assert ((Find-Calls 'gh' 'pr create').Count -eq 0) 'Opened the AI Scan PR although CodeQL failed.'
+                Assert ((Find-Calls 'gh' 'api --method PATCH').Where({ $_.Arguments[3] -like '*/code-scanning/alerts/*' }).Count -eq 0) 'Assigned an alert although CodeQL failed.'
             }
             if ($scenario -eq 'create-failure') {
                 Assert ((Find-Calls 'gh' 'repo clone').Count -eq 0) 'Cloned after repository creation failed.'
@@ -389,6 +479,7 @@ try {
                 'security-prs' { 'octobooth-demos' }
                 'security-prs-v4' { 'octobooth-demos' }
                 'nested-body' { 'octobooth-demos' }
+                { $_ -like 'ai-security*' } { 'octobooth-demos' }
                 'owner-override' { 'other-org' }
                 default { 'demo-user' }
             }
@@ -521,6 +612,70 @@ try {
                     Assert ($fetch.Count -eq 1 -and $fetch[0].Arguments[1].StartsWith($homeRepos)) 'PR branches were not fetched into the local clone.'
                 }
                 Assert ($testState.Opened -contains "https://github.com/$fullName/pulls") 'Pull request list was not opened.'
+            }
+            if ($scenario -like 'ai-security*') {
+                $fullName = $create.Arguments[2]
+                $hasScan = $scenario -ne 'ai-security-autofix-only'
+                $hasAutofix = $scenario -notin @('ai-security-scan-only', 'ai-security-not-enabled')
+                Assert ($fullName -like 'octobooth-demos/ai-security-*') "$scenario created '$fullName'."
+                Assert ((Find-Calls 'gh' 'api').Where({ ($_.Arguments -join ' ').Contains('default-setup') }).Count -eq 0) 'Enabled CodeQL default setup alongside the advanced workflow.'
+                Assert ((Find-Calls 'gh' 'api').Where({ $_.Arguments -contains 'PUT' }).Count -eq 0) "$scenario enabled unrelated security features."
+                $ghas = @(Find-Calls 'gh' "api repos/$fullName -X PATCH")
+                Assert ($ghas.Count -eq 1 -and ($ghas[0].Arguments -join ' ').Contains('advanced_security][status]=enabled')) 'Advanced Security was not enabled.'
+                $aiScan = @(Find-Calls 'gh' "api --method PATCH repos/$fullName/code-scanning/ai-scan")
+                $analyses = @((Find-Calls 'gh' 'api').Where({ $_.Arguments[1] -like '*/code-scanning/analyses?*' }))
+                $seedPush = @(Find-Calls 'git' 'push origin trunk')
+                $dispatch = @(Find-Calls 'gh' 'workflow run codeql-advanced.yml')
+                $runList = @((Find-Calls 'gh' 'run list').Where({ $_.Arguments -contains 'codeql-advanced.yml' }))
+                $assign = @((Find-Calls 'gh' 'api --method PATCH').Where({ $_.Arguments[3] -like '*/code-scanning/alerts/*' }))
+                $prCalls = @(Find-Calls 'gh' 'pr create')
+                $pull = @((Find-Calls 'git' '-C').Where({ ($_.Arguments -join ' ').Contains('pull --quiet origin trunk') }))
+                Assert ($pull.Count -eq ([int]($scenario -ne 'ai-security-no-clone'))) 'Local clone was not updated (or was touched with -NoClone).'
+                Assert ($testState.Opened -contains "https://github.com/$fullName/pulls") 'Pull request list was not opened.'
+                if ($hasScan) {
+                    Assert ($aiScan.Count -eq 1) 'AI Scan was not enabled.'
+                    Assert ($aiScan[0].Arguments -contains 'X-GitHub-Api-Version: 2026-03-10' -and $aiScan[0].Arguments -contains 'pr_scan=enabled') "Wrong AI Scan call '$($aiScan[0].Arguments -join ' ')'."
+                    Assert ($prCalls.Count -eq 1) 'Expected one AI Scan PR.'
+                    $expectedPolls = if ($scenario -eq 'ai-security-not-enabled') { 90 } elseif ($hasAutofix) { 0 } else { 1 }
+                    Assert ($analyses.Count -eq $expectedPolls) "Polled code scanning $($analyses.Count) times (want $expectedPolls)."
+                    if ($analyses.Count -gt 0) {
+                        Assert ($testState.Calls.IndexOf($analyses[-1]) -lt $testState.Calls.IndexOf($prCalls[0])) 'Opened the AI Scan PR before code scanning was on.'
+                    }
+                    $a = $prCalls[0].Arguments
+                    Assert ($a[[array]::IndexOf($a, '--head') + 1] -eq 'feature/containerize-supplier-portal' -and $a[[array]::IndexOf($a, '--base') + 1] -eq 'trunk') 'AI Scan PR has the wrong head or base.'
+                }
+                else {
+                    Assert ($aiScan.Count -eq 0) 'Changed the AI Scan setting without "ai_scan": true.'
+                    Assert ($prCalls.Count -eq 0 -and $analyses.Count -eq 0) 'Opened a PR without prs[].'
+                }
+                if ($hasAutofix) {
+                    if ($scenario -eq 'ai-security-no-seed') {
+                        Assert ($seedPush.Count -eq 0) 'Pushed to the default branch without a seed.'
+                        Assert ($dispatch.Count -eq 1 -and $dispatch[0].Arguments -contains 'trunk') 'CodeQL was not started on the default branch.'
+                        Assert (($runList[0].Arguments -join ' ') -like '*--event workflow_dispatch*') 'CodeQL wait could pick up the earlier push run instead of the dispatched one.'
+                    }
+                    else {
+                        Assert ($seedPush.Count -eq 1) 'Seed commit was not pushed to the default branch.'
+                        Assert ($dispatch.Count -eq 0) 'Dispatched CodeQL although the seed push starts it.'
+                        Assert ($runList[0].Arguments -notcontains '--event') 'Filtered the seed push run by event.'
+                    }
+                    Assert ($runList.Count -ge 1 -and $runList[0].Arguments -contains 'abc1234') 'Did not wait for CodeQL on the pushed commit.'
+                    $expectedAssignees = if ($scenario -in @('ai-security-assign-fallback', 'ai-security-assign-failure')) {
+                        'assignees[]=github-agentic-autofix[bot],assignees[]=copilot-swe-agent[bot]'
+                    } else { 'assignees[]=github-agentic-autofix[bot]' }
+                    $actualAssignees = @($assign | ForEach-Object { @($_.Arguments | Where-Object { $_ -like 'assignees`[`]=*' })[0] }) -join ','
+                    Assert ($actualAssignees -eq $expectedAssignees) "Assignment attempts were '$actualAssignees'."
+                    Assert (@($assign | Where-Object { $_.Arguments[3] -ne "repos/$fullName/code-scanning/alerts/4" }).Count -eq 0) 'The preassign_rule alert was not the one assigned.'
+                    Assert ($testState.Calls.IndexOf($runList[0]) -lt $testState.Calls.IndexOf($assign[0])) 'Assigned an alert before CodeQL finished.'
+                    if ($hasScan) {
+                        Assert ($testState.Calls.IndexOf($assign[-1]) -lt $testState.Calls.IndexOf($prCalls[0])) 'Opened the AI Scan PR before the CodeQL wait and assignment.'
+                    }
+                    Assert ($testState.Opened -contains "https://github.com/$fullName/security/code-scanning") 'Code scanning alerts were not opened.'
+                }
+                else {
+                    Assert ($seedPush.Count -eq 0 -and $dispatch.Count -eq 0 -and $runList.Count -eq 0 -and $assign.Count -eq 0) 'Waited for CodeQL or assigned Copilot without "autofix".'
+                    Assert ($testState.Opened -notcontains "https://github.com/$fullName/security/code-scanning") 'Opened the alert list without "autofix".'
+                }
             }
             if ($scenario -eq 'login') {
                 Assert ((Find-Calls 'gh' 'auth login').Count -eq 1) 'Authentication failure did not trigger login.'

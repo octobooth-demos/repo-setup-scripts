@@ -141,6 +141,8 @@ function parseLine(run, line) {
         if (pr) pr.copilotReview = "failed";
     }
     if ((m = line.match(/Pull requests: (https:\/\/\S+)/))) r.pullsUrl = m[1];
+    if ((m = line.match(/Code scanning alerts: (https:\/\/\S+)/))) r.alertsUrl = m[1];
+    if ((m = line.match(/Alert #(\d+) assigned to Copilot/))) r.copilotAlert = Number(m[1]);
 }
 
 function readOutputs(file) {
@@ -178,7 +180,7 @@ function startRun({ template, owner, noClone = false, openBrowser = false }) {
         exitCode: null,
         startedAt: new Date().toISOString(),
         finishedAt: null,
-        result: { repo: null, repoUrl: null, owner: null, clonePath: null, pagesUrl: null, topPrUrl: null, pullsUrl: null, prs: [], issues: [], codespace: false, answerKey: tpl.answerKey },
+        result: { repo: null, repoUrl: null, owner: null, clonePath: null, pagesUrl: null, topPrUrl: null, pullsUrl: null, alertsUrl: null, copilotAlert: null, prs: [], issues: [], codespace: false, answerKey: tpl.answerKey },
         log: "",
     };
     runs.unshift(run);
@@ -218,6 +220,7 @@ function startRun({ template, owner, noClone = false, openBrowser = false }) {
         if (outputs.top_pr_url) run.result.topPrUrl = outputs.top_pr_url;
         if (outputs.pages_url) run.result.pagesUrl = run.result.pagesUrl || outputs.pages_url;
         if (outputs.pulls_url) run.result.pullsUrl = outputs.pulls_url;
+        if (outputs.alerts_url) run.result.alertsUrl = outputs.alerts_url;
         rmSync(outDir, { recursive: true, force: true });
         run.exitCode = code;
         run.status = run.cancelled ? "cancelled" : code === 0 ? "succeeded" : "failed";

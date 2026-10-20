@@ -15,6 +15,7 @@ on:
           - security-octo-supply-v4
           - ctrl-slash
           - octocart
+          - ai-security
   issue_comment:
     types: [created]
 
@@ -33,7 +34,8 @@ jobs:
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'issue_comment' && startsWith(github.event.comment.body, '/new-demo'))
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # ai-security waits for CodeQL on the default branch, which can take ~10 minutes.
+    timeout-minutes: 30
     steps:
       - name: Check commenter permission
         if: github.event_name == 'issue_comment'
@@ -69,9 +71,9 @@ jobs:
           fi
           # Codespace workflows need a user token, so ChatOps only allows these.
           if ! jq -e --arg key "$key" \
-            '.repos[] | select(.key == $key and (.workflow | IN("repo_only", "security_prs", "stacked_prs", "code_review_prs")))' \
+            '.repos[] | select(.key == $key and (.workflow | IN("repo_only", "security_prs", "stacked_prs", "code_review_prs", "ai_security")))' \
             config.json > /dev/null; then
-            valid=$(jq -r '[.repos[] | select(.workflow | IN("repo_only", "security_prs", "stacked_prs", "code_review_prs")) | .key] | join(", ")' config.json)
+            valid=$(jq -r '[.repos[] | select(.workflow | IN("repo_only", "security_prs", "stacked_prs", "code_review_prs", "ai_security")) | .key] | join(", ")' config.json)
             echo "::error::Unknown or unsupported template key '$key'. Valid keys: $valid"
             exit 1
           fi
@@ -110,6 +112,7 @@ jobs:
           TOP_PR_URL: ${{ steps.create.outputs.top_pr_url }}
           PAGES_URL: ${{ steps.create.outputs.pages_url }}
           PULLS_URL: ${{ steps.create.outputs.pulls_url }}
+          ALERTS_URL: ${{ steps.create.outputs.alerts_url }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           if [ "$OUTCOME" = "success" ]; then
@@ -121,7 +124,14 @@ jobs:
               body="$body"$'\n\n'"Game: $PAGES_URL"
             fi
             if [ -n "$PULLS_URL" ]; then
-              body="$body"$'\n\n'"Pull requests for Copilot Code Review: $PULLS_URL"
+              if [ "$TEMPLATE_KEY" = "octocart" ]; then
+                body="$body"$'\n\n'"Pull requests for Copilot Code Review: $PULLS_URL"
+              else
+                body="$body"$'\n\n'"Pull requests: $PULLS_URL"
+              fi
+            fi
+            if [ -n "$ALERTS_URL" ]; then
+              body="$body"$'\n\n'"Code scanning alerts (assign to Copilot): $ALERTS_URL"
             fi
           else
             body="❌ Demo creation failed. See $RUN_URL"
@@ -135,6 +145,7 @@ jobs:
           TOP_PR_URL: ${{ steps.create.outputs.top_pr_url }}
           PAGES_URL: ${{ steps.create.outputs.pages_url }}
           PULLS_URL: ${{ steps.create.outputs.pulls_url }}
+          ALERTS_URL: ${{ steps.create.outputs.alerts_url }}
         run: |
           {
             echo "### New demo"
@@ -142,5 +153,6 @@ jobs:
             [ -n "$TOP_PR_URL" ] && echo "- Top of stack: $TOP_PR_URL"
             [ -n "$PAGES_URL" ] && echo "- Game: $PAGES_URL"
             [ -n "$PULLS_URL" ] && echo "- Pull requests: $PULLS_URL"
+            [ -n "$ALERTS_URL" ] && echo "- Code scanning alerts: $ALERTS_URL"
             true
           } >> "$GITHUB_STEP_SUMMARY"

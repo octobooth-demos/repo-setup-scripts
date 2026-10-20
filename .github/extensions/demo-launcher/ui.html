@@ -167,6 +167,7 @@ function renderRun(r) {
       ${done && !res.deleted ? `<button class="btn" data-act="session" data-kind="issue" data-target="${is.number}" data-id="${r.id}">Open issue session</button>` : ""}</div>`);
   }
   if (res.pullsUrl) links.push(`<div class="link-row">📋 <a href="${esc(res.pullsUrl)}" target="_blank">All pull requests</a></div>`);
+  if (res.alertsUrl) links.push(`<div class="link-row">🚨 <a href="${esc(res.alertsUrl)}" target="_blank">Code scanning alerts</a>${res.copilotAlert ? ` <span class="succeeded" style="font-size:12px">🤖 ✓ alert #${res.copilotAlert} assigned to Copilot</span>` : ""}</div>`);
   if (res.pagesUrl) links.push(`<div class="link-row">🎮 <a href="${esc(res.pagesUrl)}" target="_blank">${esc(res.pagesUrl)}</a></div>`);
   if (res.clonePath) links.push(`<div class="link-row">📁 <code>${esc(res.clonePath)}</code></div>`);
   if (res.codespace) links.push(`<div class="link-row">☁️ Codespace created</div>`);

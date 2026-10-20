@@ -201,6 +201,39 @@
         "PRs: TypeScript + PHP demo PRs created",
         "PHP findings need AI Code Scanning enabled for the org; push an edit to the PHP PR to trigger it"
       ]
+    },
+    {
+      "key": "ai-security",
+      "owner": "org",
+      "display_name": "AI Security (AI Scan + agentic autofix)",
+      "description_short": "Infra PR with AI Scan findings, plus CodeQL alerts on main with one already assigned to Copilot",
+      "workflow_hint": "Takes ~5-10 min, then ~10 more for AI findings and Copilot's fix PR. Create it before the booth opens",
+      "template": "security-octo-supply",
+      "repo_base_name": "ai-security",
+      "repo_description": "AI Scan and agentic autofix demo",
+      "workflow": "ai_security",
+      "ai_scan": true,
+      "seed": {
+        "resource_dir": "resources/ai-security/seed",
+        "commit_message": "feat: add supplier portal document center"
+      },
+      "autofix": {
+        "preassign_rule": "js/sql-injection"
+      },
+      "prs": [
+        {
+          "branch": "feature/containerize-supplier-portal",
+          "resource_dir": "resources/ai-security/pr-infra",
+          "commit_message": "feat: containerize the supplier portal and deploy it to staging",
+          "title": "Containerize the supplier portal and deploy it to staging",
+          "body_file": "resources/ai-security/pr-infra/pr-body.md"
+        }
+      ],
+      "summary_lines": [
+        "AI Scan: check the PR for findings labeled \"AI\" (usually within 10 minutes)",
+        "Agentic autofix: check Security -> Code scanning for the alert assigned to Copilot; its draft PR usually appears within 10 minutes",
+        "Presenter notes: resources/ai-security/ANSWER_KEY.md in repo-setup-scripts"
+      ]
     }
   ]
 }

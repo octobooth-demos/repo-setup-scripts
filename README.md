@@ -46,7 +46,7 @@ Every repository the scripts create gets the `demo-generated` topic, which is wh
 - Streams the script log live and, when it finishes, shows links to the repo, PRs, issues, Pages site, and local clone.
 - Offers one-click follow-ups: **Open session in Copilot app** (Copilot adds the repo as a project and opens a fresh session), **Open PR/issue session**, and **Open in VS Code** (`code <clone>`).
 
-Only one demo runs at a time. Run history is kept in `~/.copilot/extensions/demo-launcher/artifacts/runs.json`. The agent can also drive it with canvas actions (`list_templates`, `launch`, `get_run`, `list_runs`, `cancel`). The panel is a plain loopback web page, so its URL also works in any browser, including VS Code's Simple Browser.
+You can create several demos at once (each run gets its own repo, clone, and log card), so visitors can each get their own copy. Run history is kept in `~/.copilot/extensions/demo-launcher/artifacts/runs.json`. The agent can also drive it with canvas actions (`list_templates`, `launch`, `get_run`, `list_runs`, `cancel`). The panel is a plain loopback web page, so its URL also works in any browser, including VS Code's Simple Browser.
 
 ## Where repos are created
 

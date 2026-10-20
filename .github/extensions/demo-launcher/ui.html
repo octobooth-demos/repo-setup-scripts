@@ -77,6 +77,7 @@
     <label><input type="checkbox" id="noClone" /> Skip local clone</label>
     <label><input type="checkbox" id="openBrowser" /> Let script open browser tabs</label>
     <button class="btn primary" id="launch" disabled>Create demo</button>
+    <span class="muted" id="active"></span>
   </div>
 
   <h2 style="display:flex;justify-content:space-between;align-items:center">
@@ -107,7 +108,7 @@ async function post(path, body) {
 }
 
 function renderTemplates() {
-  const busy = runs.some((r) => r.status === "running");
+  const active = runs.filter((r) => r.status === "running").length;
   $("templates").innerHTML = templates.map((t) => `
     <button class="card ${t.key === selected ? "selected" : ""}" data-key="${esc(t.key)}">
       <span class="name">${esc(t.displayName)}</span>
@@ -118,8 +119,9 @@ function renderTemplates() {
   const tpl = templates.find((t) => t.key === selected);
   $("noClone").disabled = !!tpl?.requiresClone;
   if (tpl?.requiresClone) $("noClone").checked = false;
-  $("launch").disabled = !tpl || busy;
-  $("launch").textContent = busy ? "A demo is being created…" : tpl ? `Create ${tpl.displayName}` : "Select a demo";
+  $("launch").disabled = !tpl;
+  $("launch").textContent = tpl ? `Create ${tpl.displayName}` : "Select a demo";
+  $("active").textContent = active ? `${active} demo${active > 1 ? "s" : ""} being created…` : "";
 }
 
 function fmtTime(iso) { return iso ? new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : ""; }

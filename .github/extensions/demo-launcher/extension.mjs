@@ -114,8 +114,6 @@ function startRun({ template, owner, noClone = false, openBrowser = false }) {
     const tpl = loadTemplates().find((t) => t.key === template);
     if (!tpl) throw new CanvasError("unknown_template", `Unknown template '${template}'.`);
     if (noClone && tpl.requiresClone) throw new CanvasError("invalid_options", `${tpl.displayName} needs a local clone.`);
-    const active = runs.find((r) => r.status === "running");
-    if (active) throw new CanvasError("busy", `A demo is already being created (${active.templateName}). Wait for it to finish.`);
 
     const isWin = process.platform === "win32";
     const outDir = mkdtempSync(join(tmpdir(), "demo-launcher-"));
@@ -413,7 +411,7 @@ const session = await joinSession({
                 },
                 {
                     name: "cancel",
-                    description: "Stop the in-progress demo run.",
+                    description: "Stop an in-progress demo run (latest by default).",
                     inputSchema: runIdInput,
                     handler: async (ctx) => cancelRun(findRun(ctx.input?.runId).id),
                 },

@@ -165,11 +165,11 @@ try {
         'login', 'invalid-selection', 'no-machine', 'nested-body',
         'missing-template', 'missing-body', 'empty-prs', 'unknown-workflow',
         'outside-body', 'invalid-json', 'missing-org', 'empty-repos',
-        'create-failure', 'push-failure', 'login-failure',
+        'create-failure', 'topic-failure', 'push-failure', 'login-failure',
         'stacked-prs', 'stack-one-layer', 'stack-missing-field', 'stack-api-failure', 'stack-verify-mismatch',
         'non-interactive', 'unknown-template', 'non-interactive-login', 'no-clone-branch',
         'owner-override', 'serve', 'serve-no-clone', 'pages-failure', 'bad-visibility', 'dry-run-without-cleanup', 'cleanup-with-template',
-        'cleanup', 'cleanup-dry-run', 'cleanup-cancel', 'cleanup-org'
+        'cleanup', 'cleanup-dry-run', 'cleanup-cancel', 'cleanup-org', 'cleanup-all', 'cleanup-all-with-age'
     )) {
         $config = $originalConfig | ConvertFrom-Json
         $config.repos += $branchRepo
@@ -219,6 +219,7 @@ try {
             'missing-org' { $config.org = ''; $expectedFailure = "top-level 'org'" }
             'empty-repos' { $config.repos = @(); $expectedFailure = 'no repos' }
             'create-failure' { $testState.Failure = 'repo create'; $expectedFailure = 'exit code 42' }
+            'topic-failure' { $selection = '5'; $testState.Failure = 'repo edit'; $expectedFailure = 'cleanup would never find it' }
             'push-failure' { $selection = '2'; $testState.Failure = 'git push'; $expectedFailure = 'exit code 42' }
             'login-failure' { $testState.NeedsLogin = $true; $testState.Failure = 'auth login'; $expectedFailure = 'exit code 42' }
             'stacked-prs' { $selection = '5' }
@@ -256,6 +257,12 @@ try {
                 $expectedFailure = 'cannot be combined with -NoClone'
             }
             'dry-run-without-cleanup' { $selection = $null; $scriptArgs = @{ DryRun = $true }; $expectedFailure = 'only apply to -Cleanup' }
+            'cleanup-all' { $selection = $null; $scriptArgs = @{ Cleanup = $true; Yes = $true; All = $true } }
+            'cleanup-all-with-age' {
+                $selection = $null
+                $scriptArgs = @{ Cleanup = $true; All = $true; OlderThanHours = 5 }
+                $expectedFailure = '-All cannot be combined'
+            }
             'cleanup-with-template' {
                 $selection = $null
                 $scriptArgs = @{ Cleanup = $true; Template = 'booth-bingo' }
@@ -289,7 +296,7 @@ try {
         Assert ((Get-Location).Path -eq $originalLocation.Path) "$scenario did not restore location."
         if ($expectedFailure) {
             Assert ($null -ne $caught -and $caught.Contains($expectedFailure)) "$scenario expected '$expectedFailure', got '$caught'."
-            if ($scenario -notin @('create-failure', 'push-failure', 'login-failure', 'stack-api-failure', 'stack-verify-mismatch', 'non-interactive-login')) {
+            if ($scenario -notin @('create-failure', 'topic-failure', 'push-failure', 'login-failure', 'stack-api-failure', 'stack-verify-mismatch', 'non-interactive-login')) {
                 Assert ($testState.Calls.Count -eq 0) "$scenario invoked a remote command before validation."
             }
             if ($scenario -eq 'non-interactive-login') {
@@ -301,6 +308,13 @@ try {
             }
             if ($scenario -eq 'push-failure') {
                 Assert ((Find-Calls 'gh' 'pr create').Count -eq 0) 'Created a PR after push failed.'
+            }
+            if ($scenario -eq 'topic-failure') {
+                Assert ((Find-Calls 'gh' 'repo edit').Count -eq 3) 'Tagging was not retried.'
+                $deleted = @((Find-Calls 'gh' 'repo delete') | ForEach-Object { $_.Arguments[2] })
+                $created = @(Find-Calls 'gh' 'repo create')[0].Arguments[2]
+                Assert (($deleted -join ',') -eq $created) "Untagged repo was not deleted (deleted '$($deleted -join ',')')."
+                Assert ((Find-Calls 'gh' 'repo clone').Count -eq 0) 'Cloned an untagged repository.'
             }
             if ($scenario -eq 'create-failure') {
                 Assert ((Find-Calls 'gh' 'repo clone').Count -eq 0) 'Cloned after repository creation failed.'
@@ -316,6 +330,9 @@ try {
                 'cleanup' {
                     Assert ($list[0].Arguments[2] -like 'user/repos*') 'Own account should use user/repos.'
                     Assert (($deleted -join ',') -eq 'demo-user/old-demo') "Deleted '$($deleted -join ',')'."
+                }
+                'cleanup-all' {
+                    Assert (($deleted -join ',') -eq 'demo-user/old-demo,demo-user/fresh-demo') "Deleted '$($deleted -join ',')'."
                 }
                 'cleanup-org' {
                     Assert ($list[0].Arguments[2] -like 'orgs/someone/repos*') 'Other owner should use orgs/<owner>/repos.'

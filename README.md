@@ -44,6 +44,7 @@ Every repository the scripts create gets the `demo-generated` topic, which is wh
 
 - Lists every template in `config.json` and creates the one you pick in the background (runs `create-repo.sh --template <key>`, or `create-repo.ps1 -Template <key>` on Windows), with optional owner, `--no-clone`, and browser-tab settings.
 - Streams the script log live and, when it finishes, shows links to the repo, PRs, issues, Pages site, and local clone.
+- For Copilot Code Review demos (OctoCart), marks each PR with whether Copilot Code Review was requested (✓, ✓ via REST, or ⚠️ with a reminder to pick Copilot under **Reviewers** on the PR), links to the repo's pull request list, and adds a **🔑 Presenter answer key** button that opens `resources/<key>/ANSWER_KEY.md` from this repo locally (in VS Code if available). The answer key is never copied into the demo repo, so keep it off the shared screen.
 - Cleans up like `--cleanup`: pick an owner and age cutoff (default 24 hours, or **Any age**), review the matching `demo-generated` repos, untick any you want to keep, then delete the rest and optionally their local clones in `~/repos`. Deleting needs the `delete_repo` scope (`gh auth refresh -h github.com -s delete_repo`).
 - Offers one-click follow-ups: **Open session in Copilot app** (Copilot adds the repo as a project and opens a fresh session), **Open PR/issue session**, and **Open in VS Code** (`code <clone>`).
 

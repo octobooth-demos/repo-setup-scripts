@@ -33,7 +33,15 @@ function loadTemplates() {
         template: `${r.template_org || config.org}/${r.template}`,
         owner: r.owner === "org" ? config.org : r.owner || null,
         requiresClone: r.workflow === "branch_and_codespace",
+        answerKey: answerKeyPath(r.key),
     }));
+}
+
+// Presenter-only notes (e.g. resources/octocart/ANSWER_KEY.md). They stay in this repo
+// and are never copied into demo repos, so the canvas opens them from here.
+function answerKeyPath(key) {
+    const file = join(REPO_ROOT, "resources", String(key), "ANSWER_KEY.md");
+    return existsSync(file) ? file : null;
 }
 
 // The app may inject its own GH_TOKEN (without scopes like `codespace` or `delete_repo`),
@@ -120,6 +128,15 @@ function parseLine(run, line) {
         const pr = r.prs.find((p) => p.url === m[2]);
         if (pr && run._pendingPrTitle) pr.title = run._pendingPrTitle;
     }
+    if ((m = line.match(/Copilot Code Review requested on PR #(\d+)( \(via REST API\))?/))) {
+        const pr = r.prs.find((p) => p.number === Number(m[1]));
+        if (pr) pr.copilotReview = m[2] ? "rest" : "requested";
+    }
+    if ((m = line.match(/Could not request Copilot Code Review on PR #(\d+)/))) {
+        const pr = r.prs.find((p) => p.number === Number(m[1]));
+        if (pr) pr.copilotReview = "failed";
+    }
+    if ((m = line.match(/Pull requests: (https:\/\/\S+)/))) r.pullsUrl = m[1];
 }
 
 function readOutputs(file) {
@@ -157,7 +174,7 @@ function startRun({ template, owner, noClone = false, openBrowser = false }) {
         exitCode: null,
         startedAt: new Date().toISOString(),
         finishedAt: null,
-        result: { repo: null, repoUrl: null, owner: null, clonePath: null, pagesUrl: null, topPrUrl: null, prs: [], issues: [], codespace: false },
+        result: { repo: null, repoUrl: null, owner: null, clonePath: null, pagesUrl: null, topPrUrl: null, pullsUrl: null, prs: [], issues: [], codespace: false, answerKey: tpl.answerKey },
         log: "",
     };
     runs.unshift(run);
@@ -196,6 +213,7 @@ function startRun({ template, owner, noClone = false, openBrowser = false }) {
         }
         if (outputs.top_pr_url) run.result.topPrUrl = outputs.top_pr_url;
         if (outputs.pages_url) run.result.pagesUrl = run.result.pagesUrl || outputs.pages_url;
+        if (outputs.pulls_url) run.result.pullsUrl = outputs.pulls_url;
         rmSync(outDir, { recursive: true, force: true });
         run.exitCode = code;
         run.status = run.cancelled ? "cancelled" : code === 0 ? "succeeded" : "failed";
@@ -298,6 +316,20 @@ function openInVSCode(run) {
     return { opened: r.clonePath };
 }
 
+function openAnswerKey(run) {
+    const file = answerKeyPath(run.template);
+    if (!file) throw new CanvasError("no_answer_key", "This demo has no presenter answer key.");
+    const code = which("code");
+    let child;
+    if (code) child = spawn(code, [file], { detached: true, stdio: "ignore", shell: process.platform === "win32" });
+    else if (process.platform === "darwin") child = spawn("open", ["-t", file], { detached: true, stdio: "ignore" });
+    else if (process.platform === "win32") child = spawn("notepad.exe", [file], { detached: true, stdio: "ignore" });
+    else child = spawn("xdg-open", [file], { detached: true, stdio: "ignore" });
+    child.on("error", () => {});
+    child.unref();
+    return { opened: file };
+}
+
 // ---------- HTTP server (one shared loopback server for all panels) ----------
 
 let serverPromise = null;
@@ -360,6 +392,7 @@ async function handle(req, res) {
                 return json(res, 200, { sent: true });
             }
             if (url.pathname === "/api/open-vscode") return json(res, 200, openInVSCode(findRun(body.id)));
+            if (url.pathname === "/api/open-answer-key") return json(res, 200, openAnswerKey(findRun(body.id)));
             if (url.pathname === "/api/cleanup/preview") return json(res, 200, await cleanup.preview(body));
             if (url.pathname === "/api/cleanup/delete") return json(res, 200, await cleanup.remove(body));
             if (url.pathname === "/api/cleanup/reset") return json(res, 200, cleanup.reset());

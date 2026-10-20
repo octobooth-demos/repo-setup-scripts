@@ -151,14 +151,21 @@ function renderRun(r) {
   const done = r.status !== "running";
   const links = [];
   if (res.repoUrl) links.push(`<div class="link-row">📦 <a href="${esc(res.repoUrl)}" target="_blank">${esc(res.repo)}</a></div>`);
+  const review = {
+    requested: `<span class="succeeded" style="font-size:12px">🤖 ✓ Copilot review requested</span>`,
+    rest: `<span class="succeeded" style="font-size:12px">🤖 ✓ Copilot review requested (via REST)</span>`,
+    failed: `<span class="warn" style="margin:0" title="Open the PR and pick Copilot under Reviewers">⚠️ Copilot review not requested: pick Copilot under Reviewers on the PR</span>`,
+  };
   for (const pr of res.prs || []) {
     links.push(`<div class="link-row">🔀 <a href="${esc(pr.url)}" target="_blank">PR #${pr.number}${pr.title ? ` · ${esc(pr.title)}` : ""}</a>
+      ${review[pr.copilotReview] || ""}
       ${done && !res.deleted ? `<button class="btn" data-act="session" data-kind="pr" data-target="${pr.number}" data-id="${r.id}">Open PR session</button>` : ""}</div>`);
   }
   for (const is of res.issues || []) {
     links.push(`<div class="link-row">🐛 <a href="${esc(is.url)}" target="_blank">Issue #${is.number}</a>
       ${done && !res.deleted ? `<button class="btn" data-act="session" data-kind="issue" data-target="${is.number}" data-id="${r.id}">Open issue session</button>` : ""}</div>`);
   }
+  if (res.pullsUrl) links.push(`<div class="link-row">📋 <a href="${esc(res.pullsUrl)}" target="_blank">All pull requests</a></div>`);
   if (res.pagesUrl) links.push(`<div class="link-row">🎮 <a href="${esc(res.pagesUrl)}" target="_blank">${esc(res.pagesUrl)}</a></div>`);
   if (res.clonePath) links.push(`<div class="link-row">📁 <code>${esc(res.clonePath)}</code></div>`);
   if (res.codespace) links.push(`<div class="link-row">☁️ Codespace created</div>`);
@@ -169,6 +176,8 @@ function renderRun(r) {
     : canAct ? `
       <button class="btn primary" data-act="session" data-kind="repo" data-id="${r.id}">Open session in Copilot app</button>
       ${res.clonePath ? `<button class="btn" data-act="vscode" data-id="${r.id}">Open in VS Code</button>` : ""}` : "";
+  const answerKey = res.answerKey && !res.deleted
+    ? `<button class="btn" data-act="answer-key" data-id="${r.id}" title="${esc(res.answerKey)}">🔑 Presenter answer key</button>` : "";
 
   return `<div class="run ${res.deleted ? "deleted" : ""}">
     <div class="run-head">
@@ -178,7 +187,7 @@ function renderRun(r) {
     </div>
     ${r.status !== "succeeded" && done && res.repo ? `<div class="muted" style="font-size:12px;margin-top:6px">⚠️ The repo was created but a later step failed; see the log.</div>` : ""}
     ${links.length ? `<div class="links">${links.join("")}</div>` : ""}
-    ${actions ? `<div class="actions">${actions}</div>` : ""}
+    ${actions || answerKey ? `<div class="actions">${actions}${answerKey}</div>` : ""}
     <details data-log="${r.id}" ${openLogs.has(r.id) || r.status === "running" || r.status === "failed" ? "open" : ""}>
       <summary>Log</summary>
       <pre class="log" id="log-${r.id}">${esc(r.logTail || "")}</pre>
@@ -221,6 +230,7 @@ $("runs").addEventListener("click", async (e) => {
   b.disabled = true;
   try {
     if (b.dataset.act === "cancel") { await post("/api/cancel", { id: b.dataset.id }); toast("Cancelling…"); }
+    if (b.dataset.act === "answer-key") { await post("/api/open-answer-key", { id: b.dataset.id }); toast("Opening the answer key locally (don't share your screen!)"); }
     if (b.dataset.act === "vscode") { await post("/api/open-vscode", { id: b.dataset.id }); toast("Opening VS Code…"); }
     if (b.dataset.act === "session") {
       await post("/api/open-session", { id: b.dataset.id, kind: b.dataset.kind, target: b.dataset.target && Number(b.dataset.target) });

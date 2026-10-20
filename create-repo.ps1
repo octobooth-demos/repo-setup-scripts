@@ -283,13 +283,13 @@ function New-ResourcePullRequest {
 function Request-CopilotReview {
     param([int]$Number)
 
-    & gh pr edit $Number --repo $fullRepoName --add-reviewer '@copilot' 2>&1 | Out-Null
+    Invoke-GhQuiet pr edit $Number --repo $fullRepoName --add-reviewer '@copilot' | Out-Null
     if ($LASTEXITCODE -eq 0) {
         Write-Host "Copilot Code Review requested on PR #$Number"
         return
     }
-    & gh api --method POST "repos/$fullRepoName/pulls/$Number/requested_reviewers" `
-        -f 'reviewers[]=copilot-pull-request-reviewer[bot]' --silent 2>&1 | Out-Null
+    Invoke-GhQuiet api --method POST "repos/$fullRepoName/pulls/$Number/requested_reviewers" `
+        -f 'reviewers[]=copilot-pull-request-reviewer[bot]' --silent | Out-Null
     if ($LASTEXITCODE -eq 0) {
         Write-Host "Copilot Code Review requested on PR #$Number (via REST API)"
         return

@@ -86,6 +86,30 @@ bash ./create-repo.sh --cleanup [--older-than 24] [--dry-run] [--yes] [--owner <
 
 Deleting repos needs the `delete_repo` scope. The scripts request it when they log in; for an existing login run `gh auth refresh -h github.com -s delete_repo`.
 
+### Which cleanup covers which repos
+
+| Where the demo repo lives | How it gets cleaned up |
+| --- | --- |
+| A booth account (`octobooth-1`, `octobooth-2`, …), the default | Run `--cleanup` / `-Cleanup` **on that machine**. Nothing else can reach it, because the [ChatOps App](#chatops) is only installed on the org. |
+| The `octobooth-demos` org (`--owner octobooth-demos`, ChatOps, `security-octo-supply`) | Automatic: the [nightly cleanup](.github/workflows/cleanup-demos.yml) deletes them at 08:00 UTC. To clean up sooner, comment `/cleanup` or run the workflow from the Actions tab. |
+
+**Recommended booth routine (repos in each booth account):**
+
+```bash
+# Start of the day, once per machine
+gh auth refresh -h github.com -s delete_repo
+
+# Each demo
+git pull
+bash ./create-repo.sh --template booth-bingo
+
+# End of the day (or the next morning): remove that account's demos older than 24h
+bash ./create-repo.sh --cleanup
+# or remove everything from today: bash ./create-repo.sh --cleanup --older-than 0
+```
+
+**Fallback (repos in the org, cleaned up automatically):** add `--owner octobooth-demos` (or `-Owner octobooth-demos`) when creating demos. Nothing needs to run on the machines afterwards. This requires the booth accounts to be `octobooth-demos` members who are allowed to create repos, including **public** ones (Booth Bingo is public so GitHub Pages works).
+
 ## Workflows and config fields
 
 Each `repos[]` entry needs `key`, `display_name`, `template`, `repo_base_name`, and `workflow`. Optional `template_org` overrides the top-level `org` for the template source, optional `owner` pins where the repo is created (see [above](#where-repos-are-created)), optional `visibility` (`private` by default, or `public` / `internal`) sets the new repo's visibility, optional `"pages": true` turns on GitHub Pages and deploys it with the template's `pages.yml` workflow (see [Showing the game](#showing-the-game); Booth Bingo sets both), optional `"serve": true` starts the [local preview](#running-it-locally-instead-optional) whenever the repo is cloned, and `summary_lines` are printed at the end.
@@ -115,7 +139,7 @@ Each overlay holds the cumulative files for its layer. The booth talk track is i
 Two workflows in this repo let you create and clean up demos without a booth machine running the script.
 
 - **[New demo](.github/workflows/new-demo.yml)**: run it from the Actions tab and pick a template, or comment `/new-demo <key>` on any issue or PR in this repo. Repos are always created in `octobooth-demos`, because App tokens cannot create repos in personal accounts. It replies with the repo URL and, for stacks, the top PR URL and the game URL. Only `repo_only`, `security_prs`, and `stacked_prs` templates are allowed, because Codespaces need a user token.
-- **[Clean up demos](.github/workflows/cleanup-demos.yml)**: runs nightly, from the Actions tab (`max_age_hours`, default 24; `dry_run`, default on), or by comment: `/cleanup [hours] [--dry-run]`. It only deletes repos in `octobooth-demos` that have the `demo-generated` topic **and** are older than the cutoff.
+- **[Clean up demos](.github/workflows/cleanup-demos.yml)**: runs nightly, from the Actions tab (`max_age_hours`, default 24; `dry_run`, default on), or by comment: `/cleanup [hours] [--dry-run]`. It only deletes repos in `octobooth-demos` that have the `demo-generated` topic **and** are older than the cutoff. It cannot see repos in booth accounts; see [Which cleanup covers which repos](#which-cleanup-covers-which-repos).
 
 Comment commands only run for users with write, maintain, or admin access to this repository.
 

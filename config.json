@@ -154,7 +154,7 @@
       ],
       "summary_lines": [
         "PRs: promo codes, order export, and wishlist feature PRs created",
-        "Copilot Code Review: requested on each PR (reviews land in a few minutes)",
+        "Copilot Code Review: attempted on each PR; check warnings for any manual review requests needed",
         "Presenter answer key: resources/octocart/ANSWER_KEY.md in repo-setup-scripts"
       ]
     }

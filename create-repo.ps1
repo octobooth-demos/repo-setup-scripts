@@ -488,7 +488,7 @@ function Wait-CodeQLAnalysis {
         }
         if ($runId) {
             # One field per line; avoids embedded quotes that PowerShell 5.1 mangles.
-            $fields = @(Invoke-GhQuiet run view $runId --repo $fullRepoName --json status,conclusion --jq '.status, .conclusion')
+            $fields = @(Invoke-GhQuiet run view $runId --repo $fullRepoName --json 'status,conclusion' --jq '.status, .conclusion')
             $state = (($fields | ForEach-Object { "$_".Trim() }) -join ' ').Trim()
             if ($state -eq 'completed success') { break }
             if ($state -like 'completed *') {
@@ -585,7 +585,7 @@ function Enable-DemoPages {
     for ($attempt = 1; $attempt -le 60; $attempt++) {
         # One field per line; avoids embedded quotes that PowerShell 5.1 mangles.
         $fields = @(Invoke-GhQuiet run list --repo $fullRepoName --workflow $pagesWorkflow --event workflow_dispatch `
-            --limit 1 --json status,conclusion --jq '.[0].status, .[0].conclusion')
+            --limit 1 --json 'status,conclusion' --jq '.[0].status, .[0].conclusion')
         $state = (($fields | ForEach-Object { "$_".Trim() }) -join ' ').Trim()
         if ($state -eq 'completed success') {
             Write-Host "Game is live: $url"

@@ -52,6 +52,12 @@ function gh {
     $arguments = @($args)
     $testState.Calls.Add([pscustomobject]@{ Command = 'gh'; Arguments = $arguments; Location = (Get-Location).Path })
     $global:LASTEXITCODE = 0
+    $jsonIndex = [array]::IndexOf($arguments, '--json')
+    if ($jsonIndex -ge 0 -and $arguments[$jsonIndex + 1] -isnot [string]) {
+        # PowerShell splits an unquoted comma list into separate native args, which gh rejects.
+        $global:LASTEXITCODE = 1
+        return
+    }
     if ($arguments[0] -eq 'auth' -and $arguments[1] -eq 'status' -and $testState.NeedsLogin) {
         $global:LASTEXITCODE = 1
         return

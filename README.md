@@ -2,6 +2,49 @@
 
 Create demo repositories (private unless a template says otherwise) from the templates in [`config.json`](config.json), with optional branches, issues, demo pull requests, security features, and Codespaces.
 
+There are three ways to create a demo, and all of them run the same scripts and config:
+
+- **[Demo Launcher canvas](#demo-launcher-canvas)**: a side panel in the GitHub Copilot app. Pick a demo, click **Create**, then jump into the repo, PR, or session. This is the easiest option at the booth.
+- **[`create-repo.sh` / `create-repo.ps1`](#bash)**: the scripts the launcher runs, used interactively or [non-interactively](#non-interactive-mode).
+- **[ChatOps](#chatops)**: `/new-demo <key>` comments or the Actions tab. These create demos in the `octobooth-demos` org without a booth machine.
+
+## Quick start (booth machine)
+
+Do this once per machine (macOS):
+
+1. Install the tools and log in with the scopes the demos and cleanup need:
+
+   ```bash
+   brew install gh jq
+   gh auth login
+   gh auth refresh -h github.com -s codespace,delete_repo
+   ```
+
+2. In the GitHub Copilot app, add `octobooth-demos/repo-setup-scripts` as a project. This clones it to `~/repos/repo-setup-scripts`.
+3. Make the Demo Launcher available in every session, not just this project's (see [details](#make-it-available-in-every-session)):
+
+   ```bash
+   cd ~/repos/repo-setup-scripts
+   bash .github/extensions/demo-launcher/install.sh
+   ```
+
+   Then restart the Copilot app (or reload extensions in open sessions).
+
+Before each booth day, update the checkout with `git -C ~/repos/repo-setup-scripts pull`. Then ask Copilot in any session to **"open the demo launcher"**. At the end of the day, use the launcher's **Clean up** section or `bash ./create-repo.sh --cleanup` (see [Cleaning up](#cleaning-up)).
+
+## Demos
+
+Each entry in [`config.json`](config.json) is one demo. Pass its key to `--template` / `-Template` or pick it in the launcher.
+
+| Key | Demo | What gets created | Presenter notes |
+| --- | --- | --- | --- |
+| `securing-your-code` | Secure Code | Repo only, from `github-samples/securing-your-code` | Labs live in the repo |
+| `security-octo-supply` | Security Supply Chain | Repo in the `octobooth-demos` org with Dependabot, autofix, and CodeQL turned on, plus two vulnerable PRs (TypeScript and PHP) | Pinned to the org for code scanning |
+| `tailspin-toys` | Tailspin Toys | Repo, an issue assigned to Copilot coding agent, and a Codespace | Needs coding agent and Codespaces on the owner ([note](#where-repos-are-created)) |
+| `ctrl-slash` | Ctrl Slash | Repo only | |
+| `booth-bingo` | Booth Bingo (stacked PRs) | Public repo, 3 stacked PRs registered as a native stack, and GitHub Pages | [Details](#booth-bingo-stacked-prs); talk track in the template's README |
+| `octocart` | OctoCart (Copilot Code Review) | Repo with 4 feature PRs. Copilot Code Review is requested on 3 of them; the 4th is left for you to request live | [Details](#octocart-copilot-code-review); [answer key](resources/octocart/ANSWER_KEY.md) (presenters only) |
+
 ## PowerShell
 
 Run [`create-repo.ps1`](create-repo.ps1) with Windows PowerShell 5.1 or [PowerShell 7](https://learn.microsoft.com/powershell/scripting/install/installing-powershell). Install the [GitHub CLI](https://cli.github.com/) and [Git](https://git-scm.com/downloads) first and ensure both are on your `PATH`. No `jq` installation is required.
@@ -36,33 +79,95 @@ bash ./create-repo.sh --template booth-bingo [--no-clone]
 
 With no arguments the scripts behave exactly as before. In non-interactive mode they never start `gh auth login`; authenticate first (or set `GH_TOKEN`), otherwise the script fails. `--no-clone` / `-NoClone` skips the permanent clone into `~/repos` and is rejected for `branch_and_codespace`. Unknown keys fail before anything is created and list the valid keys.
 
+When `GITHUB_OUTPUT` is set (in Actions, or by the Demo Launcher), the scripts write `repo_name`, `repo_url`, and, depending on the workflow, `top_pr_url`, `pages_url`, and `pulls_url` to it. `DEMO_NO_BROWSER=1` stops them from opening browser tabs. The launcher sets this unless you tick **Let script open browser tabs**.
+
 Every repository the scripts create gets the `demo-generated` topic, which is what [cleanup](#cleaning-up) uses to find demo repos. If the topic cannot be added (after retries), the script deletes the new repo and stops, so no untagged demo repo is left behind.
 
 ## Demo Launcher canvas
 
-[`.github/extensions/demo-launcher/`](.github/extensions/demo-launcher/) is a Copilot extension that adds a **Demo Launcher** canvas to the GitHub Copilot app (and Copilot CLI sessions in this repo). Ask Copilot to "open the demo launcher" to get a side panel that:
+[`.github/extensions/demo-launcher/`](.github/extensions/demo-launcher/) is a Copilot extension that adds a **Demo Launcher** canvas, a side panel, to the GitHub Copilot app and Copilot CLI. To open it, ask Copilot to **"open the demo launcher"**, or "open the demo launcher for octocart" to preselect a demo.
 
-- Lists every template in `config.json` and creates the one you pick in the background (runs `create-repo.sh --template <key>`, or `create-repo.ps1 -Template <key>` on Windows), with optional owner, `--no-clone`, and browser-tab settings.
-- Streams the script log live and, when it finishes, shows links to the repo, PRs, issues, Pages site, and local clone.
-- For Copilot Code Review demos (OctoCart), marks each PR with whether Copilot Code Review was requested (✓, ✓ via REST, ⚠️ with a reminder to pick Copilot under **Reviewers** on the PR, or 👋 for PRs deliberately left for a live review), links to the repo's pull request list, and adds a **🔑 Presenter answer key** button that opens `resources/<key>/ANSWER_KEY.md` from this repo locally (in VS Code if available). The answer key is never copied into the demo repo, so keep it off the shared screen.
-- Cleans up like `--cleanup`: pick an owner and age cutoff (default 24 hours, or **Any age**), review the matching `demo-generated` repos, untick any you want to keep, then delete the rest and optionally their local clones in `~/repos`. Deleting needs the `delete_repo` scope (`gh auth refresh -h github.com -s delete_repo`).
-- Offers one-click follow-ups: **Open session in Copilot app** (Copilot adds the repo as a project and opens a fresh session), **Open PR/issue session**, and **Open in VS Code** (`code <clone>`).
+### What it does
 
-You can create several demos at once (each run gets its own repo, clone, and log card), so visitors can each get their own copy. Run history is kept in `~/.copilot/extensions/demo-launcher/artifacts/runs.json`. The agent can also drive it with canvas actions (`list_templates`, `launch`, `get_run`, `list_runs`, `cancel`, `cleanup_preview`, `cleanup_delete`). Runs use your `gh auth login` rather than any `GH_TOKEN` the app sets, so they have the same scopes as a terminal run. The panel is a plain loopback web page, so its URL also works in any browser, including VS Code's Simple Browser.
+- **Create demos in the background.** It lists every template in `config.json` and runs `create-repo.sh --template <key>` (or `create-repo.ps1 -Template <key>` on Windows) for the one you pick. Optional settings: owner, **Skip local clone** (`--no-clone`), and **Let script open browser tabs**. You can start several runs at once, and each gets its own repo, clone, and card, so every visitor can have their own copy.
+- **Show live progress and links.** Each run card streams the script log. When the run finishes, the card links to the repo, PRs, issues, Pages site, and local clone.
+- **Show Copilot Code Review state (OctoCart).** Each PR shows whether a review was requested:
+  - ✓ requested
+  - ✓ requested via REST
+  - ⚠️ the request failed (pick Copilot under **Reviewers** on the PR)
+  - 👋 deliberately left for a live review
 
-### Setting up a booth machine
+  The card also links to the repo's pull request list and has a **🔑 Presenter answer key** button. The button opens `resources/<key>/ANSWER_KEY.md` from this repo on your machine (in VS Code if it's installed). The answer key is never copied into demo repos, so keep it off the shared screen.
+- **One-click follow-ups.** **Open session in Copilot app** has Copilot add the repo as a project and open a fresh session. **Open PR session** and **Open issue session** open those items. **Open in VS Code** runs `code <clone>`.
+- **Clean up.** This works like `--cleanup`. Pick an owner and an age cutoff (default 24 hours, or **Any age**), review the matching `demo-generated` repos, and untick any you want to keep. Then delete the rest, optionally with their clones in `~/repos`. Deleting needs the `delete_repo` scope.
 
-1. Install `gh`, `git`, and `jq` (`brew install gh jq`), then log in with the scopes the demos and cleanup use:
-   ```bash
-   gh auth login
-   gh auth refresh -h github.com -s codespace,delete_repo
-   ```
-2. Add `octobooth-demos/repo-setup-scripts` as a project in the Copilot app (this clones it). Sessions in this project get the canvas automatically.
-3. Optional: make the canvas available in **every** session (for example from inside a demo repo's session):
-   ```bash
-   bash .github/extensions/demo-launcher/install.sh
-   ```
-   Run it from the main checkout. It writes a small loader to `~/.copilot/extensions/demo-launcher/` that points back at the checkout, so `git pull` keeps it current; the scripts still run from that checkout. `--uninstall` removes it.
+Runs use your stored `gh auth login`, not any `GH_TOKEN` the app injects, so they have the same scopes as a terminal run. Run history survives restarts. It's kept in `~/.copilot/extensions/demo-launcher/artifacts/runs.json`, and **Clear history** empties it. The panel is a plain loopback web page, so its URL also works in a browser, including VS Code's Simple Browser. The port changes each time the extension restarts.
+
+### Where it's available
+
+| Session | Canvas available? |
+| --- | --- |
+| Any session in the `repo-setup-scripts` project, including worktrees and PR sessions | Yes. Copilot loads project extensions from `.github/extensions/`, and each session uses its own checkout's copy. |
+| Any other session (a demo repo, another project, or a chat) | Only after you [install the loader](#make-it-available-in-every-session). |
+
+### Make it available in every session
+
+Run the installer once per machine (macOS or Linux), from the **main checkout**:
+
+```bash
+cd ~/repos/repo-setup-scripts
+bash .github/extensions/demo-launcher/install.sh
+```
+
+Then restart the Copilot app, or ask Copilot to reload extensions in sessions that are already open. In a session outside this project, ask Copilot to "open the demo launcher" to check that it worked.
+
+How the loader works:
+
+- The installer writes a small user-level extension (a loader) to `~/.copilot/extensions/demo-launcher/extension.mjs`, or to `$COPILOT_HOME/extensions/demo-launcher/` if `COPILOT_HOME` is set. Copilot loads user-level extensions in every session.
+- The loader imports `extension.mjs` straight from your checkout. **`git pull` updates the launcher**; you don't need to reinstall. Demos still run `create-repo` and `config.json` from that checkout.
+- If you run the installer from a worktree, it points the loader at the **main checkout** anyway, because worktrees get deleted. If the main checkout doesn't have the extension yet, it falls back to the worktree with a warning. In that case, re-run it from the main checkout after merging.
+- In sessions inside this repo, the loader does nothing and lets the project's own copy provide the canvas. That avoids two Demo Launchers, and a branch you're working on uses its own version. As a result, extension lists in this project show two `demo-launcher` entries (`user` and `project`), and that's expected.
+
+**Update:** run `git -C ~/repos/repo-setup-scripts pull`, then reload extensions or restart the app. You only need to re-run `install.sh` if `install.sh` itself changes. Re-running it is always safe.
+
+**Uninstall:** run `bash .github/extensions/demo-launcher/install.sh --uninstall`. This removes the loader and keeps your run history in `artifacts/`.
+
+**Windows:** `install.sh` is for macOS and Linux. On Windows, open the canvas from sessions in the `repo-setup-scripts` project. Runs there use `create-repo.ps1`.
+
+### Troubleshooting
+
+| Symptom | Fix |
+| --- | --- |
+| Copilot can't find the Demo Launcher outside this project | Run `install.sh`, then restart the app or reload extensions. Check that `~/.copilot/extensions/demo-launcher/extension.mjs` exists and that the path it imports exists. |
+| The panel shows old behavior | Run `git pull` in the main checkout and reload extensions. Sessions inside this project use their own checkout, so update that branch. |
+| A run fails with an auth or scope error, or cleanup asks for `delete_repo` | Run `gh auth status` in a terminal, then `gh auth refresh -h github.com -s codespace,delete_repo`. |
+| The demo was created in the wrong account | Repos go to the [logged-in account](#where-repos-are-created) unless you set **Owner**. Check `gh auth status`. |
+| The panel URL stopped working | The extension restarted on a new port. Reopen the canvas. |
+| A card says **interrupted** | The app or extension restarted mid-run. The repo may be half set up. Delete it with **Clean up** and run it again. |
+
+### Agent actions
+
+Copilot can drive the canvas directly with these actions:
+
+- `list_templates`
+- `launch` (`template`, `owner`, `noClone`, `openBrowser`)
+- `get_run` and `list_runs`
+- `cancel`
+- `cleanup_preview` (`owner`, `olderThanHours`)
+- `cleanup_delete` (`repos`, `removeClones`)
+
+For example: "launch octocart in the demo launcher and tell me when Copilot has reviewed the PRs."
+
+### Files
+
+| File | Purpose |
+| --- | --- |
+| [`extension.mjs`](.github/extensions/demo-launcher/extension.mjs) | Registers the canvas and its actions, runs `create-repo` in the background, parses its output, and serves the panel on a loopback port |
+| [`ui.html`](.github/extensions/demo-launcher/ui.html) | The panel UI |
+| [`cleanup.mjs`](.github/extensions/demo-launcher/cleanup.mjs) | The Clean up section (preview and delete through `create-repo --cleanup`) |
+| [`install.sh`](.github/extensions/demo-launcher/install.sh) | Installs or uninstalls the user-level loader |
+
+If you change what the scripts print (repo, clone, `PR #N created: <url>`, Copilot review lines, and so on), update `parseLine` in `extension.mjs` to match.
 
 ## Where repos are created
 
@@ -211,4 +316,12 @@ Run the standalone PowerShell checks without creating any GitHub resources. They
 
 ```powershell
 .\tests\create-repo.Tests.ps1
+```
+
+On macOS or Linux, run the same file with `pwsh -File tests/create-repo.Tests.ps1`. Other quick checks:
+
+```bash
+bash -n create-repo.sh
+for f in .github/extensions/demo-launcher/*.mjs; do node --check "$f"; done
+bash -n .github/extensions/demo-launcher/install.sh
 ```

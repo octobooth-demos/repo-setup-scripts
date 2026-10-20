@@ -152,7 +152,10 @@ function Assert-SelectedRepo {
             $missing += @(Assert-PullRequestEntries $Repo.prs 'prs' 1)
         }
         'ai_security' {
-            $missing += @(Assert-PullRequestEntries $Repo.prs 'prs' 1)
+            # AI Scan entries need a PR; agentic autofix entries need "autofix".
+            if ($Repo.PSObject.Properties['prs'] -or -not $Repo.PSObject.Properties['autofix']) {
+                $missing += @(Assert-PullRequestEntries $Repo.prs 'prs' 1)
+            }
             if ($Repo.seed) {
                 foreach ($field in @('resource_dir', 'commit_message')) {
                     if ([string]::IsNullOrWhiteSpace($Repo.seed.$field)) {
@@ -453,10 +456,27 @@ function Get-OpenCodeScanningAlerts {
     foreach ($alert in $parsed) { $alert }
 }
 
+# AI Scan only reviews PRs opened while code scanning is on, which for advanced
+# setup means after the first analysis upload (the template's CodeQL run on its
+# initial commit). Wait (bounded) for it; only warns on timeout.
+function Wait-CodeScanningEnabled {
+    Write-Host 'Waiting for code scanning to turn on (first CodeQL upload, usually 2-4 minutes)...'
+    for ($waited = 0; $waited -lt $codeqlWaitSeconds; $waited += 10) {
+        $count = "$(@(Invoke-GhQuiet api "repos/$fullRepoName/code-scanning/analyses?per_page=1" --jq 'length')[-1])".Trim()
+        if ($LASTEXITCODE -eq 0 -and $count -match '^[1-9]') {
+            Write-Host 'Code scanning is on.'
+            return
+        }
+        Start-Sleep -Seconds 10
+    }
+    Write-Warning "Code scanning still had no analysis after $([int]($codeqlWaitSeconds / 60)) minutes; opening the PR anyway. If no AI findings appear, push a commit to the PR branch to rescan it."
+}
+
 # Wait (bounded) for the CodeQL workflow run on $Sha to finish and for open
-# default-branch alerts to show up. Throws a clear message on failure.
+# default-branch alerts to show up (preferring an alert for $Rule, since results
+# for each language arrive separately). Throws a clear message on failure.
 function Wait-CodeQLAnalysis {
-    param([string]$Workflow, [string]$Sha)
+    param([string]$Workflow, [string]$Sha, [string]$Rule)
 
     Write-Host "Waiting for CodeQL ($Workflow) to analyze $defaultBranch (usually 3-6 minutes)..."
     $runId = $null
@@ -485,14 +505,16 @@ function Wait-CodeQLAnalysis {
     }
     Write-Host 'CodeQL analysis finished.'
 
+    # Processing uploaded results can lag the workflow run by several minutes.
+    Write-Host 'Waiting for code scanning to process the results...'
     $alerts = @()
-    for ($attempt = 1; $attempt -le 12; $attempt++) {
+    for ($attempt = 1; $attempt -le 60; $attempt++) {
         $alerts = @(Get-OpenCodeScanningAlerts)
-        if ($alerts.Count -gt 0) { break }
+        if ($alerts.Count -gt 0 -and (-not $Rule -or @($alerts | Where-Object { $_.rule.id -eq $Rule }).Count -gt 0)) { break }
         Start-Sleep -Seconds 5
     }
     if ($alerts.Count -eq 0) {
-        throw "CodeQL finished but no open alerts appeared on $defaultBranch."
+        throw "CodeQL finished but no open alerts appeared on $defaultBranch within 5 minutes. Check https://github.com/$fullRepoName/security/code-scanning and assign an alert to Copilot by hand."
     }
     Write-Host "$($alerts.Count) open code scanning alerts on $defaultBranch"
 }
@@ -799,17 +821,16 @@ try {
             Set-ActionOutput 'pulls_url' $pullsUrl
         }
         'ai_security' {
-            Write-Host 'Setting up AI Scan + agentic autofix demo...'
+            Write-Host 'Setting up AI code security demo...'
             # The template runs CodeQL through its own advanced workflow. Default setup
             # is deliberately not enabled: it would reject that workflow's uploads.
-            $codeqlWorkflow = if ($selectedRepo.codeql_workflow) { $selectedRepo.codeql_workflow } else { 'codeql-advanced.yml' }
             # Private repos need Advanced Security before code scanning results are accepted.
             Invoke-Native 'gh' @(
                 'api', "repos/$fullRepoName", '-X', 'PATCH',
                 '-f', 'security_and_analysis[advanced_security][status]=enabled', '--silent'
             )
             Write-Host 'Advanced Security enabled.'
-            Enable-AiScan
+            if ($selectedRepo.ai_scan -eq $true) { Enable-AiScan }
 
             $tempDirectory = Join-Path ([IO.Path]::GetTempPath()) ([IO.Path]::GetRandomFileName())
             New-Item -ItemType Directory -Path $tempDirectory | Out-Null
@@ -819,23 +840,30 @@ try {
             Set-Location -LiteralPath $tempClonePath
             Set-GitIdentity
 
-            if ($selectedRepo.seed) {
-                Write-Host 'Adding extra default-branch code for CodeQL to flag...'
-                $seedPath = Join-Path $scriptDirectory $selectedRepo.seed.resource_dir
-                Get-ChildItem -LiteralPath $seedPath -Force | Copy-Item -Destination . -Recurse -Force
-                Invoke-Native 'git' @('add', '-A') | Out-Host
-                Invoke-Native 'git' @('commit', '-m', $selectedRepo.seed.commit_message, '--quiet') | Out-Host
-                Invoke-Native 'git' @('push', 'origin', $defaultBranch, '--quiet') | Out-Host
+            # Agentic autofix only works on default-branch alerts, so wait for CodeQL first.
+            if ($selectedRepo.PSObject.Properties['autofix']) {
+                $codeqlWorkflow = if ($selectedRepo.codeql_workflow) { $selectedRepo.codeql_workflow } else { 'codeql-advanced.yml' }
+                if ($selectedRepo.seed) {
+                    Write-Host 'Adding extra default-branch code for CodeQL to flag...'
+                    $seedPath = Join-Path $scriptDirectory $selectedRepo.seed.resource_dir
+                    Get-ChildItem -LiteralPath $seedPath -Force | Copy-Item -Destination . -Recurse -Force
+                    Invoke-Native 'git' @('add', '-A') | Out-Host
+                    Invoke-Native 'git' @('commit', '-m', $selectedRepo.seed.commit_message, '--quiet') | Out-Host
+                    Invoke-Native 'git' @('push', 'origin', $defaultBranch, '--quiet') | Out-Host
+                }
+                else {
+                    Invoke-Native 'gh' @('workflow', 'run', $codeqlWorkflow, '--repo', $fullRepoName, '--ref', $defaultBranch) | Out-Null
+                }
+                $headSha = "$(@(Invoke-Native 'git' @('rev-parse', 'HEAD'))[-1])".Trim()
+                Wait-CodeQLAnalysis $codeqlWorkflow $headSha $selectedRepo.autofix.preassign_rule
+                $assignedAlertUrl = Set-CopilotAlertAssignee $selectedRepo.autofix.preassign_rule
+                $alertsUrl = "https://github.com/$fullRepoName/security/code-scanning"
+                Set-ActionOutput 'alerts_url' $alertsUrl
             }
-            else {
-                Invoke-Native 'gh' @('workflow', 'run', $codeqlWorkflow, '--repo', $fullRepoName, '--ref', $defaultBranch) | Out-Null
-            }
-            $headSha = "$(@(Invoke-Native 'git' @('rev-parse', 'HEAD'))[-1])".Trim()
-            Wait-CodeQLAnalysis $codeqlWorkflow $headSha
 
-            $assignedAlertUrl = Set-CopilotAlertAssignee $selectedRepo.autofix.preassign_rule
-
-            foreach ($pr in $selectedRepo.prs) {
+            $aiScanPrs = @($selectedRepo.prs | Where-Object { $null -ne $_ })
+            if ($aiScanPrs.Count -gt 0 -and $selectedRepo.ai_scan -eq $true) { Wait-CodeScanningEnabled }
+            foreach ($pr in $aiScanPrs) {
                 New-ResourcePullRequest $pr | Out-Null
             }
             if (-not $NoClone) {
@@ -843,9 +871,7 @@ try {
                 Invoke-Native 'git' @('-C', $clonePath, 'fetch', '--quiet', 'origin') | Out-Host
             }
             $pullsUrl = "https://github.com/$fullRepoName/pulls"
-            $alertsUrl = "https://github.com/$fullRepoName/security/code-scanning"
             Set-ActionOutput 'pulls_url' $pullsUrl
-            Set-ActionOutput 'alerts_url' $alertsUrl
         }
         'stacked_prs' {
             Write-Host 'Setting up stacked PRs demo...'

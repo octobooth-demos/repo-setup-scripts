@@ -14,7 +14,8 @@ on:
           - security-octo-supply
           - ctrl-slash
           - octocart
-          - ai-security
+          - ai-scan
+          - agentic-autofix
   issue_comment:
     types: [created]
 
@@ -33,7 +34,7 @@ jobs:
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'issue_comment' && startsWith(github.event.comment.body, '/new-demo'))
     runs-on: ubuntu-latest
-    # ai-security waits for CodeQL on the default branch, which can take ~10 minutes.
+    # agentic-autofix waits for CodeQL on the default branch, which can take ~10 minutes.
     timeout-minutes: 30
     steps:
       - name: Check commenter permission
@@ -122,10 +123,15 @@ jobs:
             if [ -n "$PAGES_URL" ]; then
               body="$body"$'\n\n'"Game: $PAGES_URL"
             fi
+            if [ -n "$PULLS_URL" ]; then
+              if [ "$TEMPLATE_KEY" = "octocart" ]; then
+                body="$body"$'\n\n'"Pull requests for Copilot Code Review: $PULLS_URL"
+              else
+                body="$body"$'\n\n'"Pull requests: $PULLS_URL"
+              fi
+            fi
             if [ -n "$ALERTS_URL" ]; then
-              body="$body"$'\n\n'"AI Scan PR: $PULLS_URL"$'\n\n'"Code scanning alerts (assign to Copilot): $ALERTS_URL"
-            elif [ -n "$PULLS_URL" ]; then
-              body="$body"$'\n\n'"Pull requests for Copilot Code Review: $PULLS_URL"
+              body="$body"$'\n\n'"Code scanning alerts (assign to Copilot): $ALERTS_URL"
             fi
           else
             body="❌ Demo creation failed. See $RUN_URL"

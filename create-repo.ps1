@@ -648,7 +648,12 @@ try {
             Set-GitIdentity
             foreach ($pr in $selectedRepo.prs) {
                 $created = New-ResourcePullRequest $pr
-                Request-CopilotReview $created.Number
+                # "request_review": false leaves the PR for the presenter to request live.
+                if ($pr.request_review -eq $false) {
+                    Write-Host "Copilot Code Review not requested on PR #$($created.Number): request it live from the PR (Reviewers -> Copilot)."
+                } else {
+                    Request-CopilotReview $created.Number
+                }
             }
             # Make the PR branches visible in the local clone (Copilot app, editor).
             if (-not $NoClone) {

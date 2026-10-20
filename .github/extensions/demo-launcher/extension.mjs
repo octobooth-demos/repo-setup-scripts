@@ -132,6 +132,10 @@ function parseLine(run, line) {
         const pr = r.prs.find((p) => p.number === Number(m[1]));
         if (pr) pr.copilotReview = m[2] ? "rest" : "requested";
     }
+    if ((m = line.match(/Copilot Code Review not requested on PR #(\d+)/))) {
+        const pr = r.prs.find((p) => p.number === Number(m[1]));
+        if (pr) pr.copilotReview = "live";
+    }
     if ((m = line.match(/Could not request Copilot Code Review on PR #(\d+)/))) {
         const pr = r.prs.find((p) => p.number === Number(m[1]));
         if (pr) pr.copilotReview = "failed";

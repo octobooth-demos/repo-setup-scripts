@@ -154,6 +154,7 @@ function renderRun(r) {
   const review = {
     requested: `<span class="succeeded" style="font-size:12px">🤖 ✓ Copilot review requested</span>`,
     rest: `<span class="succeeded" style="font-size:12px">🤖 ✓ Copilot review requested (via REST)</span>`,
+    live: `<span class="running" style="font-size:12px" title="Left for you: request Copilot under Reviewers on the PR during the demo">👋 Request Copilot review live</span>`,
     failed: `<span class="warn" style="margin:0" title="Open the PR and pick Copilot under Reviewers">⚠️ Copilot review not requested: pick Copilot under Reviewers on the PR</span>`,
   };
   for (const pr of res.prs || []) {

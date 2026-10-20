@@ -123,8 +123,8 @@
     {
       "key": "octocart",
       "display_name": "OctoCart (Copilot Code Review)",
-      "description_short": "Octocat merch store (Express + React) with three feature PRs to review",
-      "workflow_hint": "Creates repo + three feature PRs and requests Copilot Code Review on each",
+      "description_short": "Octocat merch store (Express + React) with four feature PRs to review",
+      "workflow_hint": "Creates repo + four feature PRs; requests Copilot Code Review on three and leaves one for you to request live",
       "template": "octocart",
       "repo_base_name": "octocart",
       "repo_description": "OctoCart Copilot Code Review demo",
@@ -150,11 +150,19 @@
           "commit_message": "feat: add a wishlist",
           "title": "Add a wishlist",
           "body_file": "resources/octocart/pr-wishlist/pr-body.md"
+        },
+        {
+          "branch": "feature/product-reviews",
+          "resource_dir": "resources/octocart/pr-product-reviews",
+          "commit_message": "feat: add product reviews",
+          "title": "Add product reviews",
+          "body_file": "resources/octocart/pr-product-reviews/pr-body.md",
+          "request_review": false
         }
       ],
       "summary_lines": [
-        "PRs: promo codes, order export, and wishlist feature PRs created",
-        "Copilot Code Review: attempted on each PR; check warnings for any manual review requests needed",
+        "PRs: promo codes, order export, wishlist, and product reviews feature PRs created",
+        "Copilot Code Review: requested on the first three PRs (check warnings); request it live on \"Add product reviews\" (Reviewers -> Copilot)",
         "Presenter answer key: resources/octocart/ANSWER_KEY.md in repo-setup-scripts"
       ]
     }

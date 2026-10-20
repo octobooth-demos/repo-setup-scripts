@@ -918,6 +918,8 @@ case $WORKFLOW in
             pr_body_file=$(jq -r ".repos[$SELECTED_INDEX].prs[$i].body_file" "$CONFIG_FILE")
             pr_commit_msg=$(jq -r ".repos[$SELECTED_INDEX].prs[$i].commit_message" "$CONFIG_FILE")
             pr_title=$(jq -r ".repos[$SELECTED_INDEX].prs[$i].title" "$CONFIG_FILE")
+            # "request_review": false leaves the PR for the presenter to request live.
+            pr_request_review=$(jq -r ".repos[$SELECTED_INDEX].prs[$i].request_review != false" "$CONFIG_FILE")
 
             create_pr_from_resources \
                 "$pr_branch" \
@@ -925,7 +927,11 @@ case $WORKFLOW in
                 "$pr_body_file" \
                 "$pr_commit_msg" \
                 "$pr_title"
-            request_copilot_review "$CREATED_PR_NUMBER"
+            if [ "$pr_request_review" = true ]; then
+                request_copilot_review "$CREATED_PR_NUMBER"
+            else
+                echo "👋 Copilot Code Review not requested on PR #$CREATED_PR_NUMBER: request it live from the PR (Reviewers -> Copilot)."
+            fi
             i=$((i + 1))
         done
 

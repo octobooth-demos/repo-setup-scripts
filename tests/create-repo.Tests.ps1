@@ -149,6 +149,10 @@ function git {
                 Assert (Test-Path -LiteralPath './api/src/routes/wishlist.ts') 'Wishlist overlay was not copied.'
                 Assert (Test-Path -LiteralPath './web/src/components/Wishlist.tsx') 'Wishlist component was not copied.'
             }
+            'feat: add product reviews' {
+                Assert (Test-Path -LiteralPath './api/src/routes/reviews.ts') 'Product reviews overlay was not copied.'
+                Assert (Test-Path -LiteralPath './web/src/components/ProductReviews.tsx') 'Product reviews component was not copied.'
+            }
             default {
                 Assert (Test-Path -LiteralPath './php/src/Controllers/NoteController.php') 'PHP resources were not copied.'
             }
@@ -403,7 +407,7 @@ try {
             }
             if ($selection -eq '2') {
                 Assert ((Find-Calls 'gh' 'pr create').Count -eq 2) 'Expected two PRs.'
-                Assert ((Find-Calls 'gh' 'api repos/').Count -eq 5) 'Expected readiness checks and three security API calls.'
+                Assert ((Find-Calls 'gh' 'api repos/').Count -eq 6) 'Expected readiness checks and four security API calls.'
                 foreach ($prCall in (Find-Calls 'gh' 'pr create')) {
                     Assert ($prCall.Arguments -contains 'trunk') 'PR did not use the default branch.'
                 }
@@ -467,14 +471,14 @@ try {
                 $fullName = $create.Arguments[2]
                 Assert ($fullName -like 'demo-user/octocart-*') "Code review demo created '$fullName'."
                 $prCalls = @(Find-Calls 'gh' 'pr create')
-                Assert ($prCalls.Count -eq 3) 'Expected three code review PRs.'
+                Assert ($prCalls.Count -eq 4) 'Expected four code review PRs.'
                 $heads = @($prCalls | ForEach-Object { $_.Arguments[[array]::IndexOf($_.Arguments, '--head') + 1] })
-                Assert (($heads -join ',') -eq 'feature/stackable-promo-codes,feature/order-history-export,feature/wishlist') "PR heads were '$($heads -join ',')'."
+                Assert (($heads -join ',') -eq 'feature/stackable-promo-codes,feature/order-history-export,feature/wishlist,feature/product-reviews') "PR heads were '$($heads -join ',')'."
                 foreach ($prCall in $prCalls) {
                     Assert ($prCall.Arguments -contains 'trunk') 'Code review PR did not target the default branch.'
                 }
                 $edits = @(Find-Calls 'gh' 'pr edit')
-                Assert ($edits.Count -eq 3) 'Expected a Copilot review request per PR.'
+                Assert ($edits.Count -eq 3) 'Expected a Copilot review request on each PR except the live-review one.'
                 for ($i = 0; $i -lt 3; $i++) {
                     $expected = "pr edit $($i + 1) --repo $fullName --add-reviewer @copilot"
                     Assert (($edits[$i].Arguments -join ' ') -eq $expected) "Review request was '$($edits[$i].Arguments -join ' ')'."
@@ -484,10 +488,11 @@ try {
                     Assert ($rest.Count -eq 0) 'Used the REST fallback although gh pr edit succeeded.'
                 }
                 else {
-                    Assert ($rest.Count -eq 3) 'REST fallback was not used for every PR.'
+                    Assert ($rest.Count -eq 3) 'REST fallback was not used for every review-requested PR.'
                     Assert ($rest[0].Arguments[3] -eq "repos/$fullName/pulls/1/requested_reviewers") "Wrong fallback endpoint '$($rest[0].Arguments[3])'."
                     Assert ($rest[0].Arguments -contains 'reviewers[]=copilot-pull-request-reviewer[bot]') 'Fallback did not request the Copilot reviewer bot.'
                 }
+                Assert (-not ($rest | Where-Object { $_.Arguments[3] -like '*/pulls/4/*' })) 'Requested a review on the live-review PR.'
                 Assert ((Find-Calls 'gh' 'api repos/').Where({ $_.Arguments -contains 'PUT' }).Count -eq 0) 'Code review demo enabled security features.'
                 $fetch = @(Find-Calls 'git' '-C').Where({ ($_.Arguments -join ' ').Contains('fetch --quiet origin') })
                 if ($scenario -eq 'code-review-no-clone') {

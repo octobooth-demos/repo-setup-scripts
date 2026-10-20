@@ -3,8 +3,8 @@
 > **Presenters only.** This file lives in `repo-setup-scripts` and is never copied into
 > demo repos (only the `pr-*/` directories are overlaid). Don't show it on screen.
 
-`create-repo` opens three PRs against the OctoCart baseline and requests Copilot Code Review
-on each one. All three PRs pass lint, typecheck, tests, and build, so every issue below is
+`create-repo` opens four PRs against the OctoCart baseline. It requests Copilot Code Review on
+the first three and leaves PR 4 for you to request live. All four PRs pass lint, typecheck, tests, and build, so every issue below is
 something CI cannot catch. Line numbers refer to the file **after** the PR is applied.
 
 CCR is non-deterministic. Expect it to catch most, not all, of these issues, and sometimes
@@ -69,12 +69,31 @@ instructions. Show `.github/copilot-instructions.md` first, then the review comm
 | 13 | (no test files) | tests: every route has tests, including an error path | No API or component tests at all. |
 | bonus | `api/src/data/store.ts` (`saveToWishlist`) | Bug | Clicking the heart on an already-saved product sends no note, which wipes the existing note and resets `addedAt`. CCR found this in testing. |
 
+## PR 4: "Add product reviews" (`feature/product-reviews`), the live review
+
+Theme: **security and house rules in a small diff.** `create-repo` does **not** request a review
+on this PR. Request it live: on github.com use **Reviewers → Copilot**; in the Copilot app, open
+the PR session and ask for a review. In testing, the review took about 7 minutes to land, so have something to talk through while it runs.
+
+| # | File:line | Category | What's wrong |
+|---|-----------|----------|--------------|
+| 1 | `web/src/components/ProductReviews.tsx:37` | Security (stored XSS) | `dangerouslySetInnerHTML={{ __html: review.body }}` renders unsanitized user input. A review like `<img src=x onerror=alert(1)>` runs script for every shopper who opens that product's reviews. The PR body even advertises "simple formatting like `<b>`". |
+| 2 | `api/src/routes/reviews.ts:35, 43` | Security (house rule: api) | `POST` has no `requireAuth`, and `author` comes from the request body. Anyone can post anonymously as "OctoCart Staff" or as another customer. The author should be `currentUser(req).name`. |
+| 3 | `api/src/routes/reviews.ts:43` | Validation (house rule: api) | `req.body` and `req.params` are read without zod `validate()`. `rating` can be `500`, `-3`, `2.5`, or `"5"`: a string turns the `reduce` into string concatenation, `500` swamps the average, and a negative rating makes `'★'.repeat()` throw a RangeError that crashes the UI (`ProductReviews.tsx:36`). `body` has no length limit. |
+| 4 | `api/src/routes/reviews.ts:18, 22, 35, 39` | Errors (house rule: api) | Raw `async` handlers without `asyncHandler`, and ad hoc `res.status(404).json({ message })` instead of throwing `NotFoundError`. The error shape isn't `{ error: { code, message } }`. |
+| 5 | `api/src/routes/reviews.ts:30` | Bug | A product with no reviews divides `0 / 0`: `average` is `NaN` and serializes as `null`, though the client type says `number`. |
+| 6 | `api/src/routes/reviews.ts:14` | Bug / tests | Reviews live in a module-level array instead of the store, so `resetStore()` doesn't clear them. The second test only passes (`count` 2, `average` 4.5) because the first test's review **leaked** into it. |
+| 7 | `web/src/components/ProductCard.tsx:31` + `ProductReviews.tsx:16` | Performance | Every product card fetches its reviews on mount, so the product list fires one request per product (N+1), even though the reviews are collapsed by default. Fetch on expand, or include a summary in `/api/products`. |
+| 8 | `api/test/reviews.test.ts`, no `ProductReviews.test.tsx` | Tests (house rule: tests) | Happy paths only: nothing tests auth, validation, unknown products, or the empty-reviews case. The new component has no test. |
+
 ## Presenter tips
 
 - Open the **PR list** (the script opens it for you) and start with PR 3. It's the most visual
   showcase of custom instructions. Then use PR 1 for the "it even catches a one-character bug" moment.
 - If CCR hasn't finished, refresh. In testing, reviews landed in about 3-6 minutes, and
   the larger wishlist PR took the longest. Create the demo a few minutes before you need it.
+- Save PR 4 for the live moment: request the review while the audience watches, walk through the
+  finished reviews on PRs 1–3 while it runs, then come back to the XSS and validation findings.
 - To re-run a review, use **Reviewers ➜ Re-request review** on Copilot.
 - The baseline repo also contains `.github/instructions/*.instructions.md` files scoped by
   `applyTo` globs. Point out that the web rules fire only on `web/**` files.

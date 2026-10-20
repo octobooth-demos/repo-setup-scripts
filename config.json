@@ -119,6 +119,52 @@
         "Next: open the top PR and use the stack navigator",
         "After you merge the stack, the game tab updates by itself in about a minute"
       ]
+    },
+    {
+      "key": "octocart",
+      "display_name": "OctoCart (Copilot Code Review)",
+      "description_short": "Octocat merch store (Express + React) with four feature PRs to review",
+      "workflow_hint": "Creates repo + four feature PRs; requests Copilot Code Review on three and leaves one for you to request live",
+      "template": "octocart",
+      "repo_base_name": "octocart",
+      "repo_description": "OctoCart Copilot Code Review demo",
+      "workflow": "code_review_prs",
+      "prs": [
+        {
+          "branch": "feature/stackable-promo-codes",
+          "resource_dir": "resources/octocart/pr-promo-codes",
+          "commit_message": "feat: support stacking promo codes and sale pricing",
+          "title": "Support stacking promo codes and sale pricing",
+          "body_file": "resources/octocart/pr-promo-codes/pr-body.md"
+        },
+        {
+          "branch": "feature/order-history-export",
+          "resource_dir": "resources/octocart/pr-order-export",
+          "commit_message": "feat: add order history page with CSV export",
+          "title": "Add order history page with CSV export",
+          "body_file": "resources/octocart/pr-order-export/pr-body.md"
+        },
+        {
+          "branch": "feature/wishlist",
+          "resource_dir": "resources/octocart/pr-wishlist",
+          "commit_message": "feat: add a wishlist",
+          "title": "Add a wishlist",
+          "body_file": "resources/octocart/pr-wishlist/pr-body.md"
+        },
+        {
+          "branch": "feature/product-reviews",
+          "resource_dir": "resources/octocart/pr-product-reviews",
+          "commit_message": "feat: add product reviews",
+          "title": "Add product reviews",
+          "body_file": "resources/octocart/pr-product-reviews/pr-body.md",
+          "request_review": false
+        }
+      ],
+      "summary_lines": [
+        "PRs: promo codes, order export, wishlist, and product reviews feature PRs created",
+        "Copilot Code Review: requested on the first three PRs (check warnings); request it live on \"Add product reviews\" (Reviewers -> Copilot)",
+        "Presenter answer key: resources/octocart/ANSWER_KEY.md in repo-setup-scripts"
+      ]
     }
   ]
 }

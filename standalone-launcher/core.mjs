@@ -1,8 +1,9 @@
-// Demo Launcher core: pick a template from config.json, run create-repo in the
-// background, watch the log, then jump into the new repo (app session, VS Code, GitHub).
+// Standalone Demo Launcher core: a browser GUI for create-repo. Pick a template from
+// config.json, run create-repo in the background, watch the log, then jump into the new repo.
 //
-// Plain Node only. No Copilot SDK imports, so it runs both as the Copilot canvas
-// (.github/extensions/demo-launcher/extension.mjs) and standalone (launcher/server.mjs).
+// A self-contained fallback for the Demo Launcher canvas (.github/extensions/demo-launcher/):
+// plain Node, no Copilot SDK, and no code shared with the canvas, so neither can break the other.
+// When create-repo's output changes, update parseLine here and in the canvas's extension.mjs.
 
 import { createServer } from "node:http";
 import { spawn, spawnSync } from "node:child_process";
@@ -23,15 +24,13 @@ const UI_FILE = join(LAUNCHER_DIR, "ui.html");
 const MAX_RUNS = 30;
 const MAX_LOG_CHARS = 200_000;
 
-// Set by configure(). `agent` is { send(prompt) } inside the Copilot app and null standalone.
+// Set by configure().
 let STORE_FILE = null;
-let agent = null;
 let log = () => {};
-let allowedHosts = null; // null = don't check Host/Origin (canvas mode, random port)
+let allowedHosts = null; // null = don't check Host/Origin
 
-export function configure({ stateDir, agent: a = null, log: l, allowedHosts: hosts = null }) {
+export function configure({ stateDir, log: l, allowedHosts: hosts = null }) {
     STORE_FILE = join(stateDir, "runs.json");
-    agent = a;
     if (l) log = l;
     allowedHosts = hosts;
     loadRuns();
@@ -56,7 +55,7 @@ export function loadTemplates() {
 }
 
 // Optional "seed_prompt_file" (e.g. resources/ensemble-blank/seed-prompt.txt): the prompt the
-// presenter runs in the new repo. The canvas shows it with Copy and "Run with Ensemble".
+// presenter runs in the new repo. The UI shows it with Copy buttons.
 function readSeedPrompt(file) {
     if (!file) return null;
     const path = resolve(REPO_ROOT, String(file));
@@ -71,7 +70,7 @@ export function seedPromptFor(run) {
 }
 
 // Presenter-only notes (e.g. resources/octocart/ANSWER_KEY.md). They stay in this repo
-// and are never copied into demo repos, so the canvas opens them from here.
+// and are never copied into demo repos, so the launcher opens them from here.
 function answerKeyPath(key) {
     const file = join(REPO_ROOT, "resources", String(key), "ANSWER_KEY.md");
     return existsSync(file) ? file : null;
@@ -337,15 +336,11 @@ export function sessionPrompt(run, kind, target) {
     return `[Demo Launcher] I just created the demo repo ${r.repo} (${run.templateName}). ${where} Add it as a project in this app (create_project) if it isn't one already, create a new idle session in it (create_session with that project_id, no kickoff, detached: true), then navigate me to that session.`;
 }
 
-// In the canvas, the prompt goes straight to the session's agent. Standalone there is no
-// agent, so it's copied for the presenter to paste into any Copilot app chat instead.
-export async function askAgent(prompt) {
-    if (agent) {
-        await agent.send(prompt);
-        return { sent: true };
-    }
+// There's no Copilot agent here, so session prompts are copied for the presenter to paste
+// into any Copilot app chat (the same text the canvas sends to its session).
+function copySessionPrompt(prompt) {
     copyToClipboard(prompt);
-    return { sent: false, copied: true };
+    return { copied: true };
 }
 
 function which(bin) {
@@ -372,7 +367,7 @@ function openInVSCode(run) {
     return { opened: r.clonePath };
 }
 
-// Fallback for when the canvas webview blocks navigator.clipboard.
+// Server-side copy, also the fallback when the browser blocks navigator.clipboard.
 function copyToClipboard(text) {
     const candidates = process.platform === "darwin" ? [["pbcopy", []]]
         : process.platform === "win32" ? [["clip", []]]
@@ -449,7 +444,7 @@ async function handle(req, res) {
             return res.end(readFileSync(UI_FILE, "utf8"));
         }
         if (req.method === "GET" && url.pathname === "/api/state") {
-            return json(res, 200, { templates: loadTemplates(), runs: runs.map((r) => summary(r)), cleanup: cleanup.state, agent: !!agent });
+            return json(res, 200, { templates: loadTemplates(), runs: runs.map((r) => summary(r)), cleanup: cleanup.state });
         }
         if (req.method === "GET" && url.pathname.startsWith("/api/runs/")) {
             return json(res, 200, findRun(url.pathname.split("/")[3]));
@@ -473,7 +468,7 @@ async function handle(req, res) {
             if (url.pathname === "/api/cancel") return json(res, 200, cancelRun(body.id));
             if (url.pathname === "/api/open-session") {
                 const run = findRun(body.id);
-                return json(res, 200, await askAgent(sessionPrompt(run, body.kind || "repo", body.target)));
+                return json(res, 200, copySessionPrompt(sessionPrompt(run, body.kind || "repo", body.target)));
             }
             if (url.pathname === "/api/copy-seed") return json(res, 200, copyToClipboard(seedPromptFor(findRun(body.id))));
             if (url.pathname === "/api/open-vscode") return json(res, 200, openInVSCode(findRun(body.id)));
@@ -494,7 +489,7 @@ async function handle(req, res) {
     }
 }
 
-// One shared loopback server for all panels. Port 0 picks a free port (canvas mode).
+// One shared loopback server for all browser tabs.
 export function listen({ port = 0, host = "127.0.0.1" } = {}) {
     if (!serverPromise) {
         serverPromise = new Promise((resolve, reject) => {

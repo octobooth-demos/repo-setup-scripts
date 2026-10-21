@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-// Standalone Demo Launcher: the same UI and API as the Copilot canvas, served on a fixed
-// loopback port so it works in any browser without the Copilot app or SDK.
+// Standalone Demo Launcher: a browser GUI for create-repo on a fixed loopback port. A fallback
+// for the Copilot canvas that needs neither the Copilot app nor its SDK.
 //
-//   node launcher/server.mjs [--port 4747] [--open]
+//   node standalone-launcher/server.mjs [--port 4747] [--open]
 //
 // Env: DEMO_LAUNCHER_PORT, DEMO_LAUNCHER_STATE_DIR (run history location).
 
@@ -21,7 +21,7 @@ const { values } = parseArgs({
 });
 
 if (values.help) {
-    console.log("Usage: node launcher/server.mjs [--port 4747] [--open]");
+    console.log("Usage: node standalone-launcher/server.mjs [--port 4747] [--open]");
     process.exit(0);
 }
 

@@ -1,9 +1,9 @@
-# Run the standalone Demo Launcher (launcher/server.mjs) as a Windows logon task, so
+# Run the standalone Demo Launcher (standalone-launcher/server.mjs) as a Windows logon task, so
 # http://127.0.0.1:4747/ is always up in any browser, with or without the Copilot app.
 # Safe to re-run: it replaces the scheduled task and restarts it.
 #
-#   pwsh launcher/install-service.ps1 [-Port 4747]
-#   pwsh launcher/install-service.ps1 -Uninstall
+#   pwsh standalone-launcher/install-service.ps1 [-Port 4747]
+#   pwsh standalone-launcher/install-service.ps1 -Uninstall
 [CmdletBinding()]
 param(
     [ValidateRange(1, 65535)]
@@ -15,7 +15,7 @@ $ErrorActionPreference = 'Stop'
 $TaskName = 'Demo Launcher'
 
 if (-not $IsWindows -and $PSVersionTable.PSEdition -eq 'Core') {
-    Write-Error 'This installer supports Windows only. On macOS use launcher/install-service.sh; elsewhere run: node launcher/server.mjs'
+    Write-Error 'This installer supports Windows only. On macOS use standalone-launcher/install-service.sh; elsewhere run: node standalone-launcher/server.mjs'
 }
 
 $existing = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
@@ -38,12 +38,12 @@ if ($nodeMajor -lt 18) { Write-Error "Node.js 18+ is required (found $(& $node -
 $launcherDir = $PSScriptRoot
 $commonDir = git -C $launcherDir rev-parse --path-format=absolute --git-common-dir 2>$null
 if ($LASTEXITCODE -eq 0 -and $commonDir) {
-    $mainDir = Join-Path (Split-Path $commonDir -Parent) 'launcher'
+    $mainDir = Join-Path (Split-Path $commonDir -Parent) 'standalone-launcher'
     if ((Resolve-Path $mainDir -ErrorAction SilentlyContinue).Path -ne (Resolve-Path $launcherDir).Path) {
         if (Test-Path (Join-Path $mainDir 'server.mjs')) {
             $launcherDir = $mainDir
         } else {
-            Write-Warning "The main checkout doesn't have launcher/server.mjs yet; using this worktree. Re-run from the main checkout after merging."
+            Write-Warning "The main checkout doesn't have standalone-launcher/server.mjs yet; using this worktree. Re-run from the main checkout after merging."
         }
     }
 }
@@ -64,7 +64,7 @@ $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoi
 $principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType Interactive -RunLevel Limited
 
 Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Settings $settings -Principal $principal `
-    -Description 'Standalone Demo Launcher (repo-setup-scripts/launcher/server.mjs)' | Out-Null
+    -Description 'Standalone Demo Launcher (repo-setup-scripts/standalone-launcher/server.mjs)' | Out-Null
 Start-ScheduledTask -TaskName $TaskName
 
 $url = "http://127.0.0.1:$Port/"

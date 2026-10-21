@@ -4,7 +4,7 @@ Create demo repositories (private unless a template says otherwise) from the tem
 
 There are three ways to create a demo, and all of them run the same scripts and config:
 
-- **[Demo Launcher canvas](#demo-launcher-canvas)**: a side panel in the GitHub Copilot app. Pick a demo, click **Create**, then jump into the repo, PR, or session. This is the easiest option at the booth. The same launcher also runs [standalone in a browser](#standalone-demo-launcher) as a backup if the canvas ever breaks.
+- **[Demo Launcher canvas](#demo-launcher-canvas)**: a side panel in the GitHub Copilot app. Pick a demo, click **Create**, then jump into the repo, PR, or session. This is the easiest option at the booth. If the canvas is ever unavailable, the [standalone Demo Launcher](#standalone-demo-launcher) is the same kind of GUI in a browser.
 - **[`create-repo.sh` / `create-repo.ps1`](#bash)**: the scripts the launcher runs, used interactively or [non-interactively](#non-interactive-mode).
 - **[ChatOps](#chatops)**: `/new-demo <key>` comments or the Actions tab. These create demos in the `octobooth-demos` org without a booth machine.
 
@@ -30,10 +30,10 @@ Do this once per machine (macOS):
 
    Then restart the Copilot app (or reload extensions in open sessions).
 
-4. Optional backup: run the [standalone launcher](#standalone-demo-launcher) as a login service so it's always at http://127.0.0.1:4747/ in a browser:
+4. Optional fallback: run the [standalone Demo Launcher](#standalone-demo-launcher) as a login service so it's always at http://127.0.0.1:4747/ in a browser:
 
    ```bash
-   bash launcher/install-service.sh
+   bash standalone-launcher/install-service.sh
    ```
 
 Before each booth day, update the checkout with `git -C ~/repos/repo-setup-scripts pull`. Then ask Copilot in any session to **"open the demo launcher"**. At the end of the day, use the launcher's **Clean up** section or `bash ./create-repo.sh --cleanup` (see [Cleaning up](#cleaning-up)).
@@ -154,7 +154,7 @@ How the loader works:
 | The demo was created in the wrong account | Repos go to the [logged-in account](#where-repos-are-created) unless you set **Owner**. Check `gh auth status`. |
 | The panel URL stopped working | The extension restarted on a new port. Reopen the canvas. |
 | A card says **interrupted** | The app or extension restarted mid-run. The repo may be half set up. Delete it with **Clean up** and run it again. |
-| The canvas won't load after a Copilot app update | Use the [standalone launcher](#standalone-demo-launcher) at http://127.0.0.1:4747/ while the canvas is fixed. |
+| The canvas won't load at all (for example after a Copilot app update) | Use the [standalone Demo Launcher](#standalone-demo-launcher) at http://127.0.0.1:4747/ until it's fixed. |
 
 ### Agent actions
 
@@ -171,45 +171,44 @@ For example: "launch octocart in the demo launcher and tell me when Copilot has 
 
 ### Files
 
-The launcher logic lives in [`launcher/`](launcher/) and uses plain Node only. The canvas is a thin Copilot SDK adapter around it, so an SDK change can only break that one file.
-
 | File | Purpose |
 | --- | --- |
-| [`.github/extensions/demo-launcher/extension.mjs`](.github/extensions/demo-launcher/extension.mjs) | The only file that imports the Copilot SDK: registers the canvas and its actions and hands follow-up prompts to the session |
-| [`.github/extensions/demo-launcher/install.sh`](.github/extensions/demo-launcher/install.sh) | Installs or uninstalls the user-level loader |
-| [`launcher/core.mjs`](launcher/core.mjs) | Runs `create-repo` in the background, parses its output, and serves the panel and API on a loopback port |
-| [`launcher/ui.html`](launcher/ui.html) | The panel UI |
-| [`launcher/cleanup.mjs`](launcher/cleanup.mjs) | The Clean up section (preview and delete through `create-repo --cleanup`) |
-| [`launcher/server.mjs`](launcher/server.mjs) | The [standalone](#standalone-demo-launcher) entry point |
-| [`launcher/install-service.sh`](launcher/install-service.sh) / [`.ps1`](launcher/install-service.ps1) | Install the standalone launcher as a login service |
+| [`extension.mjs`](.github/extensions/demo-launcher/extension.mjs) | Registers the canvas and its actions, runs `create-repo` in the background, parses its output, and serves the panel on a loopback port |
+| [`ui.html`](.github/extensions/demo-launcher/ui.html) | The panel UI |
+| [`cleanup.mjs`](.github/extensions/demo-launcher/cleanup.mjs) | The Clean up section (preview and delete through `create-repo --cleanup`) |
+| [`install.sh`](.github/extensions/demo-launcher/install.sh) | Installs or uninstalls the user-level loader |
 
-If you change what the scripts print (repo, clone, `PR #N created: <url>`, Copilot review lines, and so on), update `parseLine` in `launcher/core.mjs` to match.
+If you change what the scripts print (repo, clone, `PR #N created: <url>`, Copilot review lines, and so on), update `parseLine` in `extension.mjs` and in [`standalone-launcher/core.mjs`](standalone-launcher/core.mjs) to match.
 
 ## Standalone Demo Launcher
 
-A backup for when the canvas isn't available, for example if a Copilot app update changes the extension SDK. [`launcher/server.mjs`](launcher/server.mjs) serves the same UI in any browser on a fixed port, with no Copilot app or SDK needed:
+A fallback for when the canvas isn't available, for example if a Copilot app update breaks extensions. [`standalone-launcher/`](standalone-launcher/) is a GUI for `create-repo` that runs in any browser. It works without the Copilot app.
+
+It lives **alongside** the canvas and doesn't replace it. It shares no code with `.github/extensions/demo-launcher/` and doesn't import the Copilot SDK. Like the terminal, it reads `config.json` and runs `create-repo.sh` / `create-repo.ps1` from this checkout, so `git pull` updates its demo list. Its run history is kept separately from the canvas's.
 
 ```bash
-node launcher/server.mjs --open        # http://127.0.0.1:4747/ (--port or DEMO_LAUNCHER_PORT to change)
+node standalone-launcher/server.mjs --open     # http://127.0.0.1:4747/ (--port or DEMO_LAUNCHER_PORT to change)
 ```
 
-Everything works the same except the buttons that need a Copilot agent. **Open session**, **Open PR/issue session**, and **Run with Ensemble** become **📋 Copy … prompt**. They copy the same instruction the canvas would send, so you can paste it into any Copilot app chat and Copilot opens the session for you. Run history is kept apart from the canvas's history, in `~/Library/Application Support/demo-launcher/` on macOS (`%LOCALAPPDATA%\demo-launcher` on Windows, `DEMO_LAUNCHER_STATE_DIR` to override).
+It has the same demo picker, live logs, links, presenter answer key, and Clean up as the canvas. There's no Copilot agent behind it, so the session buttons become **📋 Copy … prompt**. They copy the instruction the canvas would send to Copilot; paste it into any Copilot app chat and Copilot opens the session (or the Ensemble run) for you.
 
-**Always on.** To start it at login and restart it if it stops, run this from the **main checkout** (it points at the main checkout even when run from a worktree, like `install.sh`):
+**Always on.** To start it at login and restart it if it stops, run the installer from the **main checkout**. Like `install.sh`, it uses the main checkout even when run from a worktree.
 
 ```bash
-bash launcher/install-service.sh               # macOS: LaunchAgent, logs in ~/Library/Logs/demo-launcher.log
-bash launcher/install-service.sh --uninstall
+bash standalone-launcher/install-service.sh               # macOS LaunchAgent; logs in ~/Library/Logs/demo-launcher.log
+bash standalone-launcher/install-service.sh --uninstall
 ```
 
 ```powershell
-.\launcher\install-service.ps1                 # Windows: logon scheduled task, logs in %LOCALAPPDATA%\demo-launcher\server.log
-.\launcher\install-service.ps1 -Uninstall
+.\standalone-launcher\install-service.ps1                 # Windows logon task; logs in %LOCALAPPDATA%\demo-launcher\server.log
+.\standalone-launcher\install-service.ps1 -Uninstall
 ```
 
-`git pull` updates it; restart the service to pick up changes (re-run the installer). Re-run it as well after switching Node versions with nvm, because the service uses the absolute `node` path from install time.
+After `git pull`, re-run the installer to restart the service with the new code. Re-run it as well after switching Node versions with nvm, because the service records the absolute `node` path.
 
-**Security.** The server listens only on `127.0.0.1`. It rejects requests whose `Host` isn't `127.0.0.1:<port>` or `localhost:<port>` (DNS rebinding), and POSTs from other origins or that aren't JSON (CSRF). Other local users and processes on the machine can still reach it, so don't run it on a shared machine.
+Run history is in `~/Library/Application Support/demo-launcher/` on macOS (`%LOCALAPPDATA%\demo-launcher` on Windows). Set `DEMO_LAUNCHER_STATE_DIR` to override it.
+
+**Security.** The server listens only on `127.0.0.1` and rejects requests with any other `Host` (DNS rebinding). POSTs must be JSON and come from the launcher's own page (CSRF). Other users and processes on the same machine can still reach it, so don't run it on a shared machine.
 
 ## Where repos are created
 
@@ -405,7 +404,7 @@ On macOS or Linux, run the same file with `pwsh -File tests/create-repo.Tests.ps
 
 ```bash
 bash -n create-repo.sh
-for f in .github/extensions/demo-launcher/*.mjs launcher/*.mjs; do node --check "$f"; done
+for f in .github/extensions/demo-launcher/*.mjs standalone-launcher/*.mjs; do node --check "$f"; done
 bash -n .github/extensions/demo-launcher/install.sh
-bash -n launcher/install-service.sh
+bash -n standalone-launcher/install-service.sh
 ```

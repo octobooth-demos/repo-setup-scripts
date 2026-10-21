@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Run the standalone Demo Launcher (launcher/server.mjs) as a macOS login service, so
+# Run the standalone Demo Launcher (standalone-launcher/server.mjs) as a macOS login service, so
 # http://127.0.0.1:4747/ is always up in any browser, with or without the Copilot app.
 # Safe to re-run: it rewrites the LaunchAgent and restarts it.
 #
-#   bash launcher/install-service.sh [--port 4747]
-#   bash launcher/install-service.sh --uninstall
+#   bash standalone-launcher/install-service.sh [--port 4747]
+#   bash standalone-launcher/install-service.sh --uninstall
 set -euo pipefail
 
 LABEL="com.octobooth.demo-launcher"
@@ -17,13 +17,13 @@ while [ $# -gt 0 ]; do
     case "$1" in
         --port) PORT="${2:?--port needs a value}"; shift 2 ;;
         --uninstall) ACTION=uninstall; shift ;;
-        -h|--help) echo "Usage: bash launcher/install-service.sh [--port 4747] [--uninstall]"; exit 0 ;;
+        -h|--help) echo "Usage: bash standalone-launcher/install-service.sh [--port 4747] [--uninstall]"; exit 0 ;;
         *) echo "Unknown option: $1" >&2; exit 2 ;;
     esac
 done
 
 if [ "$(uname -s)" != "Darwin" ]; then
-    echo "❌ This installer supports macOS only. Elsewhere, run: node launcher/server.mjs" >&2
+    echo "❌ This installer supports macOS only. Elsewhere, run: node standalone-launcher/server.mjs" >&2
     exit 1
 fi
 
@@ -58,12 +58,12 @@ NODE="$(cd "$(dirname "$NODE")" && pwd -P)/$(basename "$NODE")"
 # Prefer the main checkout over a temporary worktree, which may be deleted later.
 LAUNCHER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if common_dir=$(git -C "$LAUNCHER_DIR" rev-parse --path-format=absolute --git-common-dir 2>/dev/null); then
-    main_dir="$(dirname "$common_dir")/launcher"
+    main_dir="$(dirname "$common_dir")/standalone-launcher"
     if [ "$main_dir" != "$LAUNCHER_DIR" ]; then
         if [ -f "$main_dir/server.mjs" ]; then
             LAUNCHER_DIR="$main_dir"
         else
-            echo "⚠️  The main checkout ($(dirname "$common_dir")) doesn't have launcher/server.mjs yet;"
+            echo "⚠️  The main checkout ($(dirname "$common_dir")) doesn't have standalone-launcher/server.mjs yet;"
             echo "   using this worktree instead. Re-run this from the main checkout after merging."
         fi
     fi
@@ -85,7 +85,7 @@ mkdir -p "$(dirname "$PLIST")" "$(dirname "$LOG_FILE")"
 cat > "$PLIST" <<PLIST_EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<!-- Installed by repo-setup-scripts (launcher/install-service.sh). -->
+<!-- Installed by repo-setup-scripts (standalone-launcher/install-service.sh). -->
 <plist version="1.0">
 <dict>
     <key>Label</key>

@@ -396,4 +396,11 @@ On macOS or Linux, run the same file with `pwsh -File tests/create-repo.Tests.ps
 bash -n create-repo.sh
 for f in .github/extensions/demo-launcher/*.mjs; do node --check "$f"; done
 bash -n .github/extensions/demo-launcher/install.sh
+shellcheck --severity=warning -x create-repo.sh .github/extensions/demo-launcher/install.sh
 ```
+
+```powershell
+Invoke-ScriptAnalyzer -Path .\create-repo.ps1 -Settings .\PSScriptAnalyzerSettings.psd1
+```
+
+The [CI workflow](.github/workflows/ci.yml) runs these checks on every pull request and push to `main`, and also validates `config.json` (required fields, workflow names, and that every referenced resource file and directory exists). CI never creates repos or uses secrets.

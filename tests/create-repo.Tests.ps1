@@ -15,6 +15,9 @@ $testState = [pscustomobject]@{
     StalePushRun = $false
 }
 Remove-Item Env:DEMO_NO_BROWSER -ErrorAction SilentlyContinue
+# Behave the same locally and in CI: the script skips browsers under Actions and
+# would append test outputs to the runner's real step output file.
+Remove-Item Env:GITHUB_ACTIONS, Env:GITHUB_OUTPUT -ErrorAction SilentlyContinue
 
 function Assert {
     param([bool]$Condition, [string]$Message)

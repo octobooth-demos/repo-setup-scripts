@@ -103,7 +103,7 @@ Every repository the scripts create gets the `demo-generated` topic, which is wh
   The card also links to the repo's pull request list and has a **🔑 Presenter answer key** button. The button opens `resources/<key>/ANSWER_KEY.md` from this repo on your machine (in VS Code if it's installed). The answer key is never copied into demo repos, so keep it off the shared screen.
 - **One-click follow-ups.** **Open session in Copilot app** has Copilot add the repo as a project and open a fresh session. **Open PR session** and **Open issue session** open those items. **Open in VS Code** runs `code <clone>`.
 - **Seed prompts.** For demos with a `seed_prompt_file` (like `ensemble-blank`), the card shows the prompt with **📋 Copy** and **▶ Run with Ensemble**. Run with Ensemble has Copilot add the repo as a project and start a new autopilot session that runs the prompt on the Ensemble model (`model: "auto"`, `auto_tier: "hydrafusion"`).
-- **Clean up.** This works like `--cleanup`. Pick an owner and an age cutoff (default 24 hours, or **Any age**), review the matching `demo-generated` repos, and untick any you want to keep. Then delete the rest, optionally with their clones in `~/repos`. Deleting needs the `delete_repo` scope.
+- **Clean up.** This works like `--cleanup`. Pick an owner and an age cutoff (default 72 hours, or **Any age**), review the matching `demo-generated` repos, and untick any you want to keep. Then delete the rest, optionally with their clones in `~/repos`. Deleting needs the `delete_repo` scope.
 
 Runs use your stored `gh auth login`, not any `GH_TOKEN` the app injects, so they have the same scopes as a terminal run. Run history survives restarts. It's kept in `~/.copilot/extensions/demo-launcher/artifacts/runs.json`, and **Clear history** empties it. The panel is a plain loopback web page, so its URL also works in a browser, including VS Code's Simple Browser. The port changes each time the extension restarts.
 
@@ -209,14 +209,14 @@ Pages on free personal accounts only works for public repos, so Booth Bingo repo
 
 ## Cleaning up
 
-Delete old demo repos from the logged-in account (or `--owner` / `-Owner`). Only repos with the `demo-generated` topic that are older than the cutoff (default 24 hours) are considered; everything else is left alone. The script lists matches and asks before deleting.
+Delete old demo repos from the logged-in account (or `--owner` / `-Owner`). Only repos with the `demo-generated` topic that are older than the cutoff (default 72 hours) are considered; everything else is left alone. The script lists matches and asks before deleting.
 
 ```bash
-bash ./create-repo.sh --cleanup [--older-than 24 | --all] [--dry-run] [--yes] [--owner <name>]
+bash ./create-repo.sh --cleanup [--older-than 72 | --all] [--dry-run] [--yes] [--owner <name>]
 ```
 
 ```powershell
-.\create-repo.ps1 -Cleanup [-OlderThanHours 24 | -All] [-DryRun] [-Yes] [-Owner <name>]
+.\create-repo.ps1 -Cleanup [-OlderThanHours 72 | -All] [-DryRun] [-Yes] [-Owner <name>]
 ```
 
 **End of event:** `--all` / `-All` ignores the age cutoff and deletes every `demo-generated` repo the owner has, including ones created minutes ago. It prints a warning and still asks before deleting unless you pass `--yes` / `-Yes`. Run with `--dry-run` first to check the list.
@@ -228,7 +228,7 @@ Deleting repos needs the `delete_repo` scope. The scripts request it when they l
 | Where the demo repo lives | How it gets cleaned up |
 | --- | --- |
 | A booth account (`octobooth-1`, `octobooth-2`, …), the default | Run `--cleanup` / `-Cleanup` **on that machine**. Nothing else can reach it, because the [ChatOps App](#chatops) is only installed on the org. |
-| The `octobooth-demos` org (`--owner octobooth-demos`, ChatOps, `security-octo-supply`, `security-octo-supply-v4`, `ai-security`, `ensemble-blank`) | Automatic: the [nightly cleanup](.github/workflows/cleanup-demos.yml) deletes them at 08:00 UTC. To clean up sooner, comment `/cleanup [hours] --confirm` or run the workflow from the Actions tab. After an event, `/cleanup --all --confirm` deletes them all regardless of age. |
+| The `octobooth-demos` org (`--owner octobooth-demos`, ChatOps, `security-octo-supply`, `security-octo-supply-v4`, `ai-security`, `ensemble-blank`) | Automatic: the [nightly cleanup](.github/workflows/cleanup-demos.yml) deletes them at 08:00 UTC once they are more than 72 hours old. To clean up sooner, comment `/cleanup [hours] --confirm` or run the workflow from the Actions tab. After an event, `/cleanup --all --confirm` deletes them all regardless of age. |
 
 **Recommended booth routine (repos in each booth account):**
 
@@ -240,7 +240,7 @@ gh auth refresh -h github.com -s delete_repo
 git pull
 bash ./create-repo.sh --template booth-bingo
 
-# End of the day (or the next morning): remove that account's demos older than 24h
+# End of the day (or the next morning): remove that account's demos older than 72h
 bash ./create-repo.sh --cleanup
 # or, after the event, remove every demo regardless of age: bash ./create-repo.sh --cleanup --all
 ```
@@ -312,7 +312,7 @@ The **presenter answer key**, [`resources/octocart/ANSWER_KEY.md`](resources/oct
 4. Assigns the `js/sql-injection` alert to Copilot with `PATCH /repos/{owner}/{repo}/code-scanning/alerts/{n}`, so a draft fix PR is ready by demo time. It assigns `github-agentic-autofix[bot]`, the account the UI's **Assign to Copilot** uses, and falls back to `copilot-swe-agent[bot]`. If both fail, it warns, and you can assign the alert yourself.
 5. Opens "Containerize the supplier portal and deploy it to staging" from [`resources/ai-security/pr-infra`](resources/ai-security/pr-infra): a Dockerfile, a deploy shell script, Terraform, and a PHP health check, none of which CodeQL analyzes. AI Scan doesn't use CodeQL results, but it only reviews PRs opened after code scanning is on. Opening the PR after step 3 guarantees that.
 
-**Pre-bake this demo.** The script takes about 5–10 minutes. AI Scan findings and Copilot's draft PR each take about 10 more minutes, and longer when GitHub is busy. Create it from the launcher before the booth opens, then work through the checklist in the [presenter notes](resources/ai-security/ANSWER_KEY.md). One repo can serve the whole day; the nightly cleanup deletes it after 24 hours.
+**Pre-bake this demo.** The script takes about 5–10 minutes. AI Scan findings and Copilot's draft PR each take about 10 more minutes, and longer when GitHub is busy. Create it from the launcher before the booth opens, then work through the checklist in the [presenter notes](resources/ai-security/ANSWER_KEY.md). One repo can serve the whole day; the nightly cleanup deletes it after 72 hours.
 
 The script doesn't turn on CodeQL default setup, because default setup can't run alongside the template's advanced workflow. Everything it does needs only admin on the repo it creates, so booth accounts that are org members (not owners) can run it. The org must already allow and enable AI Scan and agentic autofix; `octobooth-demos` does both. Each run uses Code Security AI credits and Actions minutes.
 
@@ -325,14 +325,14 @@ The script doesn't turn on CodeQL default setup, because default setup can't run
 
 `ensemble-blank` shows Ensemble (formerly Project HydraFusion), the Copilot model option that orchestrates several models per request (Single, Cascade, or Critique) for frontier-level quality at lower cost. The preview works best on a substantial, well-scoped, first-turn prompt in autopilot, so the demo is just that: an empty repo in `octobooth-demos` and one prompt from [`resources/ensemble-blank/seed-prompt.txt`](resources/ensemble-blank/seed-prompt.txt), which builds "Mona Merge Rush", a 2048-style Octocat game with `node:test` tests.
 
-After the run finishes, click **▶ Run with Ensemble** in the launcher, or copy the prompt and run it yourself with the Ensemble model in autopilot. Expect about 4-5 minutes and a playable game whose tests pass. Talking points, benchmark numbers, and alternate prompts are in the [presenter notes](resources/ensemble-blank/ANSWER_KEY.md). Use a fresh repo for each visitor; the nightly cleanup deletes them after 24 hours.
+After the run finishes, click **▶ Run with Ensemble** in the launcher, or copy the prompt and run it yourself with the Ensemble model in autopilot. Expect about 4-5 minutes and a playable game whose tests pass. Talking points, benchmark numbers, and alternate prompts are in the [presenter notes](resources/ensemble-blank/ANSWER_KEY.md). Use a fresh repo for each visitor; the nightly cleanup deletes them after 72 hours.
 
 ## ChatOps
 
 Two workflows in this repo let you create and clean up demos without a booth machine running the script.
 
 - **[New demo](.github/workflows/new-demo.yml)**: run it from the Actions tab and pick a template, or comment `/new-demo <key>` on any issue or PR in this repo. Repos are always created in `octobooth-demos`, because App tokens cannot create repos in personal accounts. It replies with the repo URL and, for stacks, the top PR URL and the game URL (for OctoCart, the pull request list). Only `repo_only`, `blank`, `security_prs`, `stacked_prs`, `code_review_prs`, and `ai_security` templates are allowed, because Codespaces need a user token.
-- **[Clean up demos](.github/workflows/cleanup-demos.yml)**: runs nightly, from the Actions tab (`max_age_hours`, default 24; `dry_run`, default on), or by comment: `/cleanup [hours | --all] [--dry-run | --confirm]`. Comment runs are dry runs unless they include `--confirm`; only the nightly run deletes without opting in. Manual and comment runs need a cutoff of at least 1 hour unless they use the end-of-event override (`--all` in a comment, or the `all` input on the Actions tab), which deletes every demo repo in the org regardless of age and adds a warning to the reply, and the comment must start with exactly `/cleanup`. If some deletions fail, the run continues with the rest, then fails and lists what was and was not deleted. It only deletes repos in `octobooth-demos` that have the `demo-generated` topic **and** are older than the cutoff. It cannot see repos in booth accounts; see [Which cleanup covers which repos](#which-cleanup-covers-which-repos).
+- **[Clean up demos](.github/workflows/cleanup-demos.yml)**: runs nightly, from the Actions tab (`max_age_hours`, default 72; `dry_run`, default on), or by comment: `/cleanup [hours | --all] [--dry-run | --confirm]`. Comment runs are dry runs unless they include `--confirm`; only the nightly run deletes without opting in. Manual and comment runs need a cutoff of at least 1 hour unless they use the end-of-event override (`--all` in a comment, or the `all` input on the Actions tab), which deletes every demo repo in the org regardless of age and adds a warning to the reply, and the comment must start with exactly `/cleanup`. If some deletions fail, the run continues with the rest, then fails and lists what was and was not deleted. It only deletes repos in `octobooth-demos` that have the `demo-generated` topic **and** are older than the cutoff. It cannot see repos in booth accounts; see [Which cleanup covers which repos](#which-cleanup-covers-which-repos).
 
 Comment commands only run for users with write, maintain, or admin access to this repository.
 

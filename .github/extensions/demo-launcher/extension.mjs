@@ -521,7 +521,7 @@ const session = await joinSession({
                         type: "object",
                         properties: {
                             owner: { type: "string", description: "Account or org; defaults to the logged-in account." },
-                            olderThanHours: { type: "integer", minimum: 0, description: "Age cutoff in hours (default 24; 0 = all)." },
+                            olderThanHours: { type: "integer", minimum: 0, description: "Age cutoff in hours (default 72; 0 = all)." },
                         },
                     },
                     handler: async (ctx) => cleanup.preview(ctx.input || {}),

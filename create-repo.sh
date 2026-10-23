@@ -946,6 +946,14 @@ validate_selected_repo() {
                 echo "❌ The project_board workflow needs a user token with the 'project' scope"
                 exit 1
             fi
+            # Classic OAuth tokens list their scopes; fine-grained tokens don't, so only check when listed.
+            local scopes
+            scopes=$(gh api -i user 2>/dev/null | tr -d '\r' | sed -n 's/^[Xx]-[Oo][Aa]uth-[Ss]copes: //p' | head -1)
+            if [ -n "$scopes" ] && ! tr ',' '\n' <<< "$scopes" | tr -d ' ' | grep -qx 'project'; then
+                echo "❌ This demo creates a GitHub Project, so your gh login needs the 'project' scope. Run:"
+                echo "   gh auth refresh -h github.com -s project"
+                exit 1
+            fi
             ;;
         *)
             echo "❌ Unknown workflow: $WORKFLOW"
@@ -1080,8 +1088,9 @@ if ! gh auth status &> /dev/null; then
         exit 1
     fi
     echo "📝 Not logged in to GitHub. Starting login process..."
-    # delete_repo lets --cleanup remove this account's old demo repos.
-    gh auth login -s delete_repo
+    # delete_repo lets --cleanup remove this account's old demo repos; project lets
+    # Copilot Airways create its GitHub Project (and cleanup delete it).
+    gh auth login -s delete_repo,project
 else
     echo "✅ Already authenticated with GitHub"
 fi

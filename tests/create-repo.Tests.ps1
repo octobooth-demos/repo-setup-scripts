@@ -12,7 +12,7 @@ $testState = [pscustomobject]@{
     NextPr = 1; StackNumbers = @(); StackMismatch = $false; GitEmail = $null; ReviewApiFailure = $false
     CleanupRepos = @(); NpmCalls = $null; PagesDisabled = $false; Opened = $null
     CodeqlConclusion = 'success'; AssignFailure = $false; AutofixBotMissing = $false; AnalysesCount = '2'; LateRulePolls = 0
-    StalePushRun = $false; SeedConclusion = 'success'; GraphQL = $null; Views = $null
+    StalePushRun = $false; SeedConclusion = 'success'; Scopes = $null; GraphQL = $null; Views = $null
 }
 $projectFixture = @{
     title = 'Roadmap'; short_description = 'Demo board'; readme = 'Read me'
@@ -97,6 +97,10 @@ function gh {
     if ($testState.Failure -and ($arguments[0..1] -join ' ') -eq $testState.Failure) {
         $global:LASTEXITCODE = 42
         return
+    }
+    if ($arguments[0] -eq 'api' -and $arguments[1] -eq '-i' -and $arguments[2] -eq 'user') {
+        if ($testState.Scopes) { return @('HTTP/2.0 200 OK', "x-oauth-scopes: $($testState.Scopes)", '', '{}') }
+        return @('HTTP/2.0 200 OK', '', '{}')
     }
     if ($arguments[0] -eq 'run' -and $arguments[1] -eq 'list' -and $arguments -contains 'hydrate-issues.yml') {
         return @('completed', $testState.SeedConclusion, 'https://github.com/runs/1')
@@ -314,7 +318,7 @@ try {
         'ai-security-assign-failure', 'ai-security-assign-fallback', 'ai-security-codeql-failure',
         'ai-security-missing-seed', 'ai-security-no-seed', 'ai-security-scan-only', 'ai-security-autofix-only',
         'ai-security-missing-prs',
-        'project-board', 'project-board-seed-failure', 'project-board-missing-file',
+        'project-board', 'project-board-seed-failure', 'project-board-missing-file', 'project-board-missing-scope',
         'blank', 'blank-interactive', 'blank-missing-seed', 'blank-needs-workflow'
     )) {
         $config = $originalConfig | ConvertFrom-Json
@@ -340,6 +344,7 @@ try {
         $testState.LateRulePolls = 0
         $testState.StalePushRun = $false
         $testState.SeedConclusion = 'success'
+        $testState.Scopes = $null
         $testState.GraphQL = New-Object 'System.Collections.Generic.List[object]'
         $testState.Views = New-Object 'System.Collections.Generic.List[object]'
         $testState.Opened = New-Object 'System.Collections.Generic.List[string]'
@@ -393,7 +398,17 @@ try {
                 $expectedFailure = 'prs[]'
             }
             'blank' { $selection = $null; $scriptArgs = @{ Template = 'ensemble-blank'; NoClone = $true } }
-            'project-board' { $selection = $null; $scriptArgs = @{ Template = 'copilot-airways'; NoClone = $true } }
+            'project-board' {
+                $selection = $null
+                $scriptArgs = @{ Template = 'copilot-airways'; NoClone = $true }
+                $testState.Scopes = 'delete_repo, project, repo'
+            }
+            'project-board-missing-scope' {
+                $selection = $null
+                $scriptArgs = @{ Template = 'copilot-airways'; NoClone = $true }
+                $testState.Scopes = 'codespace, delete_repo, repo'
+                $expectedFailure = 'gh auth refresh -h github.com -s project'
+            }
             'project-board-seed-failure' {
                 $selection = $null
                 $scriptArgs = @{ Template = 'copilot-airways'; NoClone = $true }
@@ -520,7 +535,7 @@ try {
         Assert ((Get-Location).Path -eq $originalLocation.Path) "$scenario did not restore location."
         if ($expectedFailure) {
             Assert ($null -ne $caught -and $caught.Contains($expectedFailure)) "$scenario expected '$expectedFailure', got '$caught'."
-            if ($scenario -notin @('create-failure', 'topic-failure', 'push-failure', 'login-failure', 'stack-api-failure', 'stack-verify-mismatch', 'non-interactive-login', 'ai-security-codeql-failure', 'project-board-seed-failure')) {
+            if ($scenario -notin @('create-failure', 'topic-failure', 'push-failure', 'login-failure', 'stack-api-failure', 'stack-verify-mismatch', 'non-interactive-login', 'ai-security-codeql-failure', 'project-board-seed-failure', 'project-board-missing-scope')) {
                 Assert ($testState.Calls.Count -eq 0) "$scenario invoked a remote command before validation."
             }
             if ($scenario -eq 'non-interactive-login') {
@@ -543,6 +558,9 @@ try {
             if ($scenario -eq 'ai-security-codeql-failure') {
                 Assert ((Find-Calls 'gh' 'pr create').Count -eq 0) 'Opened the AI Scan PR although CodeQL failed.'
                 Assert ((Find-Calls 'gh' 'api --method PATCH').Where({ $_.Arguments[3] -like '*/code-scanning/alerts/*' }).Count -eq 0) 'Assigned an alert although CodeQL failed.'
+            }
+            if ($scenario -eq 'project-board-missing-scope') {
+                Assert ((Find-Calls 'gh' 'repo create').Count -eq 0) 'Created a repo although the login lacks the project scope.'
             }
             if ($scenario -eq 'project-board-seed-failure') {
                 Assert ((Find-Calls 'gh' 'project create').Count -eq 0) 'Created a project although seeding failed.'

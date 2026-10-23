@@ -224,7 +224,9 @@ function Connect-GitHubAccount {
             throw 'Not authenticated with GitHub. In non-interactive mode, log in first (gh auth login) or set GH_TOKEN.'
         }
         Write-Host 'Not logged in to GitHub. Starting login process...'
-        Invoke-Native 'gh' @('auth', 'login', '-s', 'delete_repo') | Out-Host
+        # delete_repo lets -Cleanup remove old demo repos; project lets Copilot Airways
+        # create its GitHub Project (and cleanup delete it).
+        Invoke-Native 'gh' @('auth', 'login', '-s', 'delete_repo,project') | Out-Host
     }
     $currentUser = & gh api user --jq '.login'
     if ($LASTEXITCODE -ne 0) { $currentUser = $null }
@@ -964,6 +966,19 @@ try {
     $account = Connect-GitHubAccount
     $currentUser = $account.User
     $userToken = $account.UserToken
+    if ($selectedRepo.workflow -eq 'project_board') {
+        if (-not $userToken) {
+            throw "The project_board workflow needs a user token with the 'project' scope."
+        }
+        # Classic OAuth tokens list their scopes; fine-grained tokens don't, so only check when listed.
+        $scopeHeader = @(Invoke-GhQuiet api -i user | Where-Object { "$_" -match '^x-oauth-scopes:' } | Select-Object -First 1)
+        if ($scopeHeader.Count -gt 0) {
+            $scopes = @(("$($scopeHeader[0])" -replace '^[^:]+:', '') -split ',' | ForEach-Object { $_.Trim() })
+            if ($scopes -notcontains 'project') {
+                throw "This demo creates a GitHub Project, so your gh login needs the 'project' scope. Run: gh auth refresh -h github.com -s project"
+            }
+        }
+    }
 
     # Owner precedence: -Owner, then the entry's "owner" ("org" = top-level org),
     # then the logged-in account. App tokens have no account, so they use the org.
@@ -1206,9 +1221,6 @@ try {
             Register-PullRequestStack $stackNumbers
         }
         'project_board' {
-            if (-not $userToken) {
-                throw "The project_board workflow needs a user token with the 'project' scope."
-            }
             Write-Host 'Setting up GitHub Projects demo...'
             $projectUrl = New-DemoProject
         }

@@ -173,7 +173,7 @@ How the loader works:
 | The app shows two "Demo Launcher" canvases | Expected on staff builds with both the project and loader set up. Either one works. See [Two Demo Launcher canvases](#two-demo-launcher-canvases). |
 | Copilot can't find the Demo Launcher outside this project | Run `install.sh`, then restart the app or reload extensions. Check that `~/.copilot/extensions/demo-launcher/extension.mjs` exists and that the path it imports exists. If it still doesn't appear, your app build may not load user-level extensions; open it from a session in the `repo-setup-scripts` project. |
 | The panel shows old behavior | Run `git pull` in the main checkout and reload extensions. Sessions inside this project use their own checkout, so update that branch. |
-| A run fails with an auth or scope error, or cleanup asks for `delete_repo` | Run `gh auth status` in a terminal, then `gh auth refresh -h github.com -s codespace,delete_repo`. |
+| A run fails with an auth or scope error, or cleanup asks for `delete_repo` or `project` | Run `gh auth status` in a terminal, then `gh auth refresh -h github.com -s codespace,delete_repo,project`. |
 | The demo was created in the wrong account | Repos go to the [logged-in account](#where-repos-are-created) unless you set **Owner**. Check `gh auth status`. |
 | The panel URL stopped working | The extension restarted on a new port. Reopen the canvas. |
 | A card says **interrupted** | The app or extension restarted mid-run. The repo may be half set up. Delete it with **Clean up** and run it again. |
@@ -250,7 +250,7 @@ bash ./create-repo.sh --cleanup [--older-than 72 | --all] [--dry-run] [--yes] [-
 
 **End of event:** `--all` / `-All` ignores the age cutoff and deletes every `demo-generated` repo the owner has, including ones created minutes ago. It prints a warning and still asks before deleting unless you pass `--yes` / `-Yes`. Run with `--dry-run` first to check the list.
 
-Deleting repos needs the `delete_repo` scope. The scripts request it when they log in; for an existing login run `gh auth refresh -h github.com -s delete_repo`.
+Deleting repos needs the `delete_repo` scope, and deleting a Copilot Airways project needs the `project` scope. The scripts request both when they log in; for an existing login run `gh auth refresh -h github.com -s delete_repo,project`.
 
 ### Which cleanup covers which repos
 

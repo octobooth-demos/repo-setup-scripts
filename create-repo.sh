@@ -848,7 +848,14 @@ create_project_views() {
 # first. Never fails cleanup.
 # Usage: delete_demo_projects <owner/repo>
 delete_demo_projects() {
-    local owner="${1%%/*}" name="${1#*/}" project title
+    local owner="${1%%/*}" name="${1#*/}" project title projects
+    if ! projects=$(set -o pipefail; gh api graphql -f owner="$owner" -f name="$name" -f query='
+        query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) {
+          projectsV2(first: 20) { nodes { id title } } } }' 2>/dev/null \
+        | jq -r --arg suffix " ($name)" '.data.repository.projectsV2.nodes[]? | select(.title | endswith($suffix)) | [.id, .title] | @tsv'); then
+        echo "⚠️  Could not look up projects for $1; any demo project is left behind (needs the 'project' scope: gh auth refresh -s project)"
+        return 0
+    fi
     while IFS=$'\t' read -r project title; do
         [ -z "$project" ] && continue
         if gh api graphql -f id="$project" --silent -f query='
@@ -857,10 +864,7 @@ delete_demo_projects() {
         else
             echo "⚠️  Could not delete project '$title' (needs the 'project' scope: gh auth refresh -s project)"
         fi
-    done < <(gh api graphql -f owner="$owner" -f name="$name" -f query='
-        query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) {
-          projectsV2(first: 20) { nodes { id title } } } }' 2>/dev/null \
-        | jq -r --arg suffix " ($name)" '.data.repository.projectsV2.nodes[]? | select(.title | endswith($suffix)) | [.id, .title] | @tsv')
+    done <<< "$projects"
 }
 
 # Validate required fields and referenced files for the selected workflow.

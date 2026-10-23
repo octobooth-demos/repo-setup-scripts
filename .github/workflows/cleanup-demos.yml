@@ -152,10 +152,13 @@ jobs:
             # (linked and titled "... (<repo>)"). Best effort: the App needs
             # Organization projects (read and write) for this.
             name="${repo#*/}"
-            projects=$(gh api graphql -f owner="$ORG" -f name="$name" -f query='
+            if ! projects=$(gh api graphql -f owner="$ORG" -f name="$name" -f query='
               query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) {
                 projectsV2(first: 20) { nodes { id title } } } }' \
-              --jq ".data.repository.projectsV2.nodes[] | select(.title | endswith(\" ($name)\")) | .id" < /dev/null 2>/dev/null || true)
+              --jq ".data.repository.projectsV2.nodes[] | select(.title | endswith(\" ($name)\")) | .id" < /dev/null); then
+              echo "::warning::Could not look up projects for $repo; any demo project is left behind"
+              projects=""
+            fi
             for project in $projects; do
               if gh api graphql -f id="$project" --silent -f query='
                 mutation($id: ID!) { deleteProjectV2(input: { projectId: $id }) { clientMutationId } }' < /dev/null; then

@@ -883,7 +883,10 @@ function Remove-DemoProjects {
         $result = Invoke-GraphQL 'query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { projectsV2(first: 20) { nodes { id title } } } }' `
             @{ owner = $owner; name = $name }
     }
-    catch { return }
+    catch {
+        Write-Warning "Could not look up projects for $FullName; any demo project is left behind (needs the 'project' scope: gh auth refresh -s project)"
+        return
+    }
     foreach ($project in @($result.data.repository.projectsV2.nodes | Where-Object { $_ -and $_.title.EndsWith(" ($name)") })) {
         try {
             Invoke-GraphQL 'mutation($id: ID!) { deleteProjectV2(input: { projectId: $id }) { clientMutationId } }' @{ id = $project.id } | Out-Null

@@ -668,7 +668,7 @@ function Wait-SeedWorkflow {
     $dispatched = $false
     for ($waited = 0; $waited -lt $seedWaitSeconds; $waited += 5) {
         $fields = @(Invoke-GhQuiet run list --repo $fullRepoName --workflow $Workflow --limit 1 `
-            --json 'status,conclusion,url' --jq '.[0].status, .[0].conclusion, .[0].url')
+            --json 'status,conclusion,url' --jq '.[0] // empty | .status, .conclusion, .url')
         $status = if ($fields.Count -gt 0) { "$($fields[0])".Trim() } else { '' }
         if ($status -eq 'completed') {
             $conclusion = "$($fields[1])".Trim()

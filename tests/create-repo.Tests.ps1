@@ -12,7 +12,7 @@ $testState = [pscustomobject]@{
     NextPr = 1; StackNumbers = @(); StackMismatch = $false; GitEmail = $null; ReviewApiFailure = $false
     CleanupRepos = @(); NpmCalls = $null; PagesDisabled = $false; Opened = $null
     CodeqlConclusion = 'success'; AssignFailure = $false; AutofixBotMissing = $false; AnalysesCount = '2'; LateRulePolls = 0
-    StalePushRun = $false; SeedConclusion = 'success'; Scopes = $null; GraphQL = $null; Views = $null
+    StalePushRun = $false; SeedConclusion = 'success'; SeedEmptyPolls = 0; Scopes = $null; GraphQL = $null; Views = $null
 }
 $projectFixture = @{
     title = 'Roadmap'; short_description = 'Demo board'; readme = 'Read me'
@@ -103,6 +103,10 @@ function gh {
         return @('HTTP/2.0 200 OK', '', '{}')
     }
     if ($arguments[0] -eq 'run' -and $arguments[1] -eq 'list' -and $arguments -contains 'hydrate-issues.yml') {
+        if ($testState.SeedEmptyPolls -gt 0) {
+            $testState.SeedEmptyPolls--
+            return
+        }
         return @('completed', $testState.SeedConclusion, 'https://github.com/runs/1')
     }
     if ($arguments[0] -eq 'api' -and $arguments[1] -like 'repos/*/contents/.github/project/project.json*') { return $projectFixture }
@@ -318,7 +322,7 @@ try {
         'ai-security-assign-failure', 'ai-security-assign-fallback', 'ai-security-codeql-failure',
         'ai-security-missing-seed', 'ai-security-no-seed', 'ai-security-scan-only', 'ai-security-autofix-only',
         'ai-security-missing-prs',
-        'project-board', 'project-board-seed-failure', 'project-board-missing-file', 'project-board-missing-scope',
+        'project-board', 'project-board-dispatch', 'project-board-seed-failure', 'project-board-missing-file', 'project-board-missing-scope',
         'blank', 'blank-interactive', 'blank-missing-seed', 'blank-needs-workflow'
     )) {
         $config = $originalConfig | ConvertFrom-Json
@@ -344,6 +348,7 @@ try {
         $testState.LateRulePolls = 0
         $testState.StalePushRun = $false
         $testState.SeedConclusion = 'success'
+        $testState.SeedEmptyPolls = 0
         $testState.Scopes = $null
         $testState.GraphQL = New-Object 'System.Collections.Generic.List[object]'
         $testState.Views = New-Object 'System.Collections.Generic.List[object]'
@@ -402,6 +407,12 @@ try {
                 $selection = $null
                 $scriptArgs = @{ Template = 'copilot-airways'; NoClone = $true }
                 $testState.Scopes = 'delete_repo, project, repo'
+            }
+            'project-board-dispatch' {
+                $selection = $null
+                $scriptArgs = @{ Template = 'copilot-airways'; NoClone = $true }
+                $testState.Scopes = 'delete_repo, project, repo'
+                $testState.SeedEmptyPolls = 13
             }
             'project-board-missing-scope' {
                 $selection = $null
@@ -602,7 +613,7 @@ try {
                 'nested-body' { 'octobooth-demos' }
                 { $_ -like 'ai-security*' } { 'octobooth-demos' }
                 { $_ -like 'blank*' } { 'octobooth-demos' }
-                'project-board' { 'octobooth-demos' }
+                { $_ -like 'project-board*' } { 'octobooth-demos' }
                 'owner-override' { 'other-org' }
                 default { 'demo-user' }
             }
@@ -809,7 +820,12 @@ try {
                     Assert ($testState.Opened -notcontains "https://github.com/$fullName/security/code-scanning") 'Opened the alert list without "autofix".'
                 }
             }
-            if ($scenario -eq 'project-board') {
+            if ($scenario -eq 'project-board-dispatch') {
+                $seedDispatch = @(Find-Calls 'gh' 'workflow run hydrate-issues.yml')
+                Assert ($seedDispatch.Count -eq 1 -and ($seedDispatch[0].Arguments -join ' ') -like '*--ref trunk*') 'Did not dispatch the seeding workflow once on the default branch when no run appeared.'
+            }
+            elseif ($scenario -eq 'project-board') {
+                Assert ((Find-Calls 'gh' 'workflow run hydrate-issues.yml').Count -eq 0) 'Dispatched the seeding workflow even though a run existed.'
                 $fullName = $create.Arguments[2]
                 $repoName = $fullName.Split('/')[1]
                 $day = { param($d) [DateTime]::UtcNow.Date.AddDays($d).ToString('yyyy-MM-dd') }

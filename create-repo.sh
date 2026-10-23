@@ -34,7 +34,7 @@ Usage: create-repo.sh [--template <key>] [--owner <name>] [--no-clone | --serve]
                        http://localhost:8080 (npm start). Needs Node.js.
   --cleanup            Delete repos with the demo-generated topic owned by --owner
                        (default: the logged-in account) that are older than --older-than.
-  --older-than <hours> Age cutoff for --cleanup (default: 24).
+  --older-than <hours> Age cutoff for --cleanup (default: 72).
   --all                With --cleanup, ignore the age cutoff and delete every demo repo
                        (end of event). Same as --older-than 0, with a warning.
   --dry-run            With --cleanup, list what would be deleted.
@@ -57,7 +57,7 @@ NO_CLONE=false
 OWNER_OVERRIDE=""
 SERVE=false
 CLEANUP=false
-OLDER_THAN_HOURS=24
+OLDER_THAN_HOURS=72
 OLDER_THAN_SET=false
 ALL=false
 DRY_RUN=false

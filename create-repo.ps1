@@ -12,7 +12,7 @@ param(
     [switch]$Serve,
     # Delete demo-generated repos owned by -Owner (default: logged-in account) older than -OlderThanHours.
     [switch]$Cleanup,
-    [int]$OlderThanHours = 24,
+    [int]$OlderThanHours = 72,
     # End of event: ignore the age cutoff and delete every demo repo (same as -OlderThanHours 0, with a warning).
     [switch]$All,
     [switch]$DryRun,

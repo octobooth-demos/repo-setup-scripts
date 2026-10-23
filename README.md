@@ -103,7 +103,7 @@ Every repository the scripts create gets the `demo-generated` topic, which is wh
   The card also links to the repo's pull request list and has a **🔑 Presenter answer key** button. The button opens `resources/<key>/ANSWER_KEY.md` from this repo on your machine (in VS Code if it's installed). The answer key is never copied into demo repos, so keep it off the shared screen.
 - **One-click follow-ups.** **Open session in Copilot app** has Copilot add the repo as a project and open a fresh session. **Open PR session** and **Open issue session** open those items. **Open in VS Code** runs `code <clone>`.
 - **Seed prompts.** For demos with a `seed_prompt_file` (like `ensemble-blank`), the card shows the prompt with **📋 Copy** and **▶ Run with Ensemble**. Run with Ensemble has Copilot add the repo as a project and start a new autopilot session that runs the prompt on the Ensemble model (`model: "auto"`, `auto_tier: "hydrafusion"`).
-- **Clean up.** This works like `--cleanup`. Pick an owner and an age cutoff (default 24 hours, or **Any age**), review the matching `demo-generated` repos, and untick any you want to keep. Then delete the rest, optionally with their clones in `~/repos`. Deleting needs the `delete_repo` scope.
+- **Clean up.** This works like `--cleanup`. Pick an owner and an age cutoff (default 72 hours, or **Any age**), review the matching `demo-generated` repos, and untick any you want to keep. Then delete the rest, optionally with their clones in `~/repos`. Deleting needs the `delete_repo` scope.
 
 Runs use your stored `gh auth login`, not any `GH_TOKEN` the app injects, so they have the same scopes as a terminal run. Run history survives restarts. It's kept in `~/.copilot/extensions/demo-launcher/artifacts/runs.json`, and **Clear history** empties it. The panel is a plain loopback web page, so its URL also works in a browser, including VS Code's Simple Browser. The port changes each time the extension restarts.
 
@@ -209,14 +209,14 @@ Pages on free personal accounts only works for public repos, so Booth Bingo repo
 
 ## Cleaning up
 
-Delete old demo repos from the logged-in account (or `--owner` / `-Owner`). Only repos with the `demo-generated` topic that are older than the cutoff (default 24 hours) are considered; everything else is left alone. The script lists matches and asks before deleting.
+Delete old demo repos from the logged-in account (or `--owner` / `-Owner`). Only repos with the `demo-generated` topic that are older than the cutoff (default 72 hours) are considered; everything else is left alone. The script lists matches and asks before deleting.
 
 ```bash
-bash ./create-repo.sh --cleanup [--older-than 24 | --all] [--dry-run] [--yes] [--owner <name>]
+bash ./create-repo.sh --cleanup [--older-than 72 | --all] [--dry-run] [--yes] [--owner <name>]
 ```
 
 ```powershell
-.\create-repo.ps1 -Cleanup [-OlderThanHours 24 | -All] [-DryRun] [-Yes] [-Owner <name>]
+.\create-repo.ps1 -Cleanup [-OlderThanHours 72 | -All] [-DryRun] [-Yes] [-Owner <name>]
 ```
 
 **End of event:** `--all` / `-All` ignores the age cutoff and deletes every `demo-generated` repo the owner has, including ones created minutes ago. It prints a warning and still asks before deleting unless you pass `--yes` / `-Yes`. Run with `--dry-run` first to check the list.
@@ -240,7 +240,7 @@ gh auth refresh -h github.com -s delete_repo
 git pull
 bash ./create-repo.sh --template booth-bingo
 
-# End of the day (or the next morning): remove that account's demos older than 24h
+# End of the day (or the next morning): remove that account's demos older than 72h
 bash ./create-repo.sh --cleanup
 # or, after the event, remove every demo regardless of age: bash ./create-repo.sh --cleanup --all
 ```

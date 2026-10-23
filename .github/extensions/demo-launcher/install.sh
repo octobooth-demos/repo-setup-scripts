@@ -57,3 +57,4 @@ LOADER_EOF
 
 echo "✅ Installed Demo Launcher for all sessions → $SOURCE_DIR"
 echo "   Restart open sessions (or reload extensions) to pick it up."
+echo "   Don't also add repo-setup-scripts as a project in the Copilot app, or you'll see two Demo Launchers."

@@ -250,6 +250,27 @@
         "Next: run the seed prompt with the Ensemble model in autopilot (~4-5 min)",
         "Presenter notes: resources/ensemble-blank/ANSWER_KEY.md in repo-setup-scripts"
       ]
+    },
+    {
+      "key": "copilot-airways",
+      "owner": "org",
+      "display_name": "Copilot Airways (GitHub Projects)",
+      "description_short": "Flight booking app (Next.js) with a ready-made GitHub Projects board",
+      "workflow_hint": "Creates repo + seeded issues (types, milestones, sub-issues) + a GitHub Project with fields, sprints, and views",
+      "template": "copilot-airways",
+      "repo_base_name": "copilot-airways",
+      "repo_description": "Copilot Airways flight booking app",
+      "workflow": "project_board",
+      "project": {
+        "file": ".github/project/project.json",
+        "issues_file": ".github/workflows/scripts/issues-data.json",
+        "seed_workflow": "hydrate-issues.yml"
+      },
+      "summary_lines": [
+        "Issues: 14 seeded with types, milestones, and sub-issues",
+        "Project: fields, sprints, views, a draft item, and a status update",
+        "Talk track: the template's README (Demoing GitHub Projects)"
+      ]
     }
   ]
 }

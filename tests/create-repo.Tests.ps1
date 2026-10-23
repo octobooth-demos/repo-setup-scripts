@@ -12,8 +12,36 @@ $testState = [pscustomobject]@{
     NextPr = 1; StackNumbers = @(); StackMismatch = $false; GitEmail = $null; ReviewApiFailure = $false
     CleanupRepos = @(); NpmCalls = $null; PagesDisabled = $false; Opened = $null
     CodeqlConclusion = 'success'; AssignFailure = $false; AutofixBotMissing = $false; AnalysesCount = '2'; LateRulePolls = 0
-    StalePushRun = $false
+    StalePushRun = $false; SeedConclusion = 'success'; GraphQL = $null; Views = $null
 }
+$projectFixture = @{
+    title = 'Roadmap'; short_description = 'Demo board'; readme = 'Read me'
+    status_options = @(@{ name = 'Ready'; color = 'BLUE'; description = 'Go' })
+    fields = @(
+        @{ name = 'Priority'; type = 'single_select'; options = @(@{ name = 'P1'; color = 'RED'; description = 'Soon' }) }
+        @{ name = 'Sprint'; type = 'iteration'; duration_days = 14; count = 3; start_offset_days = -14 }
+    )
+    views = @(
+        @{ name = 'Backlog'; layout = 'table'; filter = 'is:open'; visible_fields = @('Title', 'Priority'); group_by = 'Status'; sort_by = @(, @('Priority', 'asc')) }
+        @{ name = 'Board'; layout = 'board'; vertical_group_by = 'Status' }
+    )
+    drafts = @(@{ title = 'Draft idea'; fields = @{ Status = 'Ready' } })
+    status_update = @{ status = 'ON_TRACK'; body = 'All good'; target_offset_days = 7 }
+} | ConvertTo-Json -Depth 10
+$issuesFixture = @{
+    issues = @(
+        @{ title = 'First'; project = @{ Status = 'Ready'; Priority = 'P1'; Estimate = 3; Sprint = 2; 'Target date' = 5 } }
+        @{ title = 'Second' }
+        @{ title = 'Missing'; project = @{ Status = 'Ready' } }
+    )
+} | ConvertTo-Json -Depth 10
+$projectFields = '{"data":{"node":{"fields":{"nodes":[' +
+    '{"id":"F_STATUS","name":"Status","dataType":"SINGLE_SELECT","options":[{"id":"o_ready","name":"Ready"}]},' +
+    '{"id":"F_PRI","name":"Priority","dataType":"SINGLE_SELECT","options":[{"id":"o_p1","name":"P1"}]},' +
+    '{"id":"F_EST","name":"Estimate","dataType":"NUMBER"},{"id":"F_DATE","name":"Target date","dataType":"DATE"},' +
+    '{"id":"F_SPR","name":"Sprint","dataType":"ITERATION","configuration":{' +
+    '"iterations":[{"id":"it3","startDate":"2030-01-29"},{"id":"it2","startDate":"2030-01-15"}],' +
+    '"completedIterations":[{"id":"it1","startDate":"2030-01-01"}]}}]}}}}'
 Remove-Item Env:DEMO_NO_BROWSER -ErrorAction SilentlyContinue
 # Behave the same locally and in CI: the script skips browsers under Actions and
 # would append test outputs to the runner's real step output file.
@@ -69,6 +97,37 @@ function gh {
     if ($testState.Failure -and ($arguments[0..1] -join ' ') -eq $testState.Failure) {
         $global:LASTEXITCODE = 42
         return
+    }
+    if ($arguments[0] -eq 'run' -and $arguments[1] -eq 'list' -and $arguments -contains 'hydrate-issues.yml') {
+        return @('completed', $testState.SeedConclusion, 'https://github.com/runs/1')
+    }
+    if ($arguments[0] -eq 'api' -and $arguments[1] -like 'repos/*/contents/.github/project/project.json*') { return $projectFixture }
+    if ($arguments[0] -eq 'api' -and $arguments[1] -like 'repos/*/contents/.github/workflows/scripts/issues-data.json*') { return $issuesFixture }
+    if ($arguments[0] -eq 'project' -and $arguments[1] -eq 'create') {
+        return '{"number":7,"id":"PVT_1","url":"https://github.com/orgs/octobooth-demos/projects/7"}'
+    }
+    if ($arguments[0] -eq 'issue' -and $arguments[1] -eq 'list') { return '[{"id":"I_1","title":"First"},{"id":"I_2","title":"Second"}]' }
+    if ($arguments[0] -eq 'api' -and $arguments[1] -like 'users/*' -and $arguments -contains '.type') { return 'Organization' }
+    if ($arguments[0] -eq 'api' -and ($arguments -join ' ') -like '*/projectsV2/7/fields*') {
+        return '[{"id":11,"name":"Title"},{"id":12,"name":"Status"},{"id":13,"name":"Priority"}]'
+    }
+    if ($arguments[0] -eq 'api' -and ($arguments -join ' ') -like '*/projectsV2/7/views*') {
+        $testState.Views.Add((Get-Content -LiteralPath $arguments[[array]::IndexOf($arguments, '--input') + 1] -Raw | ConvertFrom-Json))
+        return
+    }
+    if ($arguments[0] -eq 'api' -and $arguments[1] -eq 'graphql') {
+        $body = Get-Content -LiteralPath $arguments[3] -Raw | ConvertFrom-Json
+        $testState.GraphQL.Add($body)
+        $query = $body.query
+        if ($query -like '*field(name: "Status")*') { return '{"data":{"node":{"field":{"id":"SF"}}}}' }
+        if ($query -like '*fields(first: 50)*') { return $projectFields }
+        if ($query -like '*addProjectV2ItemById*') { return '{"data":{"addProjectV2ItemById":{"item":{"id":"ITEM_' + $body.variables.c + '"}}}}' }
+        if ($query -like '*addProjectV2DraftIssue*') { return '{"data":{"addProjectV2DraftIssue":{"projectItem":{"id":"DRAFT_1"}}}}' }
+        if ($query -like '*views(first: 50)*') { return '{"data":{"node":{"views":{"nodes":[{"id":"V1","name":"View 1"},{"id":"V2","name":"Board"}]}}}}' }
+        if ($query -like '*repository(owner*') {
+            return '{"data":{"repository":{"projectsV2":{"nodes":[{"id":"P_DEMO","title":"Roadmap (old-demo)"},{"id":"P_OTHER","title":"Team roadmap"}]}}}}'
+        }
+        return '{"data":{}}'
     }
     if ($arguments[0] -eq 'api' -and ($arguments -join ' ') -like '*/pages*') {
         if ($testState.PagesDisabled) { $global:LASTEXITCODE = 1; return }
@@ -255,6 +314,7 @@ try {
         'ai-security-assign-failure', 'ai-security-assign-fallback', 'ai-security-codeql-failure',
         'ai-security-missing-seed', 'ai-security-no-seed', 'ai-security-scan-only', 'ai-security-autofix-only',
         'ai-security-missing-prs',
+        'project-board', 'project-board-seed-failure', 'project-board-missing-file',
         'blank', 'blank-interactive', 'blank-missing-seed', 'blank-needs-workflow'
     )) {
         $config = $originalConfig | ConvertFrom-Json
@@ -279,6 +339,9 @@ try {
         $testState.AnalysesCount = '2'
         $testState.LateRulePolls = 0
         $testState.StalePushRun = $false
+        $testState.SeedConclusion = 'success'
+        $testState.GraphQL = New-Object 'System.Collections.Generic.List[object]'
+        $testState.Views = New-Object 'System.Collections.Generic.List[object]'
         $testState.Opened = New-Object 'System.Collections.Generic.List[string]'
         $testState.NpmCalls = New-Object 'System.Collections.Generic.List[object]'
         $old = '2020-01-01T00:00:00Z'
@@ -330,6 +393,20 @@ try {
                 $expectedFailure = 'prs[]'
             }
             'blank' { $selection = $null; $scriptArgs = @{ Template = 'ensemble-blank'; NoClone = $true } }
+            'project-board' { $selection = $null; $scriptArgs = @{ Template = 'copilot-airways'; NoClone = $true } }
+            'project-board-seed-failure' {
+                $selection = $null
+                $scriptArgs = @{ Template = 'copilot-airways'; NoClone = $true }
+                $testState.SeedConclusion = 'failure'
+                $expectedFailure = "hydrate-issues.yml finished with 'failure'"
+            }
+            'project-board-missing-file' {
+                $selection = $null
+                $scriptArgs = @{ Template = 'copilot-airways' }
+                $projectIndex = [array]::IndexOf(@($config.repos | ForEach-Object { $_.key }), 'copilot-airways')
+                $config.repos[$projectIndex].project.file = ''
+                $expectedFailure = 'project.file'
+            }
             'blank-interactive' { $selection = [string]($blankIndex + 1) }
             'blank-missing-seed' {
                 $selection = $null
@@ -443,7 +520,7 @@ try {
         Assert ((Get-Location).Path -eq $originalLocation.Path) "$scenario did not restore location."
         if ($expectedFailure) {
             Assert ($null -ne $caught -and $caught.Contains($expectedFailure)) "$scenario expected '$expectedFailure', got '$caught'."
-            if ($scenario -notin @('create-failure', 'topic-failure', 'push-failure', 'login-failure', 'stack-api-failure', 'stack-verify-mismatch', 'non-interactive-login', 'ai-security-codeql-failure')) {
+            if ($scenario -notin @('create-failure', 'topic-failure', 'push-failure', 'login-failure', 'stack-api-failure', 'stack-verify-mismatch', 'non-interactive-login', 'ai-security-codeql-failure', 'project-board-seed-failure')) {
                 Assert ($testState.Calls.Count -eq 0) "$scenario invoked a remote command before validation."
             }
             if ($scenario -eq 'non-interactive-login') {
@@ -467,6 +544,9 @@ try {
                 Assert ((Find-Calls 'gh' 'pr create').Count -eq 0) 'Opened the AI Scan PR although CodeQL failed.'
                 Assert ((Find-Calls 'gh' 'api --method PATCH').Where({ $_.Arguments[3] -like '*/code-scanning/alerts/*' }).Count -eq 0) 'Assigned an alert although CodeQL failed.'
             }
+            if ($scenario -eq 'project-board-seed-failure') {
+                Assert ((Find-Calls 'gh' 'project create').Count -eq 0) 'Created a project although seeding failed.'
+            }
             if ($scenario -eq 'create-failure') {
                 Assert ((Find-Calls 'gh' 'repo clone').Count -eq 0) 'Cloned after repository creation failed.'
             }
@@ -481,6 +561,8 @@ try {
                 'cleanup' {
                     Assert ($list[0].Arguments[2] -like 'user/repos*') 'Own account should use user/repos.'
                     Assert (($deleted -join ',') -eq 'demo-user/old-demo') "Deleted '$($deleted -join ',')'."
+                    $projectDeletes = @($testState.GraphQL | Where-Object { $_.query -like '*deleteProjectV2(*' } | ForEach-Object { $_.variables.id })
+                    Assert (($projectDeletes -join ',') -eq 'P_DEMO') "Deleted projects '$($projectDeletes -join ',')' (want only the demo's own)."
                 }
                 'cleanup-all' {
                     Assert (($deleted -join ',') -eq 'demo-user/old-demo,demo-user/fresh-demo') "Deleted '$($deleted -join ',')'."
@@ -502,6 +584,7 @@ try {
                 'nested-body' { 'octobooth-demos' }
                 { $_ -like 'ai-security*' } { 'octobooth-demos' }
                 { $_ -like 'blank*' } { 'octobooth-demos' }
+                'project-board' { 'octobooth-demos' }
                 'owner-override' { 'other-org' }
                 default { 'demo-user' }
             }
@@ -707,6 +790,47 @@ try {
                     Assert ($seedPush.Count -eq 0 -and $dispatch.Count -eq 0 -and $runList.Count -eq 0 -and $assign.Count -eq 0) 'Waited for CodeQL or assigned Copilot without "autofix".'
                     Assert ($testState.Opened -notcontains "https://github.com/$fullName/security/code-scanning") 'Opened the alert list without "autofix".'
                 }
+            }
+            if ($scenario -eq 'project-board') {
+                $fullName = $create.Arguments[2]
+                $repoName = $fullName.Split('/')[1]
+                $day = { param($d) [DateTime]::UtcNow.Date.AddDays($d).ToString('yyyy-MM-dd') }
+                $gql = { param($pattern) @($testState.GraphQL | Where-Object { $_.query -like $pattern }) }
+                Assert ((Find-Calls 'gh' 'run list').Where({ $_.Arguments -contains 'hydrate-issues.yml' }).Count -ge 1) 'Did not wait for the seeding workflow.'
+                $projectCreate = @(Find-Calls 'gh' 'project create')
+                Assert ($projectCreate.Count -eq 1 -and ($projectCreate[0].Arguments -join ' ') -like "*--owner octobooth-demos --title Roadmap ($repoName)*") 'Project was not created for the repo owner with the repo name in its title.'
+                Assert ((Find-Calls 'gh' "project link 7 --owner octobooth-demos --repo $fullName").Count -eq 1) 'Project was not linked to the repo.'
+                Assert ((Find-Calls 'gh' 'project edit 7').Where({ $_.Arguments -contains 'Demo board' -and $_.Arguments -contains 'Read me' }).Count -eq 1) 'Project description and README were not set.'
+                $statusUpdate = @(& $gql '*updateProjectV2Field(*')
+                Assert ($statusUpdate.Count -eq 1 -and $statusUpdate[0].variables.input.fieldId -eq 'SF' -and $statusUpdate[0].variables.input.singleSelectOptions[0].name -eq 'Ready') 'Status options were not replaced.'
+                $fieldCreates = @(& $gql '*createProjectV2Field(*')
+                Assert ($fieldCreates.Count -eq 2) "Created $($fieldCreates.Count) fields (want 2)."
+                $sprint = $fieldCreates[1].variables.input
+                Assert ($sprint.dataType -eq 'ITERATION' -and @($sprint.iterationConfiguration.iterations).Count -eq 3) 'Sprint iteration field was not created with 3 sprints.'
+                Assert ($sprint.iterationConfiguration.iterations[0].startDate -eq (& $day -14) -and $sprint.iterationConfiguration.iterations[1].startDate -eq (& $day 0) -and $sprint.iterationConfiguration.iterations[2].title -eq 'Sprint 3') 'Sprint dates are not relative to today.'
+                Assert ($fieldCreates[0].variables.input.dataType -eq 'SINGLE_SELECT' -and $fieldCreates[0].variables.input.singleSelectOptions[0].name -eq 'P1') 'Priority options were not created.'
+                $adds = @(& $gql '*addProjectV2ItemById*')
+                Assert ($adds.Count -eq 1 -and $adds[0].variables.c -eq 'I_1') 'Only issues with project values that exist should be added.'
+                $updates = @(& $gql '*updateProjectV2ItemFieldValue*')
+                Assert ($updates.Count -eq 2) "Expected one field update per item, got $($updates.Count)."
+                $values = @{}
+                foreach ($property in $updates[0].variables.PSObject.Properties) { $values[$property.Value.fieldId] = $property.Value }
+                Assert ($values['F_STATUS'].value.singleSelectOptionId -eq 'o_ready' -and $values['F_PRI'].value.singleSelectOptionId -eq 'o_p1') 'Single select values were not mapped to option ids.'
+                Assert ($values['F_EST'].value.number -eq 3 -and $values['F_DATE'].value.date -eq (& $day 5)) 'Number or date values were wrong.'
+                Assert ($values['F_SPR'].value.iterationId -eq 'it2') "Sprint 2 should be the second-oldest iteration, got '$($values['F_SPR'].value.iterationId)'."
+                Assert (@($values.Values | Where-Object { $_.itemId -ne 'ITEM_I_1' }).Count -eq 0) 'Field values were set on the wrong item.'
+                Assert ($updates[1].variables.i0.itemId -eq 'DRAFT_1') 'Draft item fields were not set.'
+                Assert ($testState.Views.Count -eq 2) "Created $($testState.Views.Count) views (want 2)."
+                $backlog = $testState.Views[0]
+                Assert ((@($backlog.visible_fields) -join ',') -eq '11,13' -and (@($backlog.group_by) -join ',') -eq '12') 'View fields were not mapped to REST field ids.'
+                Assert (@($backlog.sort_by).Count -eq 1 -and (@($backlog.sort_by[0]) -join ',') -eq '13,asc') "View sort was '$($backlog.sort_by | ConvertTo-Json -Compress)'."
+                Assert ((@($testState.Views[1].vertical_group_by) -join ',') -eq '12' -and $testState.Views[1].layout -eq 'board') 'Board columns were not grouped by Status.'
+                Assert ((Find-Calls 'gh' 'api -X POST').Where({ $_.Arguments -contains 'orgs/octobooth-demos/projectsV2/7/views' }).Count -eq 2) 'Org-owned views must use the orgs/ endpoint.'
+                $viewDeletes = @(& $gql '*deleteProjectV2View*')
+                Assert ($viewDeletes.Count -eq 1 -and $viewDeletes[0].variables.v -eq 'V1') "The default 'View 1' was not removed."
+                $statusPost = @(& $gql '*createProjectV2StatusUpdate*')
+                Assert ($statusPost.Count -eq 1 -and $statusPost[0].variables.input.targetDate -eq (& $day 7) -and $statusPost[0].variables.input.status -eq 'ON_TRACK') 'Status update was not posted.'
+                Assert ($testState.Opened -contains 'https://github.com/orgs/octobooth-demos/projects/7') 'Project was not opened.'
             }
             if ($scenario -eq 'login') {
                 Assert ((Find-Calls 'gh' 'auth login').Count -eq 1) 'Authentication failure did not trigger login.'

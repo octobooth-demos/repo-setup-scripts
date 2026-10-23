@@ -146,7 +146,25 @@ jobs:
             if [ "$DRY_RUN" = "true" ]; then
               echo "Would delete $repo"
               deleted+=("$repo")
-            elif gh repo delete "$repo" --yes < /dev/null; then
+              continue
+            fi
+            # Projects outlive their repo, so first delete the ones a demo created
+            # (linked and titled "... (<repo>)"). Best effort: the App needs
+            # Organization projects (read and write) for this.
+            name="${repo#*/}"
+            projects=$(gh api graphql -f owner="$ORG" -f name="$name" -f query='
+              query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) {
+                projectsV2(first: 20) { nodes { id title } } } }' \
+              --jq ".data.repository.projectsV2.nodes[] | select(.title | endswith(\" ($name)\")) | .id" < /dev/null 2>/dev/null || true)
+            for project in $projects; do
+              if gh api graphql -f id="$project" --silent -f query='
+                mutation($id: ID!) { deleteProjectV2(input: { projectId: $id }) { clientMutationId } }' < /dev/null; then
+                echo "Deleted project for $repo"
+              else
+                echo "::warning::Could not delete a project for $repo"
+              fi
+            done
+            if gh repo delete "$repo" --yes < /dev/null; then
               echo "Deleted $repo"
               deleted+=("$repo")
             else

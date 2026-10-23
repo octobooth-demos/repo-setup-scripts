@@ -16,6 +16,8 @@ AI_SCAN_API_VERSION="2026-03-10"
 # copilot-swe-agent[bot], so it's kept as a fallback.
 COPILOT_AUTOFIX_ASSIGNEES=("github-agentic-autofix[bot]" "copilot-swe-agent[bot]")
 CODEQL_WAIT_SECONDS="${CODEQL_WAIT_SECONDS:-900}"
+PROJECTS_API_VERSION="2026-03-10"
+SEED_WAIT_SECONDS="${SEED_WAIT_SECONDS:-600}"
 
 # --- Arguments ---
 
@@ -620,6 +622,247 @@ setup_pages() {
     echo "⚠️  The Pages deploy is still running; the site will appear at $PAGES_URL shortly."
 }
 
+# --- GitHub Projects (project_board workflow) ---
+
+# jq helper shared by the project filters: a date <days> from today (UTC).
+JQ_DAY='def day($d): (now + ($d * 86400)) | strftime("%Y-%m-%d");'
+
+# Read a file from the new repo's default branch.
+# Usage: repo_file <path>
+repo_file() {
+    gh api "repos/$FULL_REPO_NAME/contents/$1?ref=$DEFAULT_BRANCH" -H "Accept: application/vnd.github.raw"
+}
+
+# Run a GraphQL request whose JSON body ({query, variables}) is on stdin.
+graphql_input() {
+    gh api graphql --input - "$@"
+}
+
+# Wait (bounded) for the template's issue-seeding workflow to finish. Repos made
+# from a template run it on their first push; if no run shows up, start one.
+# Usage: wait_for_seed_workflow <workflow file>
+wait_for_seed_workflow() {
+    local workflow="$1"
+    local deadline=$((SECONDS + SEED_WAIT_SECONDS))
+    local dispatched=false run status conclusion url
+    echo "⏳ Waiting for $workflow to seed issues (up to $((SEED_WAIT_SECONDS / 60)) min)..."
+    while [ "$SECONDS" -lt "$deadline" ]; do
+        run=$(gh run list --repo "$FULL_REPO_NAME" --workflow "$workflow" --limit 1 \
+            --json status,conclusion,url --jq '.[0] // empty' 2>/dev/null || true)
+        if [ -n "$run" ]; then
+            status=$(jq -r '.status' <<< "$run")
+            if [ "$status" = "completed" ]; then
+                conclusion=$(jq -r '.conclusion' <<< "$run")
+                url=$(jq -r '.url' <<< "$run")
+                if [ "$conclusion" != "success" ]; then
+                    echo "❌ $workflow finished with '$conclusion': $url"
+                    exit 1
+                fi
+                echo "✅ Issues seeded by $workflow"
+                return 0
+            fi
+        elif [ "$dispatched" = false ] && [ "$SECONDS" -ge $((deadline - SEED_WAIT_SECONDS + 60)) ]; then
+            echo "ℹ️  No $workflow run yet; starting one"
+            gh workflow run "$workflow" --repo "$FULL_REPO_NAME" --ref "$DEFAULT_BRANCH" > /dev/null 2>&1 || true
+            dispatched=true
+        fi
+        sleep 5
+    done
+    echo "❌ $workflow did not finish in time. Check the Actions tab of $FULL_REPO_NAME."
+    exit 1
+}
+
+# Create a GitHub Project from the template's project definition, link it to the
+# repo, and add the seeded issues with their field values. Sets PROJECT_URL.
+setup_project() {
+    local project_file issues_file seed_workflow
+    project_file=$(repo_cfg '.project.file')
+    issues_file=$(repo_cfg '.project.issues_file')
+    seed_workflow=$(repo_cfg '.project.seed_workflow')
+
+    [ -n "$seed_workflow" ] && wait_for_seed_workflow "$seed_workflow"
+
+    local def issues=""
+    def=$(repo_file "$project_file")
+    [ -n "$issues_file" ] && issues=$(repo_file "$issues_file")
+
+    local title created project_number project_id
+    title="$(jq -r '.title' <<< "$def") ($REPO_NAME)"
+    echo "📋 Creating project: $title"
+    created=$(gh project create --owner "$OWNER" --title "$title" --format json)
+    project_number=$(jq -r '.number' <<< "$created")
+    project_id=$(jq -r '.id' <<< "$created")
+    PROJECT_URL=$(jq -r '.url' <<< "$created")
+    gh project edit "$project_number" --owner "$OWNER" \
+        --description "$(jq -r '.short_description // ""' <<< "$def")" \
+        --readme "$(jq -r '.readme // ""' <<< "$def")" > /dev/null
+    gh project link "$project_number" --owner "$OWNER" --repo "$FULL_REPO_NAME" > /dev/null
+    echo "🔗 Project linked to $FULL_REPO_NAME"
+
+    if [ "$(jq '.status_options // [] | length' <<< "$def")" -gt 0 ]; then
+        local status_field
+        status_field=$(gh api graphql -f p="$project_id" --jq '.data.node.field.id' -f query='
+            query($p: ID!) { node(id: $p) { ... on ProjectV2 { field(name: "Status") {
+              ... on ProjectV2SingleSelectField { id } } } } }')
+        jq --arg f "$status_field" '{
+            query: "mutation($input: UpdateProjectV2FieldInput!) { updateProjectV2Field(input: $input) { clientMutationId } }",
+            variables: { input: { fieldId: $f, singleSelectOptions: .status_options } } }' <<< "$def" \
+            | graphql_input --silent
+        echo "✅ Status options: $(jq -r '[.status_options[].name] | join(", ")' <<< "$def")"
+    fi
+
+    local field
+    while IFS= read -r field; do
+        jq -n --argjson f "$field" --arg p "$project_id" "$JQ_DAY"'
+            ($f.start_offset_days // 0) as $start | ($f.duration_days // 14) as $len
+            | { query: "mutation($input: CreateProjectV2FieldInput!) { createProjectV2Field(input: $input) { clientMutationId } }",
+                variables: { input: ({ projectId: $p, name: $f.name, dataType: ($f.type | ascii_upcase) }
+                  + (if $f.type == "single_select" then { singleSelectOptions: $f.options } else {} end)
+                  + (if $f.type == "iteration" then { iterationConfiguration: {
+                        startDate: day($start), duration: $len,
+                        iterations: [range($f.count // 3) | { title: "Sprint \(. + 1)", startDate: day($start + . * $len), duration: $len }] } }
+                     else {} end)) } }' \
+            | graphql_input --silent
+        echo "✅ Field: $(jq -r '.name' <<< "$field")"
+    done < <(jq -c '.fields[]?' <<< "$def")
+
+    # Field name -> {id, type, options (name -> id), iterations (ids, oldest first)}.
+    local field_map
+    field_map=$(gh api graphql -f p="$project_id" -f query='
+        query($p: ID!) { node(id: $p) { ... on ProjectV2 { fields(first: 50) { nodes {
+          ... on ProjectV2Field { id name dataType }
+          ... on ProjectV2SingleSelectField { id name dataType options { id name } }
+          ... on ProjectV2IterationField { id name dataType configuration {
+            iterations { id startDate } completedIterations { id startDate } } } } } } } }' \
+        --jq '.data.node.fields.nodes | map({ key: .name, value: { id, type: .dataType,
+            options: ((.options // []) | map({ key: .name, value: .id }) | from_entries),
+            iterations: (((.configuration.completedIterations // []) + (.configuration.iterations // []))
+                | sort_by(.startDate) | map(.id)) } }) | from_entries')
+
+    [ -z "$issues" ] && issues='{}'
+    local issue_ids="{}"
+    if [ "$issues" != "{}" ]; then
+        issue_ids=$(gh issue list --repo "$FULL_REPO_NAME" --state all --limit 500 --json id,title \
+            --jq 'map({ key: .title, value: .id }) | from_entries')
+    fi
+
+    local count=0 entry title_ content_id item_id
+    while IFS= read -r entry; do
+        title_=$(jq -r '.title' <<< "$entry")
+        content_id=$(jq -r --arg t "$title_" '.[$t] // empty' <<< "$issue_ids")
+        if [ -z "$content_id" ]; then
+            echo "⚠️  Issue not found, so not added to the project: $title_"
+            continue
+        fi
+        item_id=$(gh api graphql -f p="$project_id" -f c="$content_id" --jq '.data.addProjectV2ItemById.item.id' -f query='
+            mutation($p: ID!, $c: ID!) { addProjectV2ItemById(input: { projectId: $p, contentId: $c }) { item { id } } }')
+        set_project_fields "$project_id" "$item_id" "$field_map" "$(jq -c '.project' <<< "$entry")"
+        count=$((count + 1))
+    done < <(jq -c '.issues[]? | select(.project)' <<< "$issues")
+    echo "✅ Added $count issue(s) to the project with their field values"
+
+    while IFS= read -r entry; do
+        item_id=$(jq --arg p "$project_id" '{
+            query: "mutation($input: AddProjectV2DraftIssueInput!) { addProjectV2DraftIssue(input: $input) { projectItem { id } } }",
+            variables: { input: { projectId: $p, title, body: (.body // "") } } }' <<< "$entry" \
+            | graphql_input --jq '.data.addProjectV2DraftIssue.projectItem.id')
+        set_project_fields "$project_id" "$item_id" "$field_map" "$(jq -c '.fields // {}' <<< "$entry")"
+        echo "✅ Draft item: $(jq -r '.title' <<< "$entry")"
+    done < <(jq -c '.drafts[]?' <<< "$def")
+
+    create_project_views "$project_number" "$project_id" "$def"
+
+    if [ "$(jq 'has("status_update")' <<< "$def")" = "true" ]; then
+        jq --arg p "$project_id" "$JQ_DAY"'.status_update as $s | {
+            query: "mutation($input: CreateProjectV2StatusUpdateInput!) { createProjectV2StatusUpdate(input: $input) { clientMutationId } }",
+            variables: { input: ({ projectId: $p, status: ($s.status // "ON_TRACK"), body: ($s.body // "") }
+              + (if $s.start_offset_days != null then { startDate: day($s.start_offset_days) } else {} end)
+              + (if $s.target_offset_days != null then { targetDate: day($s.target_offset_days) } else {} end)) } }' <<< "$def" \
+            | graphql_input --silent
+        echo "✅ Project status update posted"
+    fi
+
+    echo "✅ Project ready: $PROJECT_URL"
+    set_output project_url "$PROJECT_URL"
+}
+
+# Set an item's field values in one request. Dates are days from today and
+# iterations are 1-based (oldest first).
+# Usage: set_project_fields <project_id> <item_id> <field_map json> <values json>
+set_project_fields() {
+    [ "$(jq 'length' <<< "$4")" -eq 0 ] && return 0
+    jq -n --arg p "$1" --arg item "$2" --argjson fields "$3" --argjson values "$4" "$JQ_DAY"'
+        [ $values | to_entries[] | . as $e | ($fields[$e.key] // error("Unknown project field: \($e.key)")) as $f
+          | { projectId: $p, itemId: $item, fieldId: $f.id, value: (
+              if $f.type == "SINGLE_SELECT" then { singleSelectOptionId: ($f.options[$e.value | tostring] // error("Unknown \($e.key) option: \($e.value)")) }
+              elif $f.type == "NUMBER" then { number: $e.value }
+              elif $f.type == "DATE" then { date: day($e.value) }
+              elif $f.type == "ITERATION" then { iterationId: ($f.iterations[$e.value - 1] // error("No \($e.key) number \($e.value)")) }
+              else { text: ($e.value | tostring) } end) } ] as $inputs
+        | [range($inputs | length)] as $n
+        | { query: ("mutation(" + ($n | map("$i\(.): UpdateProjectV2ItemFieldValueInput!") | join(", ")) + ") { "
+              + ($n | map("u\(.): updateProjectV2ItemFieldValue(input: $i\(.)) { clientMutationId }") | join(" ")) + " }"),
+            variables: ($n | map({ key: "i\(.)", value: $inputs[.] }) | from_entries) }' \
+        | graphql_input --silent
+}
+
+# Create the saved views (REST, so they can be filtered, grouped, and sorted),
+# then remove the default "View 1".
+# Usage: create_project_views <project_number> <project_id> <project definition json>
+create_project_views() {
+    local number="$1" project_id="$2" def="$3"
+    [ "$(jq '.views // [] | length' <<< "$def")" -eq 0 ] && return 0
+
+    local base="users/$OWNER"
+    [ "$(gh api "users/$OWNER" --jq '.type')" = "Organization" ] && base="orgs/$OWNER"
+    local rest_ids
+    rest_ids=$(gh api -H "X-GitHub-Api-Version: $PROJECTS_API_VERSION" "$base/projectsV2/$number/fields?per_page=100" \
+        --jq 'map({ key: .name, value: .id }) | from_entries')
+
+    local view
+    while IFS= read -r view; do
+        jq --argjson ids "$rest_ids" '
+            def id($n): $ids[$n] // error("Unknown field in view: \($n)");
+            . as $v | { name: $v.name, layout: $v.layout }
+            + (if $v.filter then { filter: $v.filter } else {} end)
+            + (if $v.visible_fields then { visible_fields: [$v.visible_fields[] | id(.)] } else {} end)
+            + (if $v.group_by then { group_by: [id($v.group_by)] } else {} end)
+            + (if $v.vertical_group_by then { vertical_group_by: [id($v.vertical_group_by)] } else {} end)
+            + (if $v.sort_by then { sort_by: [$v.sort_by[] | [id(.[0]), .[1]]] } else {} end)' <<< "$view" \
+            | gh api -X POST -H "X-GitHub-Api-Version: $PROJECTS_API_VERSION" "$base/projectsV2/$number/views" --input - --silent
+        echo "✅ View: $(jq -r '.name' <<< "$view")"
+    done < <(jq -c '.views[]' <<< "$def")
+
+    local default_view
+    default_view=$(gh api graphql -f p="$project_id" --jq '.data.node.views.nodes[] | select(.name == "View 1") | .id' -f query='
+        query($p: ID!) { node(id: $p) { ... on ProjectV2 { views(first: 50) { nodes { id name } } } } }')
+    if [ -n "$default_view" ]; then
+        gh api graphql -f v="$default_view" --silent -f query='
+            mutation($v: ID!) { deleteProjectV2View(input: { viewId: $v }) { clientMutationId } }' \
+            || echo "ℹ️  Could not remove the default 'View 1'"
+    fi
+}
+
+# Delete the projects that setup_project created for a demo repo: linked to it
+# and titled "... (<repo name>)". Projects outlive their repo, so cleanup does this
+# first. Never fails cleanup.
+# Usage: delete_demo_projects <owner/repo>
+delete_demo_projects() {
+    local owner="${1%%/*}" name="${1#*/}" project title
+    while IFS=$'\t' read -r project title; do
+        [ -z "$project" ] && continue
+        if gh api graphql -f id="$project" --silent -f query='
+            mutation($id: ID!) { deleteProjectV2(input: { projectId: $id }) { clientMutationId } }' 2>/dev/null; then
+            echo "🗑️  Deleted project: $title"
+        else
+            echo "⚠️  Could not delete project '$title' (needs the 'project' scope: gh auth refresh -s project)"
+        fi
+    done < <(gh api graphql -f owner="$owner" -f name="$name" -f query='
+        query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) {
+          projectsV2(first: 20) { nodes { id title } } } }' 2>/dev/null \
+        | jq -r --arg suffix " ($name)" '.data.repository.projectsV2.nodes[]? | select(.title | endswith($suffix)) | [.id, .title] | @tsv')
+}
+
 # Validate required fields and referenced files for the selected workflow.
 # Fails before any remote side effect so a config typo cannot strand a
 # half-created repo on GitHub.
@@ -697,6 +940,13 @@ validate_selected_repo() {
         stacked_prs)
             validate_pr_entries stack 2
             ;;
+        project_board)
+            [ -z "$(repo_cfg '.project.file')" ] && missing+=("project.file")
+            if [ "$USER_TOKEN" != true ]; then
+                echo "❌ The project_board workflow needs a user token with the 'project' scope"
+                exit 1
+            fi
+            ;;
         *)
             echo "❌ Unknown workflow: $WORKFLOW"
             exit 1
@@ -758,6 +1008,7 @@ run_cleanup() {
     local failed=0 repo
     for line in "${candidates[@]}"; do
         repo="${line%% *}"
+        delete_demo_projects "$repo"
         if gh repo delete "$repo" --yes; then
             echo "🗑️  Deleted $repo"
         else
@@ -1244,6 +1495,12 @@ case $WORKFLOW in
 
         register_stack
         ;;
+
+    "project_board")
+        echo ""
+        echo "📋 Setting up GitHub Projects demo..."
+        setup_project
+        ;;
 esac
 
 if [ "$PAGES" = "true" ]; then
@@ -1275,6 +1532,9 @@ fi
 if [ -n "${PAGES_URL:-}" ]; then
     echo "   Game (GitHub Pages): $PAGES_URL"
 fi
+if [ -n "${PROJECT_URL:-}" ]; then
+    echo "   Project: $PROJECT_URL"
+fi
 for line in "${SUMMARY_LINES[@]}"; do
     echo "   $line"
 done
@@ -1297,6 +1557,9 @@ if [ -n "${ALERTS_URL:-}" ]; then
 fi
 if [ -n "${PULLS_URL:-}" ]; then
     open_url "$PULLS_URL"
+fi
+if [ -n "${PROJECT_URL:-}" ]; then
+    open_url "$PROJECT_URL"
 fi
 
 # --- Optional local preview ---

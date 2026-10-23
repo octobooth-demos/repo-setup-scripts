@@ -32,6 +32,8 @@ $aiScanApiVersion = '2026-03-10'
 # copilot-swe-agent[bot], so it's kept as a fallback.
 $copilotAutofixAssignees = @('github-agentic-autofix[bot]', 'copilot-swe-agent[bot]')
 $codeqlWaitSeconds = if ($env:CODEQL_WAIT_SECONDS) { [int]$env:CODEQL_WAIT_SECONDS } else { 900 }
+$projectsApiVersion = '2026-03-10'
+$seedWaitSeconds = if ($env:SEED_WAIT_SECONDS) { [int]$env:SEED_WAIT_SECONDS } else { 600 }
 $nonInteractive = -not [string]::IsNullOrWhiteSpace($Template)
 
 if ($Cleanup -and ($nonInteractive -or $Serve -or $NoClone)) {
@@ -183,6 +185,11 @@ function Assert-SelectedRepo {
         'stacked_prs' {
             $missing += @(Assert-PullRequestEntries $Repo.stack 'stack' 2)
         }
+        'project_board' {
+            if ([string]::IsNullOrWhiteSpace($Repo.project.file)) {
+                $missing += 'project.file'
+            }
+        }
         default {
             throw "Unknown workflow: $($Repo.workflow)"
         }
@@ -293,6 +300,7 @@ function Invoke-DemoCleanup {
     }
     $failed = 0
     foreach ($repo in $candidates) {
+        Remove-DemoProjects $repo.full_name
         & gh repo delete $repo.full_name --yes
         if ($LASTEXITCODE -eq 0) { Write-Host "Deleted $($repo.full_name)" } else { $failed++ }
     }
@@ -616,6 +624,273 @@ function Enable-DemoPages {
     return $url
 }
 
+# --- GitHub Projects (project_board workflow) ---
+
+function Get-DayOffset {
+    param([double]$Days)
+    [DateTime]::UtcNow.Date.AddDays($Days).ToString('yyyy-MM-dd')
+}
+
+# Run gh and parse its JSON output.
+function Invoke-GhJson {
+    param([string[]]$Arguments)
+    $output = Invoke-Native 'gh' $Arguments
+    if ($null -eq $output) { return $null }
+    ($output -join "`n") | ConvertFrom-Json
+}
+
+# Send a GraphQL request body ({query, variables}) through a temp file, which
+# avoids native-argument quoting differences between PowerShell versions.
+function Invoke-GraphQL {
+    param([string]$Query, [hashtable]$Variables = @{})
+    $file = [IO.Path]::GetTempFileName()
+    try {
+        $body = @{ query = $Query; variables = $Variables } | ConvertTo-Json -Depth 20 -Compress
+        [IO.File]::WriteAllText($file, $body, (New-Object Text.UTF8Encoding $false))
+        Invoke-GhJson @('api', 'graphql', '--input', $file)
+    }
+    finally { Remove-Item -LiteralPath $file -Force -ErrorAction SilentlyContinue }
+}
+
+# Read a JSON file from the new repo's default branch.
+function Get-RepoJsonFile {
+    param([string]$Path)
+    Invoke-GhJson @('api', "repos/$fullRepoName/contents/$($Path)?ref=$defaultBranch", '-H', 'Accept: application/vnd.github.raw')
+}
+
+# Wait (bounded) for the template's issue-seeding workflow to finish. Repos made
+# from a template run it on their first push; if no run shows up, start one.
+function Wait-SeedWorkflow {
+    param([string]$Workflow)
+    Write-Host "Waiting for $Workflow to seed issues (up to $([int]($seedWaitSeconds / 60)) min)..."
+    $dispatched = $false
+    for ($waited = 0; $waited -lt $seedWaitSeconds; $waited += 5) {
+        $fields = @(Invoke-GhQuiet run list --repo $fullRepoName --workflow $Workflow --limit 1 `
+            --json 'status,conclusion,url' --jq '.[0].status, .[0].conclusion, .[0].url')
+        $status = if ($fields.Count -gt 0) { "$($fields[0])".Trim() } else { '' }
+        if ($status -eq 'completed') {
+            $conclusion = "$($fields[1])".Trim()
+            if ($conclusion -ne 'success') {
+                throw "$Workflow finished with '$conclusion': $("$($fields[2])".Trim())"
+            }
+            Write-Host "Issues seeded by $Workflow"
+            return
+        }
+        if (-not $status -and -not $dispatched -and $waited -ge 60) {
+            Write-Host "No $Workflow run yet; starting one"
+            Invoke-GhQuiet workflow run $Workflow --repo $fullRepoName --ref $defaultBranch | Out-Null
+            $dispatched = $true
+        }
+        Start-Sleep -Seconds 5
+    }
+    throw "$Workflow did not finish in time. Check the Actions tab of $fullRepoName."
+}
+
+# Set an item's field values in one request. Dates are days from today and
+# iterations are 1-based (oldest first).
+function Set-ProjectItemFields {
+    param([string]$ProjectId, [string]$ItemId, [hashtable]$FieldMap, $Values)
+    if ($null -eq $Values) { return }
+    $inputs = @()
+    foreach ($property in $Values.PSObject.Properties) {
+        $field = $FieldMap[$property.Name]
+        if ($null -eq $field) { throw "Unknown project field: $($property.Name)" }
+        $value = switch ($field.Type) {
+            'SINGLE_SELECT' {
+                $optionId = $field.Options["$($property.Value)"]
+                if (-not $optionId) { throw "Unknown $($property.Name) option: $($property.Value)" }
+                @{ singleSelectOptionId = $optionId }
+            }
+            'NUMBER' { @{ number = [double]$property.Value } }
+            'DATE' { @{ date = (Get-DayOffset $property.Value) } }
+            'ITERATION' {
+                $index = [int]$property.Value - 1
+                if ($index -lt 0 -or $index -ge $field.Iterations.Count) { throw "No $($property.Name) number $($property.Value)" }
+                @{ iterationId = $field.Iterations[$index] }
+            }
+            default { @{ text = "$($property.Value)" } }
+        }
+        $inputs += , @{ projectId = $ProjectId; itemId = $ItemId; fieldId = $field.Id; value = $value }
+    }
+    if ($inputs.Count -eq 0) { return }
+    $declarations = @(); $mutations = @(); $variables = @{}
+    for ($i = 0; $i -lt $inputs.Count; $i++) {
+        $declarations += "`$i$($i): UpdateProjectV2ItemFieldValueInput!"
+        $mutations += "u$($i): updateProjectV2ItemFieldValue(input: `$i$($i)) { clientMutationId }"
+        $variables["i$i"] = $inputs[$i]
+    }
+    Invoke-GraphQL "mutation($($declarations -join ', ')) { $($mutations -join ' ') }" $variables | Out-Null
+}
+
+# Create the saved views (REST, so they can be filtered, grouped, and sorted),
+# then remove the default "View 1".
+function New-ProjectViews {
+    param([int]$Number, [string]$ProjectId, $Views)
+    if (@($Views).Count -eq 0) { return }
+    $ownerType = "$(@(Invoke-Native 'gh' @('api', "users/$repoOwner", '--jq', '.type'))[-1])".Trim()
+    $base = if ($ownerType -eq 'Organization') { "orgs/$repoOwner" } else { "users/$repoOwner" }
+    $restIds = @{}
+    foreach ($field in @(Invoke-GhJson @('api', '-H', "X-GitHub-Api-Version: $projectsApiVersion", "$base/projectsV2/$Number/fields?per_page=100"))) {
+        $restIds[$field.name] = $field.id
+    }
+    $fieldId = {
+        param([string]$Name)
+        if (-not $restIds.ContainsKey($Name)) { throw "Unknown field in view: $Name" }
+        $restIds[$Name]
+    }
+    foreach ($view in $Views) {
+        $body = @{ name = $view.name; layout = $view.layout }
+        if ($view.filter) { $body.filter = $view.filter }
+        if ($view.visible_fields) { $body.visible_fields = @($view.visible_fields | ForEach-Object { & $fieldId $_ }) }
+        if ($view.group_by) { $body.group_by = @(& $fieldId $view.group_by) }
+        if ($view.vertical_group_by) { $body.vertical_group_by = @(& $fieldId $view.vertical_group_by) }
+        if ($view.sort_by) { $body.sort_by = @($view.sort_by | ForEach-Object { , @((& $fieldId $_[0]), $_[1]) }) }
+        $file = [IO.Path]::GetTempFileName()
+        try {
+            [IO.File]::WriteAllText($file, ($body | ConvertTo-Json -Depth 10 -Compress), (New-Object Text.UTF8Encoding $false))
+            Invoke-Native 'gh' @('api', '-X', 'POST', '-H', "X-GitHub-Api-Version: $projectsApiVersion",
+                "$base/projectsV2/$Number/views", '--input', $file, '--silent') | Out-Null
+        }
+        finally { Remove-Item -LiteralPath $file -Force -ErrorAction SilentlyContinue }
+        Write-Host "View: $($view.name)"
+    }
+    $existing = Invoke-GraphQL 'query($p: ID!) { node(id: $p) { ... on ProjectV2 { views(first: 50) { nodes { id name } } } } }' @{ p = $ProjectId }
+    foreach ($default in @($existing.data.node.views.nodes | Where-Object { $_.name -eq 'View 1' })) {
+        try {
+            Invoke-GraphQL 'mutation($v: ID!) { deleteProjectV2View(input: { viewId: $v }) { clientMutationId } }' @{ v = $default.id } | Out-Null
+        }
+        catch { Write-Host "Could not remove the default 'View 1'" }
+    }
+}
+
+# Create a GitHub Project from the template's project definition, link it to the
+# repo, and add the seeded issues with their field values. Returns the project URL.
+function New-DemoProject {
+    $settings = $selectedRepo.project
+    if ($settings.seed_workflow) { Wait-SeedWorkflow $settings.seed_workflow }
+    $definition = Get-RepoJsonFile $settings.file
+    $issueData = if ($settings.issues_file) { Get-RepoJsonFile $settings.issues_file } else { $null }
+
+    $title = "$($definition.title) ($repoName)"
+    Write-Host "Creating project: $title"
+    $created = Invoke-GhJson @('project', 'create', '--owner', $repoOwner, '--title', $title, '--format', 'json')
+    $number = [int]$created.number
+    $projectId = $created.id
+    $editArgs = @('project', 'edit', "$number", '--owner', $repoOwner)
+    if ($definition.short_description) { $editArgs += @('--description', $definition.short_description) }
+    if ($definition.readme) { $editArgs += @('--readme', $definition.readme) }
+    Invoke-Native 'gh' $editArgs | Out-Null
+    Invoke-Native 'gh' @('project', 'link', "$number", '--owner', $repoOwner, '--repo', $fullRepoName) | Out-Null
+    Write-Host "Project linked to $fullRepoName"
+
+    if (@($definition.status_options).Count -gt 0) {
+        $status = Invoke-GraphQL 'query($p: ID!) { node(id: $p) { ... on ProjectV2 { field(name: "Status") { ... on ProjectV2SingleSelectField { id } } } } }' @{ p = $projectId }
+        $options = @($definition.status_options | ForEach-Object { @{ name = $_.name; color = $_.color; description = "$($_.description)" } })
+        Invoke-GraphQL 'mutation($input: UpdateProjectV2FieldInput!) { updateProjectV2Field(input: $input) { clientMutationId } }' `
+            @{ input = @{ fieldId = $status.data.node.field.id; singleSelectOptions = $options } } | Out-Null
+        Write-Host "Status options: $(($definition.status_options | ForEach-Object { $_.name }) -join ', ')"
+    }
+
+    foreach ($field in @($definition.fields)) {
+        if ($null -eq $field) { continue }
+        $fieldInput = @{ projectId = $projectId; name = $field.name; dataType = $field.type.ToUpperInvariant() }
+        if ($field.type -eq 'single_select') {
+            $fieldInput.singleSelectOptions = @($field.options | ForEach-Object { @{ name = $_.name; color = $_.color; description = "$($_.description)" } })
+        }
+        if ($field.type -eq 'iteration') {
+            $start = if ($null -ne $field.start_offset_days) { [int]$field.start_offset_days } else { 0 }
+            $length = if ($field.duration_days) { [int]$field.duration_days } else { 14 }
+            $count = if ($field.count) { [int]$field.count } else { 3 }
+            $fieldInput.iterationConfiguration = @{
+                startDate = (Get-DayOffset $start); duration = $length
+                iterations = @(0..($count - 1) | ForEach-Object {
+                    @{ title = "Sprint $($_ + 1)"; startDate = (Get-DayOffset ($start + $_ * $length)); duration = $length }
+                })
+            }
+        }
+        Invoke-GraphQL 'mutation($input: CreateProjectV2FieldInput!) { createProjectV2Field(input: $input) { clientMutationId } }' @{ input = $fieldInput } | Out-Null
+        Write-Host "Field: $($field.name)"
+    }
+
+    $fields = Invoke-GraphQL @'
+query($p: ID!) { node(id: $p) { ... on ProjectV2 { fields(first: 50) { nodes {
+  ... on ProjectV2Field { id name dataType }
+  ... on ProjectV2SingleSelectField { id name dataType options { id name } }
+  ... on ProjectV2IterationField { id name dataType configuration {
+    iterations { id startDate } completedIterations { id startDate } } } } } } } }
+'@ @{ p = $projectId }
+    $fieldMap = @{}
+    foreach ($node in @($fields.data.node.fields.nodes)) {
+        $options = @{}
+        foreach ($option in @($node.options)) { if ($option) { $options[$option.name] = $option.id } }
+        $iterations = @(@($node.configuration.completedIterations) + @($node.configuration.iterations) |
+            Where-Object { $_ } | Sort-Object startDate | ForEach-Object { $_.id })
+        $fieldMap[$node.name] = @{ Id = $node.id; Type = $node.dataType; Options = $options; Iterations = $iterations }
+    }
+
+    $added = 0
+    $projectIssues = @($issueData.issues | Where-Object { $_ -and $_.project })
+    if ($projectIssues.Count -gt 0) {
+        $issueIds = @{}
+        foreach ($issue in @(Invoke-GhJson @('issue', 'list', '--repo', $fullRepoName, '--state', 'all', '--limit', '500', '--json', 'id,title'))) {
+            $issueIds[$issue.title] = $issue.id
+        }
+        foreach ($issue in $projectIssues) {
+            if (-not $issueIds.ContainsKey($issue.title)) {
+                Write-Warning "Issue not found, so not added to the project: $($issue.title)"
+                continue
+            }
+            $item = Invoke-GraphQL 'mutation($p: ID!, $c: ID!) { addProjectV2ItemById(input: { projectId: $p, contentId: $c }) { item { id } } }' `
+                @{ p = $projectId; c = $issueIds[$issue.title] }
+            Set-ProjectItemFields $projectId $item.data.addProjectV2ItemById.item.id $fieldMap $issue.project
+            $added++
+        }
+    }
+    Write-Host "Added $added issue(s) to the project with their field values"
+
+    foreach ($draft in @($definition.drafts | Where-Object { $_ })) {
+        $item = Invoke-GraphQL 'mutation($input: AddProjectV2DraftIssueInput!) { addProjectV2DraftIssue(input: $input) { projectItem { id } } }' `
+            @{ input = @{ projectId = $projectId; title = $draft.title; body = "$($draft.body)" } }
+        Set-ProjectItemFields $projectId $item.data.addProjectV2DraftIssue.projectItem.id $fieldMap $draft.fields
+        Write-Host "Draft item: $($draft.title)"
+    }
+
+    New-ProjectViews $number $projectId @($definition.views | Where-Object { $_ })
+
+    if ($definition.status_update) {
+        $update = $definition.status_update
+        $updateInput = @{ projectId = $projectId; status = $(if ($update.status) { $update.status } else { 'ON_TRACK' }); body = "$($update.body)" }
+        if ($null -ne $update.start_offset_days) { $updateInput.startDate = Get-DayOffset $update.start_offset_days }
+        if ($null -ne $update.target_offset_days) { $updateInput.targetDate = Get-DayOffset $update.target_offset_days }
+        Invoke-GraphQL 'mutation($input: CreateProjectV2StatusUpdateInput!) { createProjectV2StatusUpdate(input: $input) { clientMutationId } }' @{ input = $updateInput } | Out-Null
+        Write-Host 'Project status update posted'
+    }
+
+    Write-Host "Project ready: $($created.url)"
+    Set-ActionOutput 'project_url' $created.url
+    return $created.url
+}
+
+# Delete the projects New-DemoProject created for a demo repo: linked to it and
+# titled "... (<repo name>)". Projects outlive their repo, so cleanup does this
+# first. Never fails cleanup.
+function Remove-DemoProjects {
+    param([string]$FullName)
+    $owner, $name = $FullName -split '/', 2
+    try {
+        $result = Invoke-GraphQL 'query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { projectsV2(first: 20) { nodes { id title } } } }' `
+            @{ owner = $owner; name = $name }
+    }
+    catch { return }
+    foreach ($project in @($result.data.repository.projectsV2.nodes | Where-Object { $_ -and $_.title.EndsWith(" ($name)") })) {
+        try {
+            Invoke-GraphQL 'mutation($id: ID!) { deleteProjectV2(input: { projectId: $id }) { clientMutationId } }' @{ id = $project.id } | Out-Null
+            Write-Host "Deleted project: $($project.title)"
+        }
+        catch { Write-Warning "Could not delete project '$($project.title)' (needs the 'project' scope: gh auth refresh -s project)" }
+    }
+}
+
 try {
     Write-Host 'GitHub demo repository creation tool'
     Write-Host '======================================='
@@ -763,6 +1038,7 @@ try {
     $pullsUrl = $null
     $alertsUrl = $null
     $assignedAlertUrl = $null
+    $projectUrl = $null
 
     switch ($selectedRepo.workflow) {
         'repo_only' {
@@ -929,6 +1205,13 @@ try {
             Set-ActionOutput 'top_pr_url' $topPullRequestUrl
             Register-PullRequestStack $stackNumbers
         }
+        'project_board' {
+            if (-not $userToken) {
+                throw "The project_board workflow needs a user token with the 'project' scope."
+            }
+            Write-Host 'Setting up GitHub Projects demo...'
+            $projectUrl = New-DemoProject
+        }
     }
 
     $pagesUrl = $null
@@ -958,6 +1241,9 @@ try {
     if ($pagesUrl) {
         Write-Host "   Game (GitHub Pages): $pagesUrl"
     }
+    if ($projectUrl) {
+        Write-Host "   Project: $projectUrl"
+    }
     foreach ($line in $selectedRepo.summary_lines) {
         if ($line) { Write-Host "   $line" }
     }
@@ -972,6 +1258,7 @@ try {
     }
     if ($alertsUrl) { Open-Url $alertsUrl }
     if ($pullsUrl) { Open-Url $pullsUrl }
+    if ($projectUrl) { Open-Url $projectUrl }
 
     if ($Serve) {
         Set-Location -LiteralPath $clonePath

@@ -51,13 +51,8 @@ jobs:
           ' config.json > /dev/null
       - name: Check referenced files exist
         run: |
-          missing=0
-          while IFS=$'\t' read -r kind path; do
-            if { [ "$kind" = file ] && [ ! -f "$path" ]; } || { [ "$kind" = dir ] && [ ! -d "$path" ]; }; then
-              echo "::error file=config.json::Missing $kind: $path"
-              missing=1
-            fi
-          done < <(jq -r '
+          # Assign first so a jq failure stops the step (bash -e) instead of being lost.
+          refs=$(jq -r '
             .repos[] |
             ((.prs // [])[], (.stack // [])[] | ["dir", .resource_dir], ["file", .body_file]),
             (.issue.body_file // empty | ["file", .]),
@@ -65,11 +60,19 @@ jobs:
             (.seed_prompt_file // empty | ["file", .])
             | @tsv
           ' config.json)
+          missing=0
+          while IFS=$'\t' read -r kind path; do
+            if { [ "$kind" = file ] && [ ! -f "$path" ]; } || { [ "$kind" = dir ] && [ ! -d "$path" ]; }; then
+              echo "::error file=config.json::Missing $kind: $path"
+              missing=1
+            fi
+          done <<< "$refs"
           exit "$missing"
       - name: Check new-demo template options exist in config.json
         run: |
           missing=0
-          for key in $(yq '.on.workflow_dispatch.inputs.template.options[]' .github/workflows/new-demo.yml); do
+          keys=$(yq -e '.on.workflow_dispatch.inputs.template.options[]' .github/workflows/new-demo.yml)
+          for key in $keys; do
             if ! jq -e --arg key "$key" 'any(.repos[]; .key == $key)' config.json > /dev/null; then
               echo "::error file=.github/workflows/new-demo.yml::Template option '$key' is not a key in config.json"
               missing=1

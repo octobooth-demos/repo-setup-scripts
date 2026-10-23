@@ -34,17 +34,23 @@ Do this once per machine (macOS):
    - The booth account also needs a Copilot seat (for Copilot code review and assigning issues to Copilot) and access to Codespaces (for Tailspin Toys).
    - If `GH_TOKEN` or `GITHUB_TOKEN` is set, `gh auth login`/`refresh` refuse to run and `gh` uses the token instead of the booth login. Remove them from your shell profile on booth machines too. The Demo Launcher already ignores them when a stored login exists, but terminal runs of `create-repo` don't.
 
-2. In the GitHub Copilot app, add `octobooth-demos/repo-setup-scripts` as a project. This clones it to `~/repos/repo-setup-scripts`, and sessions in this project can always open the Demo Launcher.
-3. Also install the loader so other sessions can open it too (see [details](#make-it-available-in-every-session)):
+2. Clone this repo to `~/repos/repo-setup-scripts`:
+
+   ```bash
+   gh repo clone octobooth-demos/repo-setup-scripts ~/repos/repo-setup-scripts
+   ```
+
+3. In the GitHub Copilot app, add that **existing local folder** (`~/repos/repo-setup-scripts`) as a project. Don't clone it again. Sessions in this project can always open the Demo Launcher.
+4. Also install the loader so other sessions can open it too (see [details](#make-it-available-in-every-session)):
 
    ```bash
    cd ~/repos/repo-setup-scripts
    bash .github/extensions/demo-launcher/install.sh
    ```
 
-   Then restart the Copilot app (or reload extensions in open sessions).
+   Then restart the Copilot app (or reload extensions in open sessions). The project and the loader now use the same checkout.
 
-Before each booth day, update the checkout with `git -C ~/repos/repo-setup-scripts pull`. Then ask Copilot to **"open the demo launcher"**. If a session outside the project can't find it, open it from a session in the `repo-setup-scripts` project instead. At the end of the day, use the launcher's **Clean up** section or `bash ./create-repo.sh --cleanup` (see [Cleaning up](#cleaning-up)).
+Before each booth day, run `git -C ~/repos/repo-setup-scripts pull` and restart the app; that updates both. Then ask Copilot to **"open the demo launcher"**. If a session outside the project can't find it, open it from a session in the `repo-setup-scripts` project instead. At the end of the day, use the launcher's **Clean up** section or `bash ./create-repo.sh --cleanup` (see [Cleaning up](#cleaning-up)).
 
 ## Demos
 
@@ -132,7 +138,7 @@ On booth machines (macOS or Linux), set up both: add the repo as a project **and
 
 #### Two Demo Launcher canvases
 
-App builds that can open canvases without a session (staff builds) may list two "Demo Launcher" canvases when both are set up: `user:demo-launcher` (the loader) and `project:demo-launcher` (the project's copy). They're the same launcher from the same checkout, so either works. To hide one, remove `repo-setup-scripts` from the app's projects (keep the clone; the loader runs from it) and restart the app.
+App builds that can open canvases without a session (staff builds) may list two "Demo Launcher" canvases when both are set up: `user:demo-launcher` (the loader) and `project:demo-launcher` (the project's copy). If you added the existing `~/repos/repo-setup-scripts` folder as the project, they're the same launcher from the same checkout, so either works. To hide one, remove `repo-setup-scripts` from the app's projects (keep the clone; the loader runs from it) and restart the app.
 
 ### Make it available in every session
 
@@ -147,7 +153,7 @@ Then restart the Copilot app, or ask Copilot to reload extensions in sessions th
 
 How the loader works:
 
-- The installer writes a small user-level extension (a loader) to `~/.copilot/extensions/demo-launcher/extension.mjs`, or to `$COPILOT_HOME/extensions/demo-launcher/` if `COPILOT_HOME` is set. Copilot loads user-level extensions in every session.
+- The installer writes a small user-level extension (a loader) to `~/.copilot/extensions/demo-launcher/extension.mjs`, or to `$COPILOT_HOME/extensions/demo-launcher/` if `COPILOT_HOME` is set. App builds that support user-level extensions load them in every session.
 - The loader imports `extension.mjs` straight from your checkout. **`git pull` updates the launcher**; you don't need to reinstall. Demos still run `create-repo` and `config.json` from that checkout.
 - If you run the installer from a worktree, it points the loader at the **main checkout** anyway, because worktrees get deleted. If the main checkout doesn't have the extension yet, it falls back to the worktree with a warning. In that case, re-run it from the main checkout after merging.
 - In sessions inside this repo, the loader does nothing and lets that checkout's copy provide the canvas. That avoids two Demo Launchers in the session, and a branch you're working on uses its own version. Staff app builds may still list [two canvases](#two-demo-launcher-canvases) outside a session.

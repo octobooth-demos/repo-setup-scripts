@@ -8,7 +8,7 @@ on:
       max_age_hours:
         description: Delete demo-generated repos older than this many hours (minimum 1)
         type: number
-        default: 24
+        default: 72
       dry_run:
         description: List repos that would be deleted without deleting them
         type: boolean
@@ -53,13 +53,13 @@ jobs:
           INPUT_ALL: ${{ inputs.all }}
           COMMENT_BODY: ${{ github.event.comment.body }}
         run: |
-          hours=24
+          hours=72
           all=false
           # Only the nightly schedule deletes without an explicit opt-in.
           dry_run=false
           case "$EVENT_NAME" in
             workflow_dispatch)
-              hours="${INPUT_HOURS:-24}"
+              hours="${INPUT_HOURS:-72}"
               dry_run="${INPUT_DRY_RUN:-true}"
               all="${INPUT_ALL:-false}"
               ;;

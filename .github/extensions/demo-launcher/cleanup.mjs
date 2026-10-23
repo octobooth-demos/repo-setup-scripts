@@ -41,6 +41,36 @@ export function createCleanup({ repoRoot, scriptEnv, scriptCommand, broadcast, o
         return header[1].split(",").map((x) => x.trim()).includes("delete_repo");
     }
 
+    // Projects outlive their repo, so delete the demo's linked ones (titled "... (<repo name>)") first.
+    // Best-effort, like delete_demo_projects in create-repo.sh: warn and keep going on failure.
+    function deleteDemoProjects(fullName, env) {
+        const [owner, name] = fullName.split("/");
+        const scopeHint = "needs the 'project' scope: gh auth refresh -h github.com -s project";
+        const lookup = spawnSync(
+            "gh",
+            ["api", "graphql", "-f", `owner=${owner}`, "-f", `name=${name}`, "-f",
+                "query=query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { projectsV2(first: 20) { nodes { id title } } } }"],
+            { cwd: repoRoot, env, encoding: "utf8", timeout: 30000 },
+        );
+        let nodes;
+        try {
+            if (lookup.status !== 0) throw new Error();
+            nodes = JSON.parse(lookup.stdout).data.repository.projectsV2.nodes ?? [];
+        } catch {
+            append(`⚠️  Could not look up projects for ${fullName}; any demo project is left behind (${scopeHint})\n`);
+            return;
+        }
+        for (const { id, title } of nodes.filter((p) => p?.title?.endsWith(` (${name})`))) {
+            const del = spawnSync(
+                "gh",
+                ["api", "graphql", "--silent", "-f", `id=${id}`, "-f",
+                    "query=mutation($id: ID!) { deleteProjectV2(input: { projectId: $id }) { clientMutationId } }"],
+                { cwd: repoRoot, env, encoding: "utf8", timeout: 30000 },
+            );
+            append(del.status === 0 ? `🗑️  Deleted project: ${title}\n` : `⚠️  Could not delete project '${title}' (${scopeHint})\n`);
+        }
+    }
+
     function run(cmd, args, env) {
         return new Promise((done) => {
             const child = spawn(cmd, args, { cwd: repoRoot, env, stdio: ["ignore", "pipe", "pipe"] });
@@ -116,6 +146,8 @@ export function createCleanup({ repoRoot, scriptEnv, scriptCommand, broadcast, o
 
         const env = scriptEnv();
         for (const repo of selected) {
+            deleteDemoProjects(repo, env);
+            publish();
             const { code, out } = await run("gh", ["repo", "delete", repo, "--yes"], env);
             if (code === 0) {
                 state.deleted.push(repo);

@@ -31,6 +31,7 @@ Do this once per machine (macOS):
    - `delete_repo` lets the launcher's **Clean up** (and `--cleanup`) delete old demo repos.
    - The default scopes (`repo`, `read:org`, `gist`) cover everything else. Answer **Yes** to "Authenticate Git" so the scripts can push demo branches over HTTPS.
    - The booth account must be a member of the `octobooth-demos` org and allowed to create repos there. Several demos (`security-octo-supply`, `security-octo-supply-v4`, `ai-security`, and `ensemble-blank`) always create their repo in that org.
+   - The booth account also needs a Copilot seat (for Copilot code review and assigning issues to Copilot) and access to Codespaces (for Tailspin Toys).
    - If `GH_TOKEN` or `GITHUB_TOKEN` is set, `gh auth login`/`refresh` refuse to run and `gh` uses the token instead of the booth login. Remove them from your shell profile on booth machines too. The Demo Launcher already ignores them when a stored login exists, but terminal runs of `create-repo` don't.
 
 2. Clone this repo to `~/repos/repo-setup-scripts`:

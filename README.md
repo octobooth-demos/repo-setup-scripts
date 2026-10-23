@@ -21,6 +21,7 @@ Do this once per machine (macOS):
    Then log in to the GitHub CLI **as the booth account** (for example `octobooth-1`), not your personal account. Demos are created in the logged-in account and in the `octobooth-demos` org:
 
    ```bash
+   unset GH_TOKEN GITHUB_TOKEN   # login and refresh fail while either is set
    gh auth login        # GitHub.com → HTTPS → "Authenticate Git" Yes → Login with a web browser
    gh auth refresh -h github.com -s codespace,delete_repo
    gh auth status       # should show the booth account and both scopes
@@ -29,8 +30,8 @@ Do this once per machine (macOS):
    - `codespace` lets Tailspin Toys create its Codespace.
    - `delete_repo` lets the launcher's **Clean up** (and `--cleanup`) delete old demo repos.
    - The default scopes (`repo`, `read:org`, `gist`) cover everything else. Answer **Yes** to "Authenticate Git" so the scripts can push demo branches over HTTPS.
-   - The booth account must be a member of the `octobooth-demos` org and allowed to create repos there. Several demos (the security ones, `ai-security`, and `ensemble-blank`) always create their repo in that org.
-   - If `GH_TOKEN` or `GITHUB_TOKEN` is set, `gh` uses it instead of this login. Unset them in your shell profile on booth machines (`unset GH_TOKEN GITHUB_TOKEN`). The Demo Launcher already ignores them when a stored login exists, but terminal runs of `create-repo` don't.
+   - The booth account must be a member of the `octobooth-demos` org and allowed to create repos there. Several demos (`security-octo-supply`, `security-octo-supply-v4`, `ai-security`, and `ensemble-blank`) always create their repo in that org.
+   - If `GH_TOKEN` or `GITHUB_TOKEN` is set, `gh auth login`/`refresh` refuse to run and `gh` uses the token instead of the booth login. Remove them from your shell profile on booth machines too. The Demo Launcher already ignores them when a stored login exists, but terminal runs of `create-repo` don't.
 
 2. Clone this repo to `~/repos/repo-setup-scripts`:
 

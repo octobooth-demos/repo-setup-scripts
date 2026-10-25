@@ -123,11 +123,12 @@
         "toolReferenceName": "demoLauncherCleanupDelete",
         "canBeReferencedInPrompt": true,
         "userDescription": "Delete repos from the current cleanup preview.",
-        "modelDescription": "Delete repos from the current cleanup preview (run demoLauncher_cleanupPreview first). Only call after the user confirmed the list. VS Code also asks the user to confirm.",
+        "modelDescription": "Delete repos from the current cleanup preview (run demoLauncher_cleanupPreview first). Pass the exact owner/name repos to delete; repos not in the current preview are skipped. Only call after the user confirmed the list. VS Code also asks the user to confirm.",
         "inputSchema": {
           "type": "object",
+          "required": ["repos"],
           "properties": {
-            "repos": { "type": "array", "items": { "type": "string" }, "description": "owner/name repos from the preview; defaults to all of them." },
+            "repos": { "type": "array", "items": { "type": "string" }, "minItems": 1, "description": "owner/name repos from the preview to delete." },
             "removeClones": { "type": "boolean", "description": "Also delete matching local clones in ~/repos." }
           }
         }

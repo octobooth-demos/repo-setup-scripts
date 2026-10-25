@@ -43,6 +43,14 @@ function storageDir() {
     return dir;
 }
 
+// Run history lives in workspace storage: each VS Code window runs its own launcher, and VS Code
+// opens a workspace in only one window, so no two launchers share a history file.
+function historyFile() {
+    const dir = context.storageUri?.fsPath || path.join(storageDir(), "no-workspace");
+    fs.mkdirSync(dir, { recursive: true });
+    return path.join(dir, "runs.json");
+}
+
 function getLauncher() {
     if (!launcherPromise) {
         launcherPromise = (async () => {
@@ -52,7 +60,7 @@ function getLauncher() {
             }
             const core = await import(pathToFileURL(path.join(repoRoot, CORE_REL)).href);
             output.appendLine(`Using ${repoRoot}`);
-            return { core, launcher: core.createLauncher({ repoRoot, storeFile: path.join(storageDir(), "runs.json"), host }) };
+            return { core, launcher: core.createLauncher({ repoRoot, storeFile: historyFile(), host }) };
         })();
         launcherPromise.catch(() => (launcherPromise = null));
     }
@@ -273,7 +281,6 @@ function trimLog(run) {
     return run.log && run.log.length > 20000 ? { ...run, log: `…${run.log.slice(-20000)}` } : run;
 }
 
-const confirmedDeletes = new Map(); // JSON tool input -> repos shown in its confirmation
 const tools = {
     demoLauncher_open: {
         invoke: async ({ template }) => {
@@ -305,25 +312,18 @@ const tools = {
         },
     },
     demoLauncher_cleanupDelete: {
-        // Delete exactly the repos shown in the confirmation, even if the preview changes before
-        // the presenter approves; the core still skips any that left the preview.
-        confirm: async (input, { launcher }) => {
-            const { repos, removeClones } = input;
-            const preview = (await launcher.api("GET", "/api/state")).cleanup.candidates.map((c) => c.repo);
-            const selected = repos?.length ? repos.filter((r) => preview.includes(r)) : preview;
-            confirmedDeletes.set(JSON.stringify(input), selected);
-            const list = selected.map((r) => `- \`${r}\``).join("\n") || "_(none from the current preview)_";
+        // The tool takes an explicit repo list, so the confirmation shows exactly what this call can
+        // delete. The core further limits it to repos still in the current preview.
+        confirm: async ({ repos, removeClones }) => {
+            const list = (repos || []).map((r) => `- \`${r}\``).join("\n") || "_(none)_";
             return {
                 title: "Delete demo repos?",
                 message: new vscode.MarkdownString(`This permanently deletes these repos${removeClones ? " and their local clones" : ""}:\n\n${list}`),
             };
         },
-        invoke: async (input, { launcher }) => {
-            const key = JSON.stringify(input);
-            const repos = confirmedDeletes.get(key);
-            confirmedDeletes.delete(key);
-            if (!repos) throw new Error("not_confirmed: Confirm the repos to delete first.");
-            return launcher.cleanupDelete({ ...input, repos });
+        invoke: async ({ repos, removeClones }, { launcher }) => {
+            if (!Array.isArray(repos) || !repos.length) throw new Error("nothing_selected: Pass the repos to delete (owner/name) from the cleanup preview.");
+            return launcher.cleanupDelete({ repos, removeClones });
         },
     },
 };

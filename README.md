@@ -23,14 +23,15 @@ Do this once per machine (macOS):
    ```bash
    unset GH_TOKEN GITHUB_TOKEN   # login and refresh fail while either is set
    gh auth login        # GitHub.com → HTTPS → "Authenticate Git" Yes → Login with a web browser
-   gh auth refresh -h github.com -s codespace,delete_repo
-   gh auth status       # should show the booth account and both scopes
+   gh auth refresh -h github.com -s codespace,delete_repo,project
+   gh auth status       # should show the booth account and these scopes
    ```
 
    - `codespace` lets Tailspin Toys create its Codespace.
    - `delete_repo` lets the launcher's **Clean up** (and `--cleanup`) delete old demo repos.
+   - `project` lets Copilot Airways create its GitHub Project, and lets cleanup delete it.
    - The default scopes (`repo`, `read:org`, `gist`) cover everything else. Answer **Yes** to "Authenticate Git" so the scripts can push demo branches over HTTPS.
-   - The booth account must be a member of the `octobooth-demos` org and allowed to create repos there. Several demos (`security-octo-supply`, `security-octo-supply-v4`, `ai-security`, and `fusion-blank`) always create their repo in that org.
+   - The booth account must be a member of the `octobooth-demos` org and allowed to create repos there. Several demos (`security-octo-supply`, `security-octo-supply-v4`, `ai-security`, `fusion-blank`, and `copilot-airways`) always create their repo in that org.
    - The booth account also needs a Copilot seat (for Copilot code review and assigning issues to Copilot) and access to Codespaces (for Tailspin Toys).
    - If `GH_TOKEN` or `GITHUB_TOKEN` is set, `gh auth login`/`refresh` refuse to run and `gh` uses the token instead of the booth login. Remove them from your shell profile on booth machines too. The Demo Launcher already ignores them when a stored login exists, but terminal runs of `create-repo` don't.
 
@@ -66,6 +67,7 @@ Each entry in [`config.json`](config.json) is one demo. Pass its key to `--templ
 | `booth-bingo` | Booth Bingo (stacked PRs) | Public repo, 3 stacked PRs registered as a native stack, and GitHub Pages | [Details](#booth-bingo-stacked-prs); talk track in the template's README |
 | `octocart` | OctoCart (Copilot Code Review) | Repo with 4 feature PRs. Copilot Code Review is requested on 3 of them; the 4th is left for you to request live | [Details](#octocart-copilot-code-review); [answer key](resources/octocart/ANSWER_KEY.md) (presenters only) |
 | `ai-security` | AI Security (AI Scan + agentic autofix) | Repo in the `octobooth-demos` org with an infra PR that AI Scan reviews, plus CodeQL alerts on `main` with one already assigned to Copilot | [Details](#ai-security-ai-scan--agentic-autofix); [presenter notes](resources/ai-security/ANSWER_KEY.md). **Pre-bake it:** it takes about 20 minutes to be fully ready |
+| `copilot-airways` | Copilot Airways (GitHub Projects) | Repo in the `octobooth-demos` org with 14 seeded issues (issue types, milestones, epics with sub-issues) and a linked GitHub Project with custom fields, sprints, saved views, a draft item, and a status update | [Details](#copilot-airways-github-projects); talk track in the template's README. Takes about 2 minutes |
 | `fusion-blank` | GitHub Copilot Fusion: Blank Prompt | Empty repo (README only) in the `octobooth-demos` org, plus a seed prompt you run with the GitHub Copilot Fusion model in autopilot | [Details](#github-copilot-fusion-blank-prompt); [presenter notes](resources/fusion-blank/ANSWER_KEY.md) |
 
 ## PowerShell
@@ -171,7 +173,7 @@ How the loader works:
 | The app shows two "Demo Launcher" canvases | Expected on staff builds with both the project and loader set up. Either one works. See [Two Demo Launcher canvases](#two-demo-launcher-canvases). |
 | Copilot can't find the Demo Launcher outside this project | Run `install.sh`, then restart the app or reload extensions. Check that `~/.copilot/extensions/demo-launcher/extension.mjs` exists and that the path it imports exists. If it still doesn't appear, your app build may not load user-level extensions; open it from a session in the `repo-setup-scripts` project. |
 | The panel shows old behavior | Run `git pull` in the main checkout and reload extensions. Sessions inside this project use their own checkout, so update that branch. |
-| A run fails with an auth or scope error, or cleanup asks for `delete_repo` | Run `gh auth status` in a terminal, then `gh auth refresh -h github.com -s codespace,delete_repo`. |
+| A run fails with an auth or scope error, or cleanup asks for `delete_repo` or `project` | Run `gh auth status` in a terminal, then `gh auth refresh -h github.com -s codespace,delete_repo,project`. |
 | The demo was created in the wrong account | Repos go to the [logged-in account](#where-repos-are-created) unless you set **Owner**. Check `gh auth status`. |
 | The panel URL stopped working | The extension restarted on a new port. Reopen the canvas. |
 | A card says **interrupted** | The app or extension restarted mid-run. The repo may be half set up. Delete it with **Clean up** and run it again. |
@@ -248,14 +250,14 @@ bash ./create-repo.sh --cleanup [--older-than 72 | --all] [--dry-run] [--yes] [-
 
 **End of event:** `--all` / `-All` ignores the age cutoff and deletes every `demo-generated` repo the owner has, including ones created minutes ago. It prints a warning and still asks before deleting unless you pass `--yes` / `-Yes`. Run with `--dry-run` first to check the list.
 
-Deleting repos needs the `delete_repo` scope. The scripts request it when they log in; for an existing login run `gh auth refresh -h github.com -s delete_repo`.
+Deleting repos needs the `delete_repo` scope, and deleting a Copilot Airways project needs the `project` scope. The scripts request both when they log in; for an existing login run `gh auth refresh -h github.com -s delete_repo,project`.
 
 ### Which cleanup covers which repos
 
 | Where the demo repo lives | How it gets cleaned up |
 | --- | --- |
 | A booth account (`octobooth-1`, `octobooth-2`, …), the default | Run `--cleanup` / `-Cleanup` **on that machine**. Nothing else can reach it, because the [ChatOps App](#chatops) is only installed on the org. |
-| The `octobooth-demos` org (`--owner octobooth-demos`, ChatOps, `security-octo-supply`, `security-octo-supply-v4`, `ai-security`, `fusion-blank`) | Automatic: the [nightly cleanup](.github/workflows/cleanup-demos.yml) deletes them at 08:00 UTC once they are more than 72 hours old. To clean up sooner, comment `/cleanup [hours] --confirm` or run the workflow from the Actions tab. After an event, `/cleanup --all --confirm` deletes them all regardless of age. |
+| The `octobooth-demos` org (`--owner octobooth-demos`, ChatOps, `security-octo-supply`, `security-octo-supply-v4`, `ai-security`, `fusion-blank`, `copilot-airways`) | Automatic: the [nightly cleanup](.github/workflows/cleanup-demos.yml) deletes them at 08:00 UTC once they are more than 72 hours old. To clean up sooner, comment `/cleanup [hours] --confirm` or run the workflow from the Actions tab. After an event, `/cleanup --all --confirm` deletes them all regardless of age. |
 
 **Recommended booth routine (repos in each booth account):**
 
@@ -287,6 +289,7 @@ Each `repos[]` entry needs `key`, `display_name`, `template` (except for the `bl
 | `branch_and_codespace` | `branch` | Creates a branch and a Codespace on it. |
 | `code_review_prs` | `prs[]` | Opens one PR per entry against the default branch and requests a Copilot Code Review on each, except entries with `"request_review": false`, which are left for the presenter to request live. No security features are enabled. |
 | `stacked_prs` | `stack[]` | Opens a chain of dependent PRs and registers them as a native [stacked PR](https://docs.github.com/en/pull-requests/reference/stacked-pull-requests-apis-and-webhooks). |
+| `project_board` | `project` | Waits for the template's issue-seeding workflow (`project.seed_workflow`), then creates a GitHub Project for the repo owner from the template's `project.file`, links it to the repo, and adds every issue in `project.issues_file` that has a `project` object, with those field values. Needs a user token with the `project` scope. See [Copilot Airways](#copilot-airways-github-projects). |
 | `ai_security` | `prs[]` and/or `autofix`; optional `ai_scan`, `seed`, `codeql_workflow` | Enables Advanced Security, and AI Scan when `"ai_scan": true`. With `autofix`, it commits `seed.resource_dir` to the default branch (or dispatches `codeql_workflow`, default `codeql-advanced.yml`), waits for CodeQL alerts, and assigns the `autofix.preassign_rule` alert to Copilot. Then it opens one PR per `prs[]` entry; when `ai_scan` is on, it first makes sure code scanning has an analysis. It doesn't enable CodeQL default setup. |
 
 `prs[]` and `stack[]` entries share the same shape: `branch`, `resource_dir`, `commit_message`, `title`, and `body_file` (a path inside `resource_dir`; it is used as the PR body and never committed). `stack[]` must have at least 2 entries, listed bottom to top. Each layer is branched from the one below, its `resource_dir` is copied over the tree, and the PR targets the branch below it. After all PRs are open the scripts call `POST /repos/{owner}/{repo}/stacks` and verify the order. If registration fails, the PR chain still exists and the script exits non-zero.
@@ -348,6 +351,17 @@ The script doesn't turn on CodeQL default setup, because default setup can't run
 1. **AI Scan:** on the PR, show the findings labeled **AI** on **Conversation** and **Files changed**. They cover Dockerfile, shell, Terraform, and PHP code, which CodeQL doesn't analyze. They're advisory, need no workflow, and may include Copilot Autofix suggestions. AI findings vary from run to run, so read them before visitors arrive.
 2. **Agentic autofix:** in **Security → Code scanning**, open the pre-assigned alert and Copilot's draft PR: the fix summary, plus the CodeQL rerun that validates it. Optionally, select a few more alerts and choose **Assign to Copilot** to show a session starting in the **Agents** tab.
 
+### Copilot Airways (GitHub Projects)
+
+`copilot-airways` creates a repo in `octobooth-demos` from [`octobooth-demos/copilot-airways`](https://github.com/octobooth-demos/copilot-airways), a copy of [`octobooth/copilot-airways`](https://github.com/octobooth/copilot-airways) (a Next.js flight booking app) with GitHub Projects content added. It's pinned to the org because issue types only exist in organizations.
+
+1. The template's **Hydrate Issues** workflow runs on the first push and seeds labels, two milestones, and 14 issues from `.github/workflows/scripts/issues-data.json`: three epics with sub-issues, Feature/Task/Bug issue types, two issues already closed (so Sprint 1 and an epic show progress), and one untriaged feature.
+2. The script waits for that run, then builds a project from the template's `.github/project/project.json`: custom Status columns, Priority, Size, Estimate, Start and Target date, a two-week **Sprint** iteration (Sprint 1 finished, Sprint 2 current), and Backlog, Current sprint, Roadmap, Epics, Bugs, and My work views. It adds a draft item and an "On track" status update, and opens the project.
+
+The project is titled `Copilot Airways Roadmap (<repo>)` and linked to the repo. Cleanup (`--cleanup`, the launcher, and the nightly workflow) deletes linked projects with that title before it deletes the repo, because projects outlive their repo. The nightly workflow needs the ChatOps App to have **Organization projects: Read and write** for this; without it, the project is left behind with a warning.
+
+To change the issues, fields, or views, edit those two files in the template repo. Each issue's `project` object sets its field values: dates are days from today, and `Sprint` is the 1-based sprint number. The talk track is in the template's README under **Demoing GitHub Projects**. GitHub Actions tokens can't create projects, so ChatOps doesn't offer this demo.
+
 ### GitHub Copilot Fusion: Blank Prompt
 
 `fusion-blank` shows GitHub Copilot Fusion (formerly Project HydraFusion), the Copilot model option that orchestrates several models per request (Single, Cascade, or Critique) for frontier-level quality at lower cost. The preview works best on a substantial, well-scoped, first-turn prompt in autopilot, so the demo is just that: an empty repo in `octobooth-demos` and one prompt from [`resources/fusion-blank/seed-prompt.txt`](resources/fusion-blank/seed-prompt.txt), which builds "Mona Merge Rush", a 2048-style Octocat game with `node:test` tests.
@@ -377,6 +391,9 @@ The workflows authenticate as a GitHub App so they can create and delete org rep
    - Actions: Read and write (start the first Pages deploy, wait for CodeQL)
    - Code scanning alerts: Read and write (read the AI Security demo's alerts and assign one to Copilot)
    - Metadata: Read-only (required)
+
+   And this **organization** permission:
+   - Projects: Read and write (the nightly cleanup deletes Copilot Airways projects; optional, without it they are left behind)
 2. Install it on the `octobooth-demos` org with access to **All repositories** (new demo repos must be covered automatically).
 3. In this repo's **Settings → Secrets and variables → Actions**, add `APP_ID` (the App ID) and `APP_PRIVATE_KEY` (the full contents of a generated `.pem` private key).
 

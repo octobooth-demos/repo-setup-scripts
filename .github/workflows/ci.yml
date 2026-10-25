@@ -33,10 +33,11 @@ jobs:
               (.repo_base_name | type == "string") and
               (.repo_description | type == "string") and
               (.workflow | IN("repo_only", "blank", "branch_and_codespace", "issue_and_codespace", "security_prs",
-                "code_review_prs", "ai_security", "stacked_prs")) and
+                "code_review_prs", "ai_security", "stacked_prs", "project_board")) and
               (.workflow == "blank" or (.template | type == "string")) and
               (.workflow != "branch_and_codespace" or (.branch_name | type == "string")) and
               (.workflow != "stacked_prs" or (.stack | type == "array" and length >= 2)) and
+              (.workflow != "project_board" or (.project.file | type == "string")) and
               (((.workflow | IN("security_prs", "code_review_prs")) | not) or (.prs | type == "array" and length > 0)) and
               (.workflow != "issue_and_codespace" or
                 ((.issue.title | type == "string") and (.issue.body_file | type == "string") and

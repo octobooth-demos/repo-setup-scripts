@@ -99,45 +99,86 @@ export function createLauncher({ repoRoot = DEFAULT_REPO_ROOT, storeFile, host }
     }
 
     // ---------- run store (durable across reloads) ----------
+    //
+    // Several launchers can share one store file (each VS Code window runs its own), so every
+    // write merges with what's on disk: runs this launcher touched win, the rest come from disk.
 
+    const processes = new Map(); // runId -> ChildProcess
+    const dirty = new Set(); // run ids changed here since the last write
+    const removed = new Set(); // run ids cleared here since the last write
     let runs = [];
-    try {
-        runs = JSON.parse(readFileSync(storeFile, "utf8"));
-        for (const r of runs) {
-            const renamed = LEGACY_TEMPLATE_KEYS[r.template];
-            if (renamed) {
-                r.template = renamed;
-                try {
-                    const tpl = loadTemplates().find((t) => t.key === renamed);
-                    if (tpl) r.templateName = tpl.displayName;
-                } catch {
-                    // keep the stored name if config.json can't be read
-                }
-                if (r.result) r.result.answerKey = answerKeyPath(renamed);
-            }
-            if (r.status === "running") {
-                r.status = "interrupted";
-                r.finishedAt = r.finishedAt || new Date().toISOString();
-            }
+
+    function processAlive(pid) {
+        if (!pid) return false;
+        try {
+            process.kill(pid, 0);
+            return true;
+        } catch (e) {
+            return e.code === "EPERM";
         }
-    } catch {
-        runs = [];
+    }
+
+    function readStore() {
+        try {
+            const stored = JSON.parse(readFileSync(storeFile, "utf8"));
+            return Array.isArray(stored) ? stored : [];
+        } catch {
+            return [];
+        }
+    }
+
+    function normalize(r) {
+        const renamed = LEGACY_TEMPLATE_KEYS[r.template];
+        if (renamed) {
+            r.template = renamed;
+            try {
+                const tpl = loadTemplates().find((t) => t.key === renamed);
+                if (tpl) r.templateName = tpl.displayName;
+            } catch {
+                // keep the stored name if config.json can't be read
+            }
+            if (r.result) r.result.answerKey = answerKeyPath(renamed);
+            dirty.add(r.id);
+        }
+        // A run left "running" by a launcher that's gone (reload, crash, closed window) is over.
+        if (r.status === "running" && !processes.has(r.id) && !processAlive(r.pid)) {
+            r.status = "interrupted";
+            r.finishedAt = r.finishedAt || new Date().toISOString();
+            dirty.add(r.id);
+        }
+        return r;
+    }
+
+    function sync() {
+        const byId = new Map();
+        for (const r of readStore()) if (!removed.has(r.id)) byId.set(r.id, r);
+        for (const r of runs) if (processes.has(r.id) || dirty.has(r.id)) byId.set(r.id, r);
+        runs = [...byId.values()]
+            .map(normalize)
+            .sort((a, b) => String(b.startedAt || "").localeCompare(String(a.startedAt || "")))
+            .slice(0, MAX_RUNS);
     }
 
     let saveTimer = null;
-    function persist() {
+    function persist(...ids) {
+        for (const id of ids) dirty.add(id);
         clearTimeout(saveTimer);
         saveTimer = setTimeout(() => {
             try {
+                sync();
                 mkdirSync(dirname(storeFile), { recursive: true });
-                writeFileSync(storeFile, JSON.stringify(runs.slice(0, MAX_RUNS), null, 2));
+                writeFileSync(storeFile, JSON.stringify(runs, null, 2));
+                dirty.clear();
+                removed.clear();
             } catch {
                 // best effort
             }
         }, 250);
     }
 
-    const processes = new Map(); // runId -> ChildProcess
+    sync();
+    if (dirty.size) persist();
+
     const listeners = new Set(); // (event, data) => void
 
     function summary(run, { withLog = false } = {}) {
@@ -225,6 +266,7 @@ export function createLauncher({ repoRoot = DEFAULT_REPO_ROOT, storeFile, host }
             options: { owner: owner || null, noClone, openBrowser },
             command: `${cmd} ${args.map((a) => (a.includes(" ") ? `"${a}"` : a)).join(" ")}`,
             status: "running",
+            pid: process.pid,
             exitCode: null,
             startedAt: new Date().toISOString(),
             finishedAt: null,
@@ -250,7 +292,7 @@ export function createLauncher({ repoRoot = DEFAULT_REPO_ROOT, storeFile, host }
             partial = lines.pop();
             for (const l of lines) parseLine(run, l);
             broadcast("run", summary(run));
-            persist();
+            persist(run.id);
         };
         child.stdout.on("data", onData);
         child.stderr.on("data", onData);
@@ -275,7 +317,7 @@ export function createLauncher({ repoRoot = DEFAULT_REPO_ROOT, storeFile, host }
             run.finishedAt = new Date().toISOString();
             delete run._pendingPrTitle;
             broadcast("run", summary(run));
-            persist();
+            persist(run.id);
             log(
                 run.status === "succeeded"
                     ? `Demo ready: ${run.templateName} → ${run.result.repoUrl}`
@@ -287,7 +329,7 @@ export function createLauncher({ repoRoot = DEFAULT_REPO_ROOT, storeFile, host }
         child.on("close", (code) => finish(code));
 
         broadcast("run", summary(run));
-        persist();
+        persist(run.id);
         return run;
     }
 
@@ -301,16 +343,20 @@ export function createLauncher({ repoRoot = DEFAULT_REPO_ROOT, storeFile, host }
     }
 
     function findRun(id) {
+        sync();
         const run = id ? runs.find((r) => r.id === id) : runs[0];
         if (!run) throw new LauncherError("not_found", id ? `No run '${id}'.` : "No runs yet.");
         return run;
     }
 
     function listRuns() {
+        sync();
         return runs.map((r) => summary(r)).map(({ logTail, ...r }) => r);
     }
 
     function clearRuns() {
+        sync();
+        for (const r of runs) if (r.status !== "running") removed.add(r.id);
         runs = runs.filter((r) => r.status === "running");
         persist();
         broadcast("reset", {});
@@ -327,6 +373,7 @@ export function createLauncher({ repoRoot = DEFAULT_REPO_ROOT, storeFile, host }
             for (const r of runs) {
                 if (r.result.repo?.toLowerCase() === repo.toLowerCase()) {
                     r.result.deleted = true;
+                    dirty.add(r.id);
                     broadcast("run", summary(r));
                 }
             }
@@ -450,6 +497,7 @@ export function createLauncher({ repoRoot = DEFAULT_REPO_ROOT, storeFile, host }
     // ---------- JSON API (shared by the loopback server and the VS Code webview bridge) ----------
 
     function state() {
+        sync();
         return {
             host: { name: host.name, ...host.features },
             templates: loadTemplates(),

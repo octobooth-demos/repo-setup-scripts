@@ -93,7 +93,10 @@ const host = {
             await runInChat(prompt);
             return { ranHere: true };
         }
-        fs.writeFileSync(pendingFile(), JSON.stringify({ folder, prompt, createdAt: Date.now() }));
+        // One file per request, so a second handoff can't overwrite one that's still unclaimed.
+        const file = path.join(storageDir(), `${PENDING_PREFIX}${crypto.randomUUID()}.json`);
+        fs.writeFileSync(`${file}.tmp`, JSON.stringify({ folder, prompt, createdAt: Date.now() }));
+        fs.renameSync(`${file}.tmp`, file);
         await host.openFolder(folder);
         return { opened: folder };
     },
@@ -101,8 +104,10 @@ const host = {
 
 // ---------- seed prompts in Copilot Chat ----------
 
-function pendingFile() {
-    return path.join(storageDir(), "pending-prompt.json");
+const PENDING_PREFIX = "pending-prompt-";
+
+function isPendingFile(name) {
+    return Boolean(name) && name.startsWith(PENDING_PREFIX) && name.endsWith(".json");
 }
 
 function samePath(a, b) {
@@ -122,16 +127,25 @@ async function runInChat(prompt) {
     await vscode.commands.executeCommand("workbench.action.chat.open", { query: prompt, mode: "agent" });
 }
 
-// Claim the pending prompt if it's for this window. Renaming is atomic, so only one window wins.
-async function checkPendingPrompt() {
-    const file = pendingFile();
+// Claim pending prompts meant for this window. Renaming is atomic, so only one window wins each.
+async function checkPendingPrompts() {
+    let names;
+    try {
+        names = fs.readdirSync(storageDir()).filter(isPendingFile);
+    } catch {
+        return;
+    }
+    for (const name of names) await checkPendingPrompt(path.join(storageDir(), name));
+}
+
+async function checkPendingPrompt(file) {
     let pending;
     try {
         pending = JSON.parse(fs.readFileSync(file, "utf8"));
     } catch {
         return;
     }
-    if (Date.now() - pending.createdAt > PENDING_MAX_AGE_MS) return void fs.rmSync(file, { force: true });
+    if (!(Date.now() - pending.createdAt <= PENDING_MAX_AGE_MS)) return void fs.rmSync(file, { force: true });
     if (!isOpenHere(pending.folder)) return;
     const claimed = `${file}.${process.pid}`;
     try {
@@ -150,10 +164,10 @@ async function checkPendingPrompt() {
 
 function watchPendingPrompts() {
     if (!vscode.workspace.workspaceFolders?.length) return;
-    void checkPendingPrompt();
+    void checkPendingPrompts();
     try {
         const watcher = fs.watch(storageDir(), (_event, name) => {
-            if (name === "pending-prompt.json") void checkPendingPrompt();
+            if (isPendingFile(name)) void checkPendingPrompts();
         });
         context.subscriptions.push({ dispose: () => watcher.close() });
     } catch {
@@ -259,6 +273,7 @@ function trimLog(run) {
     return run.log && run.log.length > 20000 ? { ...run, log: `…${run.log.slice(-20000)}` } : run;
 }
 
+const confirmedDeletes = new Map(); // JSON tool input -> repos shown in its confirmation
 const tools = {
     demoLauncher_open: {
         invoke: async ({ template }) => {
@@ -290,15 +305,26 @@ const tools = {
         },
     },
     demoLauncher_cleanupDelete: {
-        confirm: async ({ repos, removeClones }, { launcher }) => {
+        // Delete exactly the repos shown in the confirmation, even if the preview changes before
+        // the presenter approves; the core still skips any that left the preview.
+        confirm: async (input, { launcher }) => {
+            const { repos, removeClones } = input;
             const preview = (await launcher.api("GET", "/api/state")).cleanup.candidates.map((c) => c.repo);
-            const list = (repos?.length ? repos.filter((r) => preview.includes(r)) : preview).map((r) => `- \`${r}\``).join("\n") || "_(none from the current preview)_";
+            const selected = repos?.length ? repos.filter((r) => preview.includes(r)) : preview;
+            confirmedDeletes.set(JSON.stringify(input), selected);
+            const list = selected.map((r) => `- \`${r}\``).join("\n") || "_(none from the current preview)_";
             return {
                 title: "Delete demo repos?",
                 message: new vscode.MarkdownString(`This permanently deletes these repos${removeClones ? " and their local clones" : ""}:\n\n${list}`),
             };
         },
-        invoke: async (input, { launcher }) => launcher.cleanupDelete(input),
+        invoke: async (input, { launcher }) => {
+            const key = JSON.stringify(input);
+            const repos = confirmedDeletes.get(key);
+            confirmedDeletes.delete(key);
+            if (!repos) throw new Error("not_confirmed: Confirm the repos to delete first.");
+            return launcher.cleanupDelete({ ...input, repos });
+        },
     },
 };
 

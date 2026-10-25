@@ -237,7 +237,6 @@
     },
     {
       "key": "fusion-blank",
-      "owner": "org",
       "display_name": "GitHub Copilot Fusion: Blank Prompt",
       "description_short": "Empty repo + one seed prompt: GitHub Copilot Fusion builds a playable 2048-style Octocat game with tests in autopilot",
       "workflow_hint": "Creates an empty repo (README only). Then copy the seed prompt or click Run with Fusion",

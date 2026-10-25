@@ -3,7 +3,8 @@
 > **Presenters only.** This file lives in `repo-setup-scripts` and is never copied into
 > demo repos (the `blank` workflow creates an empty repo with only a README). Don't show it on screen.
 
-`create-repo` creates an empty repo (`fusion-blank-xxxx`, README only) in `octobooth-demos`.
+`create-repo` creates an empty repo (`fusion-blank-xxxx`, README only) in the signed-in booth account
+(`octobooth-1`, `octobooth-2`, …), like Ctrl Slash and Booth Bingo.
 You hand Copilot **one** prompt, pick **GitHub Copilot Fusion**, switch to **autopilot**, and let it build a
 working, tested game from nothing while you talk.
 

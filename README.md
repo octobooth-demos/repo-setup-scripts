@@ -30,7 +30,7 @@ Do this once per machine (macOS):
    - `codespace` lets Tailspin Toys create its Codespace.
    - `delete_repo` lets the launcher's **Clean up** (and `--cleanup`) delete old demo repos.
    - The default scopes (`repo`, `read:org`, `gist`) cover everything else. Answer **Yes** to "Authenticate Git" so the scripts can push demo branches over HTTPS.
-   - The booth account must be a member of the `octobooth-demos` org and allowed to create repos there. Several demos (`security-octo-supply`, `security-octo-supply-v4`, `ai-security`, and `fusion-blank`) always create their repo in that org.
+   - The booth account must be a member of the `octobooth-demos` org and allowed to create repos there. The security demos (`security-octo-supply`, `security-octo-supply-v4`, and `ai-security`) always create their repo in that org.
    - The booth account also needs a Copilot seat (for Copilot code review and assigning issues to Copilot) and access to Codespaces (for Tailspin Toys).
    - If `GH_TOKEN` or `GITHUB_TOKEN` is set, `gh auth login`/`refresh` refuse to run and `gh` uses the token instead of the booth login. Remove them from your shell profile on booth machines too. The Demo Launcher already ignores them when a stored login exists, but terminal runs of `create-repo` don't.
 
@@ -66,7 +66,7 @@ Each entry in [`config.json`](config.json) is one demo. Pass its key to `--templ
 | `booth-bingo` | Booth Bingo (stacked PRs) | Public repo, 3 stacked PRs registered as a native stack, and GitHub Pages | [Details](#booth-bingo-stacked-prs); talk track in the template's README |
 | `octocart` | OctoCart (Copilot Code Review) | Repo with 4 feature PRs. Copilot Code Review is requested on 3 of them; the 4th is left for you to request live | [Details](#octocart-copilot-code-review); [answer key](resources/octocart/ANSWER_KEY.md) (presenters only) |
 | `ai-security` | AI Security (AI Scan + agentic autofix) | Repo in the `octobooth-demos` org with an infra PR that AI Scan reviews, plus CodeQL alerts on `main` with one already assigned to Copilot | [Details](#ai-security-ai-scan--agentic-autofix); [presenter notes](resources/ai-security/ANSWER_KEY.md). **Pre-bake it:** it takes about 20 minutes to be fully ready |
-| `fusion-blank` | GitHub Copilot Fusion: Blank Prompt | Empty repo (README only) in the `octobooth-demos` org, plus a seed prompt you run with the GitHub Copilot Fusion model in autopilot | [Details](#github-copilot-fusion-blank-prompt); [presenter notes](resources/fusion-blank/ANSWER_KEY.md) |
+| `fusion-blank` | GitHub Copilot Fusion: Blank Prompt | Empty repo (README only) in the booth account, plus a seed prompt you run with the GitHub Copilot Fusion model in autopilot | [Details](#github-copilot-fusion-blank-prompt); [presenter notes](resources/fusion-blank/ANSWER_KEY.md) |
 
 ## PowerShell
 
@@ -205,7 +205,7 @@ If you change what the scripts print (repo, clone, `PR #N created: <url>`, Copil
 By default, repos are created in **the account that is logged in** (`gh api user`), so each booth machine (`octobooth-1`, `octobooth-2`, …) gets its own copies. The owner is resolved in this order:
 
 1. `--owner <name>` / `-Owner <name>`
-2. The config entry's `owner` field. `"owner": "org"` means the top-level `org`; any other value is used as-is. `security-octo-supply` and `security-octo-supply-v4` are pinned to the org because they need code scanning.
+2. The config entry's `owner` field. `"owner": "org"` means the top-level `org`; any other value is used as-is. `security-octo-supply`, `security-octo-supply-v4`, and `ai-security` are pinned to the org because they need code scanning; everything else (including `fusion-blank`) goes to the logged-in booth account.
 3. The logged-in account.
 4. The top-level `org` (only when there is no user account, such as a GitHub App token in Actions).
 
@@ -255,7 +255,7 @@ Deleting repos needs the `delete_repo` scope. The scripts request it when they l
 | Where the demo repo lives | How it gets cleaned up |
 | --- | --- |
 | A booth account (`octobooth-1`, `octobooth-2`, …), the default | Run `--cleanup` / `-Cleanup` **on that machine**. Nothing else can reach it, because the [ChatOps App](#chatops) is only installed on the org. |
-| The `octobooth-demos` org (`--owner octobooth-demos`, ChatOps, `security-octo-supply`, `security-octo-supply-v4`, `ai-security`, `fusion-blank`) | Automatic: the [nightly cleanup](.github/workflows/cleanup-demos.yml) deletes them at 08:00 UTC once they are more than 72 hours old. To clean up sooner, comment `/cleanup [hours] --confirm` or run the workflow from the Actions tab. After an event, `/cleanup --all --confirm` deletes them all regardless of age. |
+| The `octobooth-demos` org (`--owner octobooth-demos`, ChatOps, `security-octo-supply`, `security-octo-supply-v4`, `ai-security`) | Automatic: the [nightly cleanup](.github/workflows/cleanup-demos.yml) deletes them at 08:00 UTC once they are more than 72 hours old. To clean up sooner, comment `/cleanup [hours] --confirm` or run the workflow from the Actions tab. After an event, `/cleanup --all --confirm` deletes them all regardless of age. |
 
 **Recommended booth routine (repos in each booth account):**
 
@@ -350,9 +350,9 @@ The script doesn't turn on CodeQL default setup, because default setup can't run
 
 ### GitHub Copilot Fusion: Blank Prompt
 
-`fusion-blank` shows GitHub Copilot Fusion (formerly Project HydraFusion), the Copilot model option that orchestrates several models per request (Single, Cascade, or Critique) for frontier-level quality at lower cost. The preview works best on a substantial, well-scoped, first-turn prompt in autopilot, so the demo is just that: an empty repo in `octobooth-demos` and one prompt from [`resources/fusion-blank/seed-prompt.txt`](resources/fusion-blank/seed-prompt.txt), which builds "Mona Merge Rush", a 2048-style Octocat game with `node:test` tests.
+`fusion-blank` shows GitHub Copilot Fusion (formerly Project HydraFusion), the Copilot model option that orchestrates several models per request (Single, Cascade, or Critique) for frontier-level quality at lower cost. The preview works best on a substantial, well-scoped, first-turn prompt in autopilot, so the demo is just that: an empty repo in the booth account (like Ctrl Slash and Booth Bingo; the seed prompt and presenter notes stay in this repo) and one prompt from [`resources/fusion-blank/seed-prompt.txt`](resources/fusion-blank/seed-prompt.txt), which builds "Mona Merge Rush", a 2048-style Octocat game with `node:test` tests.
 
-After the run finishes, click **▶ Run with Fusion** in the launcher, or copy the prompt and run it yourself with the GitHub Copilot Fusion model in autopilot. Expect about 4-5 minutes and a playable game whose tests pass. Talking points, benchmark numbers, and alternate prompts are in the [presenter notes](resources/fusion-blank/ANSWER_KEY.md). Use a fresh repo for each visitor; the nightly cleanup deletes them after 72 hours.
+After the run finishes, click **▶ Run with Fusion** in the launcher, or copy the prompt and run it yourself with the GitHub Copilot Fusion model in autopilot. Expect about 4-5 minutes and a playable game whose tests pass. Talking points, benchmark numbers, and alternate prompts are in the [presenter notes](resources/fusion-blank/ANSWER_KEY.md). Use a fresh repo for each visitor, and remove old ones with the launcher's **Clean up** or `--cleanup` on that machine (see [Which cleanup covers which repos](#which-cleanup-covers-which-repos)). ChatOps (`/new-demo fusion-blank`) still creates it in the org, where the nightly cleanup deletes it after 72 hours.
 
 ## ChatOps
 

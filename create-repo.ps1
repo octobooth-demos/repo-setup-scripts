@@ -638,7 +638,9 @@ function Invoke-GhJson {
     param([string[]]$Arguments)
     $output = Invoke-Native 'gh' $Arguments
     if ($null -eq $output) { return $null }
-    ($output -join "`n") | ConvertFrom-Json
+    $parsed = ($output -join "`n") | ConvertFrom-Json
+    # Windows PowerShell 5.1 emits a JSON array as one object; enumerate it explicitly.
+    foreach ($item in $parsed) { $item }
 }
 
 # Send a GraphQL request body ({query, variables}) through a temp file, which

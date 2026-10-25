@@ -14,7 +14,7 @@ export function createCleanup({ repoRoot, scriptEnv, scriptCommand, broadcast, o
     let state = idle();
 
     function idle() {
-        return { status: "idle", owner: null, olderThanHours: 24, candidates: [], deleted: [], failed: [], log: "", error: null, needsDeleteScope: false };
+        return { status: "idle", owner: null, olderThanHours: 72, candidates: [], deleted: [], failed: [], log: "", error: null, needsDeleteScope: false };
     }
 
     function publish() {
@@ -57,7 +57,7 @@ export function createCleanup({ repoRoot, scriptEnv, scriptCommand, broadcast, o
         });
     }
 
-    async function preview({ owner, olderThanHours = 24 } = {}) {
+    async function preview({ owner, olderThanHours = 72 } = {}) {
         if (state.status === "previewing" || state.status === "deleting") throw new LauncherError("busy", "Cleanup is already running.");
         const hours = Number(olderThanHours);
         if (!Number.isInteger(hours) || hours < 0) throw new LauncherError("invalid_options", "olderThanHours must be a whole number ≥ 0.");

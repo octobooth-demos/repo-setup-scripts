@@ -54,7 +54,7 @@ export function loadTemplates() {
     }));
 }
 
-// Optional "seed_prompt_file" (e.g. resources/ensemble-blank/seed-prompt.txt): the prompt the
+// Optional "seed_prompt_file" (e.g. resources/fusion-blank/seed-prompt.txt): the prompt the
 // presenter runs in the new repo. The UI shows it with Copy buttons.
 function readSeedPrompt(file) {
     if (!file) return null;
@@ -99,11 +99,25 @@ function scriptCommand(args) {
 
 // ---------- run store (durable across reloads) ----------
 
+// Renamed template keys, so runs saved before a rename keep their seed prompt and answer key.
+const LEGACY_TEMPLATE_KEYS = { "ensemble-blank": "fusion-blank" };
+
 let runs = [];
 function loadRuns() {
     try {
         runs = JSON.parse(readFileSync(STORE_FILE, "utf8"));
         for (const r of runs) {
+            const renamed = LEGACY_TEMPLATE_KEYS[r.template];
+            if (renamed) {
+                r.template = renamed;
+                try {
+                    const tpl = loadTemplates().find((t) => t.key === renamed);
+                    if (tpl) r.templateName = tpl.displayName;
+                } catch {
+                    // keep the stored name if config.json can't be read
+                }
+                if (r.result) r.result.answerKey = answerKeyPath(renamed);
+            }
             if (r.status === "running") {
                 r.status = "interrupted";
                 r.finishedAt = r.finishedAt || new Date().toISOString();
@@ -329,9 +343,9 @@ export function sessionPrompt(run, kind, target) {
     if (kind === "issue") {
         return `[Demo Launcher] Open a Copilot app session for issue #${target} in ${r.repo}. ${where} First add it as a project in this app (create_project) if it isn't one already, then use open_issue_session (repo_full_name "${r.repo}", issue_number ${target}). Don't start any work in it (omit kickoff), then navigate me to it.`;
     }
-    if (kind === "ensemble") {
+    if (kind === "fusion") {
         const kickoff = { prompt: seedPromptFor(run), mode: "autopilot", model: "auto", auto_tier: "hydrafusion" };
-        return `[Demo Launcher] Run the ${run.templateName} seed prompt with Ensemble in ${r.repo}. ${where} Add it as a project in this app (create_project) if it isn't one already, then call create_session with that project_id, detached: true, and exactly this kickoff object (don't change the prompt text): ${JSON.stringify(kickoff)}. Then navigate me to that session. Don't do any of the work yourself.`;
+        return `[Demo Launcher] Run the ${run.templateName} seed prompt with GitHub Copilot Fusion in ${r.repo}. ${where} Add it as a project in this app (create_project) if it isn't one already, then call create_session with that project_id, detached: true, and exactly this kickoff object (don't change the prompt text): ${JSON.stringify(kickoff)}. Then navigate me to that session. Don't do any of the work yourself.`;
     }
     return `[Demo Launcher] I just created the demo repo ${r.repo} (${run.templateName}). ${where} Add it as a project in this app (create_project) if it isn't one already, create a new idle session in it (create_session with that project_id, no kickoff, detached: true), then navigate me to that session.`;
 }

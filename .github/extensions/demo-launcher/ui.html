@@ -101,7 +101,7 @@
     <div class="options">
       <label>Owner <input type="text" id="cOwner" list="ownerList" placeholder="you (logged-in account)" /></label>
       <datalist id="ownerList"></datalist>
-      <label>Older than <input type="number" id="cHours" min="0" step="1" value="24" /> h</label>
+      <label>Older than <input type="number" id="cHours" min="0" step="1" value="72" /> h</label>
       <button class="btn" id="cAll" title="Ignore the age limit">Any age</button>
       <button class="btn" id="cFind">Find demo repos</button>
     </div>
@@ -185,7 +185,7 @@ function renderRun(r) {
   const seed = seedPrompt ? `<div class="seed">
       <div class="seed-head">💬 <strong>Seed prompt</strong>
         <button class="btn" data-act="copy-seed" data-id="${r.id}">📋 Copy</button>
-        <button class="btn primary" data-act="ensemble" data-id="${r.id}" title="New autopilot session in this repo with the Ensemble model, already running the prompt">▶ Run with Ensemble</button>
+        <button class="btn primary" data-act="fusion" data-id="${r.id}" title="New autopilot session in this repo with the GitHub Copilot Fusion model, already running the prompt">▶ Run with Fusion</button>
       </div>
       <div class="seed-text">${esc(seedPrompt)}</div>
     </div>` : "";
@@ -246,9 +246,9 @@ $("runs").addEventListener("click", async (e) => {
     if (b.dataset.act === "cancel") { await post("/api/cancel", { id: b.dataset.id }); toast("Cancelling…"); }
     if (b.dataset.act === "answer-key") { await post("/api/open-answer-key", { id: b.dataset.id }); toast("Opening the answer key locally (don't share your screen!)"); }
     if (b.dataset.act === "copy-seed") { await copySeed(b.dataset.id); toast("Seed prompt copied"); }
-    if (b.dataset.act === "ensemble") {
-      await post("/api/open-session", { id: b.dataset.id, kind: "ensemble" });
-      toast("Asked Copilot to start an Ensemble autopilot session — check the chat.");
+    if (b.dataset.act === "fusion") {
+      await post("/api/open-session", { id: b.dataset.id, kind: "fusion" });
+      toast("Asked Copilot to start a GitHub Copilot Fusion autopilot session — check the chat.");
     }
     if (b.dataset.act === "vscode") { await post("/api/open-vscode", { id: b.dataset.id }); toast("Opening VS Code…"); }
     if (b.dataset.act === "session") {

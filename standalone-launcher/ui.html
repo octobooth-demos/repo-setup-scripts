@@ -189,7 +189,7 @@ function renderRun(r) {
   const seed = seedPrompt ? `<div class="seed">
       <div class="seed-head">💬 <strong>Seed prompt</strong>
         <button class="btn" data-act="copy-seed" data-id="${r.id}">📋 Copy</button>
-        <button class="btn primary" data-act="ensemble" data-id="${r.id}" title="${COPY_HINT}">📋 Copy Ensemble prompt</button>
+        <button class="btn primary" data-act="fusion" data-id="${r.id}" title="${COPY_HINT}">📋 Copy Fusion prompt</button>
       </div>
       <div class="seed-text">${esc(seedPrompt)}</div>
     </div>` : "";
@@ -250,8 +250,8 @@ $("runs").addEventListener("click", async (e) => {
     if (b.dataset.act === "cancel") { await post("/api/cancel", { id: b.dataset.id }); toast("Cancelling…"); }
     if (b.dataset.act === "answer-key") { await post("/api/open-answer-key", { id: b.dataset.id }); toast("Opening the answer key locally (don't share your screen!)"); }
     if (b.dataset.act === "copy-seed") { await copySeed(b.dataset.id); toast("Seed prompt copied"); }
-    if (b.dataset.act === "ensemble") {
-      await post("/api/open-session", { id: b.dataset.id, kind: "ensemble" });
+    if (b.dataset.act === "fusion") {
+      await post("/api/open-session", { id: b.dataset.id, kind: "fusion" });
       toast("Prompt copied: paste it into any Copilot app chat.");
     }
     if (b.dataset.act === "vscode") { await post("/api/open-vscode", { id: b.dataset.id }); toast("Opening VS Code…"); }

@@ -12,7 +12,7 @@ param(
     [switch]$Serve,
     # Delete demo-generated repos owned by -Owner (default: logged-in account) older than -OlderThanHours.
     [switch]$Cleanup,
-    [int]$OlderThanHours = 24,
+    [int]$OlderThanHours = 72,
     # End of event: ignore the age cutoff and delete every demo repo (same as -OlderThanHours 0, with a warning).
     [switch]$All,
     [switch]$DryRun,
@@ -488,6 +488,8 @@ function Wait-CodeScanningEnabled {
 # $Event limits the run lookup to one trigger, so a dispatched run on an
 # already-scanned commit isn't confused with that commit's earlier push run.
 function Wait-CodeQLAnalysis {
+    # $Event/$eventArgs are only automatic inside event handlers; this is a plain function.
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidAssignmentToAutomaticVariable', '')]
     param([string]$Workflow, [string]$Sha, [string]$Rule, [string]$Event)
 
     Write-Host "Waiting for CodeQL ($Workflow) to analyze $defaultBranch (usually 3-6 minutes)..."

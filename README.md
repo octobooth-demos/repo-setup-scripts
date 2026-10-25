@@ -12,31 +12,51 @@ There are three ways to create a demo, and all of them run the same scripts and 
 
 Do this once per machine (macOS):
 
-1. Install the tools and log in with the scopes the demos and cleanup need:
+1. Install the tools:
 
    ```bash
    brew install gh jq
-   gh auth login
-   gh auth refresh -h github.com -s codespace,delete_repo
    ```
 
-2. In the GitHub Copilot app, add `octobooth-demos/repo-setup-scripts` as a project. This clones it to `~/repos/repo-setup-scripts`.
-3. Make the Demo Launcher available in every session, not just this project's (see [details](#make-it-available-in-every-session)):
+   Then log in to the GitHub CLI **as the booth account** (for example `octobooth-1`), not your personal account. Demos are created in the logged-in account and in the `octobooth-demos` org:
+
+   ```bash
+   unset GH_TOKEN GITHUB_TOKEN   # login and refresh fail while either is set
+   gh auth login        # GitHub.com → HTTPS → "Authenticate Git" Yes → Login with a web browser
+   gh auth refresh -h github.com -s codespace,delete_repo
+   gh auth status       # should show the booth account and both scopes
+   ```
+
+   - `codespace` lets Tailspin Toys create its Codespace.
+   - `delete_repo` lets the launcher's **Clean up** (and `--cleanup`) delete old demo repos.
+   - The default scopes (`repo`, `read:org`, `gist`) cover everything else. Answer **Yes** to "Authenticate Git" so the scripts can push demo branches over HTTPS.
+   - The booth account must be a member of the `octobooth-demos` org and allowed to create repos there. Several demos (`security-octo-supply`, `security-octo-supply-v4`, `ai-security`, and `fusion-blank`) always create their repo in that org.
+   - The booth account also needs a Copilot seat (for Copilot code review and assigning issues to Copilot) and access to Codespaces (for Tailspin Toys).
+   - If `GH_TOKEN` or `GITHUB_TOKEN` is set, `gh auth login`/`refresh` refuse to run and `gh` uses the token instead of the booth login. Remove them from your shell profile on booth machines too. The Demo Launcher already ignores them when a stored login exists, but terminal runs of `create-repo` don't.
+
+2. Clone this repo to `~/repos/repo-setup-scripts`:
+
+   ```bash
+   gh repo clone octobooth-demos/repo-setup-scripts ~/repos/repo-setup-scripts
+   ```
+
+3. In the GitHub Copilot app, add that **existing local folder** (`~/repos/repo-setup-scripts`) as a project. Don't clone it again. Sessions in this project can always open the Demo Launcher.
+4. Also install the loader so other sessions can open it too (see [details](#make-it-available-in-every-session)):
 
    ```bash
    cd ~/repos/repo-setup-scripts
    bash .github/extensions/demo-launcher/install.sh
    ```
 
-   Then restart the Copilot app (or reload extensions in open sessions).
+   Then restart the Copilot app (or reload extensions in open sessions). The project and the loader now use the same checkout.
 
-4. Optional fallback: run the [standalone Demo Launcher](#standalone-demo-launcher) as a login service so it's always at http://127.0.0.1:4747/ in a browser:
+5. Optional fallback: run the [standalone Demo Launcher](#standalone-demo-launcher) as a login service so it's always at http://127.0.0.1:4747/ in a browser:
 
    ```bash
    bash standalone-launcher/install-service.sh
    ```
 
-Before each booth day, update the checkout with `git -C ~/repos/repo-setup-scripts pull`. Then ask Copilot in any session to **"open the demo launcher"**. At the end of the day, use the launcher's **Clean up** section or `bash ./create-repo.sh --cleanup` (see [Cleaning up](#cleaning-up)).
+Before each booth day, run `git -C ~/repos/repo-setup-scripts pull` and restart the app; that updates both. Then ask Copilot to **"open the demo launcher"**. If a session outside the project can't find it, open it from a session in the `repo-setup-scripts` project instead. At the end of the day, use the launcher's **Clean up** section or `bash ./create-repo.sh --cleanup` (see [Cleaning up](#cleaning-up)).
 
 ## Demos
 
@@ -52,7 +72,7 @@ Each entry in [`config.json`](config.json) is one demo. Pass its key to `--templ
 | `booth-bingo` | Booth Bingo (stacked PRs) | Public repo, 3 stacked PRs registered as a native stack, and GitHub Pages | [Details](#booth-bingo-stacked-prs); talk track in the template's README |
 | `octocart` | OctoCart (Copilot Code Review) | Repo with 4 feature PRs. Copilot Code Review is requested on 3 of them; the 4th is left for you to request live | [Details](#octocart-copilot-code-review); [answer key](resources/octocart/ANSWER_KEY.md) (presenters only) |
 | `ai-security` | AI Security (AI Scan + agentic autofix) | Repo in the `octobooth-demos` org with an infra PR that AI Scan reviews, plus CodeQL alerts on `main` with one already assigned to Copilot | [Details](#ai-security-ai-scan--agentic-autofix); [presenter notes](resources/ai-security/ANSWER_KEY.md). **Pre-bake it:** it takes about 20 minutes to be fully ready |
-| `ensemble-blank` | Ensemble: Blank Prompt | Empty repo (README only) in the `octobooth-demos` org, plus a seed prompt you run with the Ensemble model in autopilot | [Details](#ensemble-blank-prompt); [presenter notes](resources/ensemble-blank/ANSWER_KEY.md) |
+| `fusion-blank` | GitHub Copilot Fusion: Blank Prompt | Empty repo (README only) in the `octobooth-demos` org, plus a seed prompt you run with the GitHub Copilot Fusion model in autopilot | [Details](#github-copilot-fusion-blank-prompt); [presenter notes](resources/fusion-blank/ANSWER_KEY.md) |
 
 ## PowerShell
 
@@ -108,8 +128,8 @@ Every repository the scripts create gets the `demo-generated` topic, which is wh
 
   The card also links to the repo's pull request list and has a **🔑 Presenter answer key** button. The button opens `resources/<key>/ANSWER_KEY.md` from this repo on your machine (in VS Code if it's installed). The answer key is never copied into demo repos, so keep it off the shared screen.
 - **One-click follow-ups.** **Open session in Copilot app** has Copilot add the repo as a project and open a fresh session. **Open PR session** and **Open issue session** open those items. **Open in VS Code** runs `code <clone>`.
-- **Seed prompts.** For demos with a `seed_prompt_file` (like `ensemble-blank`), the card shows the prompt with **📋 Copy** and **▶ Run with Ensemble**. Run with Ensemble has Copilot add the repo as a project and start a new autopilot session that runs the prompt on the Ensemble model (`model: "auto"`, `auto_tier: "hydrafusion"`).
-- **Clean up.** This works like `--cleanup`. Pick an owner and an age cutoff (default 24 hours, or **Any age**), review the matching `demo-generated` repos, and untick any you want to keep. Then delete the rest, optionally with their clones in `~/repos`. Deleting needs the `delete_repo` scope.
+- **Seed prompts.** For demos with a `seed_prompt_file` (like `fusion-blank`), the card shows the prompt with **📋 Copy** and **▶ Run with Fusion**. Run with Fusion has Copilot add the repo as a project and start a new autopilot session that runs the prompt on the GitHub Copilot Fusion model (`model: "auto"`, `auto_tier: "hydrafusion"`).
+- **Clean up.** This works like `--cleanup`. Pick an owner and an age cutoff (default 72 hours, or **Any age**), review the matching `demo-generated` repos, and untick any you want to keep. Then delete the rest, optionally with their clones in `~/repos`. Deleting needs the `delete_repo` scope.
 
 Runs use your stored `gh auth login`, not any `GH_TOKEN` the app injects, so they have the same scopes as a terminal run. Run history survives restarts. It's kept in `~/.copilot/extensions/demo-launcher/artifacts/runs.json`, and **Clear history** empties it. The panel is a plain loopback web page, so its URL also works in a browser, including VS Code's Simple Browser. The port changes each time the extension restarts.
 
@@ -118,7 +138,13 @@ Runs use your stored `gh auth login`, not any `GH_TOKEN` the app injects, so the
 | Session | Canvas available? |
 | --- | --- |
 | Any session in the `repo-setup-scripts` project, including worktrees and PR sessions | Yes. Copilot loads project extensions from `.github/extensions/`, and each session uses its own checkout's copy. |
-| Any other session (a demo repo, another project, or a chat) | Only after you [install the loader](#make-it-available-in-every-session). |
+| Any other session (a demo repo, another project, or a chat) | Only after you [install the loader](#make-it-available-in-every-session), and only if your app build loads user-level extensions. |
+
+On booth machines (macOS or Linux), set up both: add the repo as a project **and** run `install.sh`. The project is the guaranteed way in; the loader adds every other session. On Windows, use the project only.
+
+#### Two Demo Launcher canvases
+
+App builds that can open canvases without a session (staff builds) may list two "Demo Launcher" canvases when both are set up: `user:demo-launcher` (the loader) and `project:demo-launcher` (the project's copy). If you added the existing `~/repos/repo-setup-scripts` folder as the project, they're the same launcher from the same checkout, so either works. To hide one, remove `repo-setup-scripts` from the app's projects (keep the clone; the loader runs from it) and restart the app.
 
 ### Make it available in every session
 
@@ -133,22 +159,23 @@ Then restart the Copilot app, or ask Copilot to reload extensions in sessions th
 
 How the loader works:
 
-- The installer writes a small user-level extension (a loader) to `~/.copilot/extensions/demo-launcher/extension.mjs`, or to `$COPILOT_HOME/extensions/demo-launcher/` if `COPILOT_HOME` is set. Copilot loads user-level extensions in every session.
+- The installer writes a small user-level extension (a loader) to `~/.copilot/extensions/demo-launcher/extension.mjs`, or to `$COPILOT_HOME/extensions/demo-launcher/` if `COPILOT_HOME` is set. App builds that support user-level extensions load them in every session.
 - The loader imports `extension.mjs` straight from your checkout. **`git pull` updates the launcher**; you don't need to reinstall. Demos still run `create-repo` and `config.json` from that checkout.
 - If you run the installer from a worktree, it points the loader at the **main checkout** anyway, because worktrees get deleted. If the main checkout doesn't have the extension yet, it falls back to the worktree with a warning. In that case, re-run it from the main checkout after merging.
-- In sessions inside this repo, the loader does nothing and lets the project's own copy provide the canvas. That avoids two Demo Launchers, and a branch you're working on uses its own version. As a result, extension lists in this project show two `demo-launcher` entries (`user` and `project`), and that's expected.
+- In sessions inside this repo, the loader does nothing and lets that checkout's copy provide the canvas. That avoids two Demo Launchers in the session, and a branch you're working on uses its own version. Staff app builds may still list [two canvases](#two-demo-launcher-canvases) outside a session.
 
 **Update:** run `git -C ~/repos/repo-setup-scripts pull`, then reload extensions or restart the app. You only need to re-run `install.sh` if `install.sh` itself changes. Re-running it is always safe.
 
 **Uninstall:** run `bash .github/extensions/demo-launcher/install.sh --uninstall`. This removes the loader and keeps your run history in `artifacts/`.
 
-**Windows:** `install.sh` is for macOS and Linux. On Windows, open the canvas from sessions in the `repo-setup-scripts` project. Runs there use `create-repo.ps1`.
+**Windows:** `install.sh` is for macOS and Linux. On Windows, add `repo-setup-scripts` as a project in the Copilot app and open the canvas from sessions in that project; don't also install a loader. Runs there use `create-repo.ps1`.
 
 ### Troubleshooting
 
 | Symptom | Fix |
 | --- | --- |
-| Copilot can't find the Demo Launcher outside this project | Run `install.sh`, then restart the app or reload extensions. Check that `~/.copilot/extensions/demo-launcher/extension.mjs` exists and that the path it imports exists. |
+| The app shows two "Demo Launcher" canvases | Expected on staff builds with both the project and loader set up. Either one works. See [Two Demo Launcher canvases](#two-demo-launcher-canvases). |
+| Copilot can't find the Demo Launcher outside this project | Run `install.sh`, then restart the app or reload extensions. Check that `~/.copilot/extensions/demo-launcher/extension.mjs` exists and that the path it imports exists. If it still doesn't appear, your app build may not load user-level extensions; open it from a session in the `repo-setup-scripts` project. |
 | The panel shows old behavior | Run `git pull` in the main checkout and reload extensions. Sessions inside this project use their own checkout, so update that branch. |
 | A run fails with an auth or scope error, or cleanup asks for `delete_repo` | Run `gh auth status` in a terminal, then `gh auth refresh -h github.com -s codespace,delete_repo`. |
 | The demo was created in the wrong account | Repos go to the [logged-in account](#where-repos-are-created) unless you set **Owner**. Check `gh auth status`. |
@@ -190,7 +217,7 @@ It lives **alongside** the canvas and doesn't replace it. It shares no code with
 node standalone-launcher/server.mjs --open     # http://127.0.0.1:4747/ (--port or DEMO_LAUNCHER_PORT to change)
 ```
 
-It has the same demo picker, live logs, links, presenter answer key, and Clean up as the canvas. There's no Copilot agent behind it, so the session buttons become **📋 Copy … prompt**. They copy the instruction the canvas would send to Copilot; paste it into any Copilot app chat and Copilot opens the session (or the Ensemble run) for you.
+It has the same demo picker, live logs, links, presenter answer key, and Clean up as the canvas. There's no Copilot agent behind it, so the session buttons become **📋 Copy … prompt**. They copy the instruction the canvas would send to Copilot; paste it into any Copilot app chat and Copilot opens the session (or the GitHub Copilot Fusion run) for you.
 
 **Always on.** To start it at login and restart it if it stops, run the installer from the **main checkout**. Like `install.sh`, it uses the main checkout even when run from a worktree.
 
@@ -246,14 +273,14 @@ Pages on free personal accounts only works for public repos, so Booth Bingo repo
 
 ## Cleaning up
 
-Delete old demo repos from the logged-in account (or `--owner` / `-Owner`). Only repos with the `demo-generated` topic that are older than the cutoff (default 24 hours) are considered; everything else is left alone. The script lists matches and asks before deleting.
+Delete old demo repos from the logged-in account (or `--owner` / `-Owner`). Only repos with the `demo-generated` topic that are older than the cutoff (default 72 hours) are considered; everything else is left alone. The script lists matches and asks before deleting.
 
 ```bash
-bash ./create-repo.sh --cleanup [--older-than 24 | --all] [--dry-run] [--yes] [--owner <name>]
+bash ./create-repo.sh --cleanup [--older-than 72 | --all] [--dry-run] [--yes] [--owner <name>]
 ```
 
 ```powershell
-.\create-repo.ps1 -Cleanup [-OlderThanHours 24 | -All] [-DryRun] [-Yes] [-Owner <name>]
+.\create-repo.ps1 -Cleanup [-OlderThanHours 72 | -All] [-DryRun] [-Yes] [-Owner <name>]
 ```
 
 **End of event:** `--all` / `-All` ignores the age cutoff and deletes every `demo-generated` repo the owner has, including ones created minutes ago. It prints a warning and still asks before deleting unless you pass `--yes` / `-Yes`. Run with `--dry-run` first to check the list.
@@ -265,7 +292,7 @@ Deleting repos needs the `delete_repo` scope. The scripts request it when they l
 | Where the demo repo lives | How it gets cleaned up |
 | --- | --- |
 | A booth account (`octobooth-1`, `octobooth-2`, …), the default | Run `--cleanup` / `-Cleanup` **on that machine**. Nothing else can reach it, because the [ChatOps App](#chatops) is only installed on the org. |
-| The `octobooth-demos` org (`--owner octobooth-demos`, ChatOps, `security-octo-supply`, `security-octo-supply-v4`, `ai-security`, `ensemble-blank`) | Automatic: the [nightly cleanup](.github/workflows/cleanup-demos.yml) deletes them at 08:00 UTC. To clean up sooner, comment `/cleanup [hours] --confirm` or run the workflow from the Actions tab. After an event, `/cleanup --all --confirm` deletes them all regardless of age. |
+| The `octobooth-demos` org (`--owner octobooth-demos`, ChatOps, `security-octo-supply`, `security-octo-supply-v4`, `ai-security`, `fusion-blank`) | Automatic: the [nightly cleanup](.github/workflows/cleanup-demos.yml) deletes them at 08:00 UTC once they are more than 72 hours old. To clean up sooner, comment `/cleanup [hours] --confirm` or run the workflow from the Actions tab. After an event, `/cleanup --all --confirm` deletes them all regardless of age. |
 
 **Recommended booth routine (repos in each booth account):**
 
@@ -277,7 +304,7 @@ gh auth refresh -h github.com -s delete_repo
 git pull
 bash ./create-repo.sh --template booth-bingo
 
-# End of the day (or the next morning): remove that account's demos older than 24h
+# End of the day (or the next morning): remove that account's demos older than 72h
 bash ./create-repo.sh --cleanup
 # or, after the event, remove every demo regardless of age: bash ./create-repo.sh --cleanup --all
 ```
@@ -291,7 +318,7 @@ Each `repos[]` entry needs `key`, `display_name`, `template` (except for the `bl
 | `workflow` | Extra fields | What it does |
 | --- | --- | --- |
 | `repo_only` | — | Creates the repo. |
-| `blank` | Optional `seed_prompt_file` | Creates an empty repo with only a README (`gh repo create --add-readme`, no template). `seed_prompt_file` is a prompt in this repo that the Demo Launcher shows with Copy and Run with Ensemble buttons. |
+| `blank` | Optional `seed_prompt_file` | Creates an empty repo with only a README (`gh repo create --add-readme`, no template). `seed_prompt_file` is a prompt in this repo that the Demo Launcher shows with Copy and Run with Fusion buttons. |
 | `issue_and_codespace` | `issue` | Creates an issue and a Codespace. |
 | `security_prs` | `prs[]` | Enables security features (Dependabot alerts, automated security fixes, CodeQL default setup), disables the template's `codeql-advanced.yml` workflow if it has one, and opens one PR per entry against the default branch. |
 | `branch_and_codespace` | `branch` | Creates a branch and a Codespace on it. |
@@ -349,7 +376,7 @@ The **presenter answer key**, [`resources/octocart/ANSWER_KEY.md`](resources/oct
 4. Assigns the `js/sql-injection` alert to Copilot with `PATCH /repos/{owner}/{repo}/code-scanning/alerts/{n}`, so a draft fix PR is ready by demo time. It assigns `github-agentic-autofix[bot]`, the account the UI's **Assign to Copilot** uses, and falls back to `copilot-swe-agent[bot]`. If both fail, it warns, and you can assign the alert yourself.
 5. Opens "Containerize the supplier portal and deploy it to staging" from [`resources/ai-security/pr-infra`](resources/ai-security/pr-infra): a Dockerfile, a deploy shell script, Terraform, and a PHP health check, none of which CodeQL analyzes. AI Scan doesn't use CodeQL results, but it only reviews PRs opened after code scanning is on. Opening the PR after step 3 guarantees that.
 
-**Pre-bake this demo.** The script takes about 5–10 minutes. AI Scan findings and Copilot's draft PR each take about 10 more minutes, and longer when GitHub is busy. Create it from the launcher before the booth opens, then work through the checklist in the [presenter notes](resources/ai-security/ANSWER_KEY.md). One repo can serve the whole day; the nightly cleanup deletes it after 24 hours.
+**Pre-bake this demo.** The script takes about 5–10 minutes. AI Scan findings and Copilot's draft PR each take about 10 more minutes, and longer when GitHub is busy. Create it from the launcher before the booth opens, then work through the checklist in the [presenter notes](resources/ai-security/ANSWER_KEY.md). One repo can serve the whole day; the nightly cleanup deletes it after 72 hours.
 
 The script doesn't turn on CodeQL default setup, because default setup can't run alongside the template's advanced workflow. Everything it does needs only admin on the repo it creates, so booth accounts that are org members (not owners) can run it. The org must already allow and enable AI Scan and agentic autofix; `octobooth-demos` does both. Each run uses Code Security AI credits and Actions minutes.
 
@@ -358,18 +385,18 @@ The script doesn't turn on CodeQL default setup, because default setup can't run
 1. **AI Scan:** on the PR, show the findings labeled **AI** on **Conversation** and **Files changed**. They cover Dockerfile, shell, Terraform, and PHP code, which CodeQL doesn't analyze. They're advisory, need no workflow, and may include Copilot Autofix suggestions. AI findings vary from run to run, so read them before visitors arrive.
 2. **Agentic autofix:** in **Security → Code scanning**, open the pre-assigned alert and Copilot's draft PR: the fix summary, plus the CodeQL rerun that validates it. Optionally, select a few more alerts and choose **Assign to Copilot** to show a session starting in the **Agents** tab.
 
-### Ensemble: Blank Prompt
+### GitHub Copilot Fusion: Blank Prompt
 
-`ensemble-blank` shows Ensemble (formerly Project HydraFusion), the Copilot model option that orchestrates several models per request (Single, Cascade, or Critique) for frontier-level quality at lower cost. The preview works best on a substantial, well-scoped, first-turn prompt in autopilot, so the demo is just that: an empty repo in `octobooth-demos` and one prompt from [`resources/ensemble-blank/seed-prompt.txt`](resources/ensemble-blank/seed-prompt.txt), which builds "Mona Merge Rush", a 2048-style Octocat game with `node:test` tests.
+`fusion-blank` shows GitHub Copilot Fusion (formerly Project HydraFusion), the Copilot model option that orchestrates several models per request (Single, Cascade, or Critique) for frontier-level quality at lower cost. The preview works best on a substantial, well-scoped, first-turn prompt in autopilot, so the demo is just that: an empty repo in `octobooth-demos` and one prompt from [`resources/fusion-blank/seed-prompt.txt`](resources/fusion-blank/seed-prompt.txt), which builds "Mona Merge Rush", a 2048-style Octocat game with `node:test` tests.
 
-After the run finishes, click **▶ Run with Ensemble** in the launcher, or copy the prompt and run it yourself with the Ensemble model in autopilot. Expect about 4-5 minutes and a playable game whose tests pass. Talking points, benchmark numbers, and alternate prompts are in the [presenter notes](resources/ensemble-blank/ANSWER_KEY.md). Use a fresh repo for each visitor; the nightly cleanup deletes them after 24 hours.
+After the run finishes, click **▶ Run with Fusion** in the launcher, or copy the prompt and run it yourself with the GitHub Copilot Fusion model in autopilot. Expect about 4-5 minutes and a playable game whose tests pass. Talking points, benchmark numbers, and alternate prompts are in the [presenter notes](resources/fusion-blank/ANSWER_KEY.md). Use a fresh repo for each visitor; the nightly cleanup deletes them after 72 hours.
 
 ## ChatOps
 
 Two workflows in this repo let you create and clean up demos without a booth machine running the script.
 
 - **[New demo](.github/workflows/new-demo.yml)**: run it from the Actions tab and pick a template, or comment `/new-demo <key>` on any issue or PR in this repo. Repos are always created in `octobooth-demos`, because App tokens cannot create repos in personal accounts. It replies with the repo URL and, for stacks, the top PR URL and the game URL (for OctoCart, the pull request list). Only `repo_only`, `blank`, `security_prs`, `stacked_prs`, `code_review_prs`, and `ai_security` templates are allowed, because Codespaces need a user token.
-- **[Clean up demos](.github/workflows/cleanup-demos.yml)**: runs nightly, from the Actions tab (`max_age_hours`, default 24; `dry_run`, default on), or by comment: `/cleanup [hours | --all] [--dry-run | --confirm]`. Comment runs are dry runs unless they include `--confirm`; only the nightly run deletes without opting in. Manual and comment runs need a cutoff of at least 1 hour unless they use the end-of-event override (`--all` in a comment, or the `all` input on the Actions tab), which deletes every demo repo in the org regardless of age and adds a warning to the reply, and the comment must start with exactly `/cleanup`. If some deletions fail, the run continues with the rest, then fails and lists what was and was not deleted. It only deletes repos in `octobooth-demos` that have the `demo-generated` topic **and** are older than the cutoff. It cannot see repos in booth accounts; see [Which cleanup covers which repos](#which-cleanup-covers-which-repos).
+- **[Clean up demos](.github/workflows/cleanup-demos.yml)**: runs nightly, from the Actions tab (`max_age_hours`, default 72; `dry_run`, default on), or by comment: `/cleanup [hours | --all] [--dry-run | --confirm]`. Comment runs are dry runs unless they include `--confirm`; only the nightly run deletes without opting in. Manual and comment runs need a cutoff of at least 1 hour unless they use the end-of-event override (`--all` in a comment, or the `all` input on the Actions tab), which deletes every demo repo in the org regardless of age and adds a warning to the reply, and the comment must start with exactly `/cleanup`. If some deletions fail, the run continues with the rest, then fails and lists what was and was not deleted. It only deletes repos in `octobooth-demos` that have the `demo-generated` topic **and** are older than the cutoff. It cannot see repos in booth accounts; see [Which cleanup covers which repos](#which-cleanup-covers-which-repos).
 
 Comment commands only run for users with write, maintain, or admin access to this repository.
 
@@ -407,4 +434,11 @@ bash -n create-repo.sh
 for f in .github/extensions/demo-launcher/*.mjs standalone-launcher/*.mjs; do node --check "$f"; done
 bash -n .github/extensions/demo-launcher/install.sh
 bash -n standalone-launcher/install-service.sh
+shellcheck --severity=warning -x create-repo.sh .github/extensions/demo-launcher/install.sh standalone-launcher/install-service.sh
 ```
+
+```powershell
+Invoke-ScriptAnalyzer -Path .\create-repo.ps1 -Settings .\PSScriptAnalyzerSettings.psd1
+```
+
+The [CI workflow](.github/workflows/ci.yml) runs these checks on every pull request and push to `main`, and also validates `config.json` (required fields, workflow names, and that every referenced resource file and directory exists). CI never creates repos or uses secrets.

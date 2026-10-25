@@ -183,7 +183,7 @@ How it differs from the Copilot app canvas:
 | **▶ Run with Fusion** | **▶ Run in Copilot Chat** opens the clone in a new window and runs the seed prompt there in agent mode, with the window's current model. It needs a local clone. |
 | **🔑 Presenter answer key** opens in VS Code | Opens as a Markdown preview in the current window |
 | Canvas actions | Agent-mode tools: `demoLauncher_open`, `_listTemplates`, `_launch`, `_getRun`, `_listRuns`, `_cancel`, `_runSeedPrompt`, `_cleanupPreview`, and `_cleanupDelete` (it takes the exact repos to delete, and VS Code asks you to confirm them) |
-| History in `~/.copilot/extensions/demo-launcher/artifacts/` | Separate history per VS Code workspace (usually your `repo-setup-scripts` window), in the extension's workspace storage |
+| History in `~/.copilot/extensions/demo-launcher/artifacts/` | Separate history per VS Code workspace (usually your `repo-setup-scripts` window), in the extension's workspace storage. A window with no folder open keeps history only until it closes. |
 
 The installer packages a small `.vsix` that records your checkout's path. The extension loads `core.mjs` and `ui.html` from that checkout, so **`git pull` updates it** (reload the window). Re-run `install.sh` only when `vscode/package.json` or `vscode/extension.js` changes. If a VS Code workspace folder is itself `repo-setup-scripts`, that folder's copy is used instead, so a branch you're working on uses its own version. To point it somewhere else, set `demoLauncher.repoPath`. Use `--uninstall` to remove it, `--vsix-only` to only build the `.vsix`, and `CODE_CLI=code-insiders` for VS Code Insiders.
 

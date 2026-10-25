@@ -29,7 +29,6 @@ export const DEFAULT_REPO_ROOT = join(EXT_DIR, "..", "..", "..");
 export const UI_FILE = join(EXT_DIR, "ui.html");
 const MAX_RUNS = 30;
 const MAX_LOG_CHARS = 200_000;
-const MAX_RUN_MS = 6 * 60 * 60 * 1000; // no create-repo run takes this long
 
 // Renamed template keys, so runs saved before a rename keep their seed prompt and answer key.
 const LEGACY_TEMPLATE_KEYS = { "ensemble-blank": "fusion-blank" };
@@ -101,18 +100,8 @@ export function createLauncher({ repoRoot = DEFAULT_REPO_ROOT, storeFile, host }
 
     // ---------- run store (durable across reloads) ----------
     //
-    // Each launcher process owns its store file (VS Code keeps one per workspace). Runs record
-    // the pid that started them, so a run that's still going elsewhere isn't marked interrupted.
-
-    function processAlive(pid) {
-        if (!pid || pid === process.pid) return false;
-        try {
-            process.kill(pid, 0);
-            return true;
-        } catch (e) {
-            return e.code === "EPERM";
-        }
-    }
+    // Hosts give each launcher process its own store file where they can (VS Code keeps one per
+    // workspace). A stored run can't still be going here, so "running" means it was interrupted.
 
     let runs = [];
     try {
@@ -129,8 +118,7 @@ export function createLauncher({ repoRoot = DEFAULT_REPO_ROOT, storeFile, host }
                 }
                 if (r.result) r.result.answerKey = answerKeyPath(renamed);
             }
-            const stale = !(Date.now() - Date.parse(r.startedAt) < MAX_RUN_MS); // also covers reused pids
-            if (r.status === "running" && (stale || !processAlive(r.pid))) {
+            if (r.status === "running") {
                 r.status = "interrupted";
                 r.finishedAt = r.finishedAt || new Date().toISOString();
             }
@@ -242,7 +230,6 @@ export function createLauncher({ repoRoot = DEFAULT_REPO_ROOT, storeFile, host }
             options: { owner: owner || null, noClone, openBrowser },
             command: `${cmd} ${args.map((a) => (a.includes(" ") ? `"${a}"` : a)).join(" ")}`,
             status: "running",
-            pid: process.pid,
             exitCode: null,
             startedAt: new Date().toISOString(),
             finishedAt: null,

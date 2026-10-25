@@ -44,49 +44,17 @@ function storageDir() {
 }
 
 // Run history lives in workspace storage: each VS Code window runs its own launcher, and VS Code
-// opens a workspace in only one window, so no two launchers share a history file. Windows with
-// no folder open share one slot; the first to claim it keeps history, the rest get a scratch file.
+// opens a workspace in only one window, so no two launchers share a history file. A window with
+// no folder open keeps a scratch history that's gone when the window closes.
 function historyFile() {
-    if (context.storageUri) {
-        fs.mkdirSync(context.storageUri.fsPath, { recursive: true });
-        return path.join(context.storageUri.fsPath, "runs.json");
+    let dir = context.storageUri?.fsPath;
+    if (dir) fs.mkdirSync(dir, { recursive: true });
+    else {
+        const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "demo-launcher-"));
+        context.subscriptions.push({ dispose: () => fs.rmSync(scratch, { recursive: true, force: true }) });
+        dir = scratch;
     }
-    const dir = path.join(storageDir(), "no-workspace");
-    fs.mkdirSync(dir, { recursive: true });
-    return claimFolderlessSlot(path.join(dir, "owner.pid"))
-        ? path.join(dir, "runs.json")
-        : path.join(fs.mkdtempSync(path.join(os.tmpdir(), "demo-launcher-")), "runs.json");
-}
-
-function claimFolderlessSlot(lockFile) {
-    for (let attempt = 0; attempt < 2; attempt++) {
-        try {
-            fs.writeFileSync(lockFile, String(process.pid), { flag: "wx" });
-            context.subscriptions.push({ dispose: () => fs.rmSync(lockFile, { force: true }) });
-            return true;
-        } catch {
-            let owner = 0;
-            try {
-                owner = Number(fs.readFileSync(lockFile, "utf8"));
-            } catch {
-                continue; // released meanwhile; try again
-            }
-            if (owner === process.pid) return true;
-            if (pidAlive(owner)) return false;
-            fs.rmSync(lockFile, { force: true }); // stale: its window is gone
-        }
-    }
-    return false;
-}
-
-function pidAlive(pid) {
-    if (!pid) return false;
-    try {
-        process.kill(pid, 0);
-        return true;
-    } catch (e) {
-        return e.code === "EPERM";
-    }
+    return path.join(dir, "runs.json");
 }
 
 function getLauncher() {

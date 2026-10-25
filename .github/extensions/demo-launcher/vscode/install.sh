@@ -68,7 +68,7 @@ cat > "$STAGE/extension.vsixmanifest" <<XML
     <Description xml:space="preserve">Create booth demo repos from repo-setup-scripts.</Description>
     <Categories>Other</Categories>
     <Properties>
-      <Property Id="Microsoft.VisualStudio.Code.Engine" Value="^1.95.0" />
+      <Property Id="Microsoft.VisualStudio.Code.Engine" Value="^1.99.0" />
       <Property Id="Microsoft.VisualStudio.Code.ExtensionKind" Value="workspace" />
     </Properties>
   </Metadata>

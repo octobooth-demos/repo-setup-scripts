@@ -83,10 +83,24 @@ function scriptCommand(args) {
 
 // ---------- run store (durable across reloads) ----------
 
+// Renamed template keys, so runs saved before a rename keep their seed prompt and answer key.
+const LEGACY_TEMPLATE_KEYS = { "ensemble-blank": "fusion-blank" };
+
 let runs = [];
 try {
     runs = JSON.parse(readFileSync(STORE_FILE, "utf8"));
     for (const r of runs) {
+        const renamed = LEGACY_TEMPLATE_KEYS[r.template];
+        if (renamed) {
+            r.template = renamed;
+            try {
+                const tpl = loadTemplates().find((t) => t.key === renamed);
+                if (tpl) r.templateName = tpl.displayName;
+            } catch {
+                // keep the stored name if config.json can't be read
+            }
+            if (r.result) r.result.answerKey = answerKeyPath(renamed);
+        }
         if (r.status === "running") {
             r.status = "interrupted";
             r.finishedAt = r.finishedAt || new Date().toISOString();

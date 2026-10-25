@@ -101,7 +101,7 @@
     <div class="options">
       <label>Owner <input type="text" id="cOwner" list="ownerList" placeholder="you (logged-in account)" /></label>
       <datalist id="ownerList"></datalist>
-      <label>Older than <input type="number" id="cHours" min="0" step="1" value="24" /> h</label>
+      <label>Older than <input type="number" id="cHours" min="0" step="1" value="72" /> h</label>
       <button class="btn" id="cAll" title="Ignore the age limit">Any age</button>
       <button class="btn" id="cFind">Find demo repos</button>
     </div>
@@ -115,9 +115,9 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "
 let templates = [];
 let runs = [];
 let selected = window.DEMO_LAUNCHER?.template ?? new URLSearchParams(location.search).get("template");
-// What the host can do: the Copilot app opens app sessions and runs seed prompts with Ensemble;
+// What the host can do: the Copilot app opens app sessions and runs seed prompts with GitHub Copilot Fusion;
 // VS Code opens folders and runs seed prompts in Copilot Chat. Filled in from /api/state.
-let host = { name: "app", appSessions: true, seedRun: "ensemble" };
+let host = { name: "app", appSessions: true, seedRun: "fusion" };
 const openLogs = new Set();
 
 function toast(msg) {
@@ -213,7 +213,7 @@ function renderRun(r) {
 }
 
 function seedRunButton(r) {
-  if (host.seedRun === "ensemble") return `<button class="btn primary" data-act="run-seed" data-id="${r.id}" title="New autopilot session in this repo with the Ensemble model, already running the prompt">▶ Run with Ensemble</button>`;
+  if (host.seedRun === "fusion") return `<button class="btn primary" data-act="run-seed" data-id="${r.id}" title="New autopilot session in this repo with the GitHub Copilot Fusion model, already running the prompt">▶ Run with Fusion</button>`;
   if (host.seedRun === "chat" && r.result?.clonePath) return `<button class="btn primary" data-act="run-seed" data-id="${r.id}" title="Opens the clone in a new VS Code window and runs the prompt in Copilot Chat agent mode">▶ Run in Copilot Chat</button>`;
   return "";
 }
@@ -257,7 +257,7 @@ $("runs").addEventListener("click", async (e) => {
     if (b.dataset.act === "copy-seed") { await copySeed(b.dataset.id); toast("Seed prompt copied"); }
     if (b.dataset.act === "run-seed") {
       await post("/api/run-seed", { id: b.dataset.id });
-      toast(host.seedRun === "chat" ? "Opening the repo in a new window; Copilot Chat will run the prompt there." : "Asked Copilot to start an Ensemble autopilot session — check the chat.");
+      toast(host.seedRun === "chat" ? "Opening the repo in a new window; Copilot Chat will run the prompt there." : "Asked Copilot to start a GitHub Copilot Fusion autopilot session — check the chat.");
     }
     if (b.dataset.act === "vscode") { await post("/api/open-vscode", { id: b.dataset.id }); toast(host.name === "vscode" ? "Opening a new window…" : "Opening VS Code…"); }
     if (b.dataset.act === "session") {

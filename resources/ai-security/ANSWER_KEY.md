@@ -15,7 +15,7 @@ Neither feature is instant, so create the demo ahead of time rather than in fron
 - AI Scan findings usually appear on the PR within 10 minutes.
 - Copilot's draft fix PR appears about 10 minutes after the alert is assigned.
 
-Plan on about 20 minutes, more when GitHub is busy. One pre-baked repo can serve the whole day. The nightly cleanup deletes demo repos older than 24 hours, so create a fresh one each morning.
+Plan on about 20 minutes, more when GitHub is busy. One pre-baked repo can serve the whole day. The nightly cleanup deletes demo repos older than 72 hours, so a pre-baked repo can last up to three days; create a fresh one before it ages out.
 
 ### Checklist
 

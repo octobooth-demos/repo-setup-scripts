@@ -5,7 +5,7 @@
 //
 // host = {
 //   name: "app" | "vscode",
-//   features: { appSessions: boolean, seedRun: "ensemble" | "chat" | null },
+//   features: { appSessions: boolean, seedRun: "fusion" | "chat" | null },
 //   log(message, level),               // "info" | "warning"
 //   sendPrompt?(prompt),               // ask the host's agent to do something (app)
 //   runSeedPrompt?(run, prompt),       // run a seed prompt in the demo repo (VS Code)
@@ -30,6 +30,9 @@ export const UI_FILE = join(EXT_DIR, "ui.html");
 const MAX_RUNS = 30;
 const MAX_LOG_CHARS = 200_000;
 
+// Renamed template keys, so runs saved before a rename keep their seed prompt and answer key.
+const LEGACY_TEMPLATE_KEYS = { "ensemble-blank": "fusion-blank" };
+
 export function createLauncher({ repoRoot = DEFAULT_REPO_ROOT, storeFile, host }) {
     const CONFIG_FILE = join(repoRoot, "config.json");
     const log = (message, level = "info") => host.log?.(message, level);
@@ -52,7 +55,7 @@ export function createLauncher({ repoRoot = DEFAULT_REPO_ROOT, storeFile, host }
         }));
     }
 
-    // Optional "seed_prompt_file" (e.g. resources/ensemble-blank/seed-prompt.txt): the prompt the
+    // Optional "seed_prompt_file" (e.g. resources/fusion-blank/seed-prompt.txt): the prompt the
     // presenter runs in the new repo. The panel shows it with Copy and a host-specific Run button.
     function readSeedPrompt(file) {
         if (!file) return null;
@@ -101,6 +104,17 @@ export function createLauncher({ repoRoot = DEFAULT_REPO_ROOT, storeFile, host }
     try {
         runs = JSON.parse(readFileSync(storeFile, "utf8"));
         for (const r of runs) {
+            const renamed = LEGACY_TEMPLATE_KEYS[r.template];
+            if (renamed) {
+                r.template = renamed;
+                try {
+                    const tpl = loadTemplates().find((t) => t.key === renamed);
+                    if (tpl) r.templateName = tpl.displayName;
+                } catch {
+                    // keep the stored name if config.json can't be read
+                }
+                if (r.result) r.result.answerKey = answerKeyPath(renamed);
+            }
             if (r.status === "running") {
                 r.status = "interrupted";
                 r.finishedAt = r.finishedAt || new Date().toISOString();
@@ -342,9 +356,9 @@ export function createLauncher({ repoRoot = DEFAULT_REPO_ROOT, storeFile, host }
         if (kind === "issue") {
             return `[Demo Launcher] Open a Copilot app session for issue #${target} in ${r.repo}. ${where} First add it as a project in this app (create_project) if it isn't one already, then use open_issue_session (repo_full_name "${r.repo}", issue_number ${target}). Don't start any work in it (omit kickoff), then navigate me to it.`;
         }
-        if (kind === "ensemble") {
+        if (kind === "fusion") {
             const kickoff = { prompt: seedPromptFor(run), mode: "autopilot", model: "auto", auto_tier: "hydrafusion" };
-            return `[Demo Launcher] Run the ${run.templateName} seed prompt with Ensemble in ${r.repo}. ${where} Add it as a project in this app (create_project) if it isn't one already, then call create_session with that project_id, detached: true, and exactly this kickoff object (don't change the prompt text): ${JSON.stringify(kickoff)}. Then navigate me to that session. Don't do any of the work yourself.`;
+            return `[Demo Launcher] Run the ${run.templateName} seed prompt with GitHub Copilot Fusion in ${r.repo}. ${where} Add it as a project in this app (create_project) if it isn't one already, then call create_session with that project_id, detached: true, and exactly this kickoff object (don't change the prompt text): ${JSON.stringify(kickoff)}. Then navigate me to that session. Don't do any of the work yourself.`;
         }
         return `[Demo Launcher] I just created the demo repo ${r.repo} (${run.templateName}). ${where} Add it as a project in this app (create_project) if it isn't one already, create a new idle session in it (create_session with that project_id, no kickoff, detached: true), then navigate me to that session.`;
     }
@@ -356,7 +370,7 @@ export function createLauncher({ repoRoot = DEFAULT_REPO_ROOT, storeFile, host }
         return { sent: true };
     }
 
-    // Runs the demo's seed prompt the host's way: an Ensemble autopilot session in the Copilot
+    // Runs the demo's seed prompt the host's way: a GitHub Copilot Fusion autopilot session in the Copilot
     // app, or Copilot Chat agent mode in a VS Code window for the clone.
     async function runSeed(id, { requireSuccess = false } = {}) {
         const run = requireSuccess ? readyRun(id) : findRun(id);
@@ -364,7 +378,7 @@ export function createLauncher({ repoRoot = DEFAULT_REPO_ROOT, storeFile, host }
         const prompt = seedPromptFor(run);
         if (host.runSeedPrompt) return { ...(await host.runSeedPrompt(run, prompt)), seedPrompt: prompt };
         if (host.sendPrompt) {
-            await host.sendPrompt(sessionPrompt(run, "ensemble"));
+            await host.sendPrompt(sessionPrompt(run, "fusion"));
             return { sent: true, seedPrompt: prompt };
         }
         throw new LauncherError("unsupported", "Running seed prompts isn't available here.");
@@ -454,7 +468,7 @@ export function createLauncher({ repoRoot = DEFAULT_REPO_ROOT, storeFile, host }
                 case "/api/launch": return summary(startRun(body));
                 case "/api/cancel": return cancelRun(body.id);
                 case "/api/open-session":
-                    return body.kind === "ensemble" ? runSeed(body.id) : openSession(body.id, body.kind || "repo", body.target);
+                    return body.kind === "fusion" ? runSeed(body.id) : openSession(body.id, body.kind || "repo", body.target);
                 case "/api/run-seed": return runSeed(body.id);
                 case "/api/copy-seed": return copyToClipboard(seedPromptFor(findRun(body.id)));
                 case "/api/open-vscode": return openInVSCode(findRun(body.id));

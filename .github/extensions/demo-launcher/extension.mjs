@@ -15,7 +15,7 @@ const launcher = createLauncher({
     storeFile: STORE_FILE,
     host: {
         name: "app",
-        features: { appSessions: true, seedRun: "ensemble" },
+        features: { appSessions: true, seedRun: "fusion" },
         log: (message, level) => session?.log(message, { level }),
         async sendPrompt(prompt) {
             if (!session) throw new LauncherError("no_session", "Extension is not connected to a session.");
@@ -92,7 +92,7 @@ session = await joinSession({
                         type: "object",
                         properties: {
                             owner: { type: "string", description: "Account or org; defaults to the logged-in account." },
-                            olderThanHours: { type: "integer", minimum: 0, description: "Age cutoff in hours (default 24; 0 = all)." },
+                            olderThanHours: { type: "integer", minimum: 0, description: "Age cutoff in hours (default 72; 0 = all)." },
                         },
                     },
                     handler: action((input) => launcher.cleanupPreview(input)),
@@ -110,8 +110,8 @@ session = await joinSession({
                     handler: action((input) => launcher.cleanupDelete(input)),
                 },
                 {
-                    name: "run_with_ensemble",
-                    description: "For demos with a seed prompt: open a new autopilot session in the demo repo that runs the seed prompt with the Ensemble model (latest run by default).",
+                    name: "run_with_fusion",
+                    description: "For demos with a seed prompt: open a new autopilot session in the demo repo that runs the seed prompt with the GitHub Copilot Fusion model (latest run by default).",
                     inputSchema: runIdInput,
                     handler: action((input) => launcher.runSeed(input.runId, { requireSuccess: true })),
                 },

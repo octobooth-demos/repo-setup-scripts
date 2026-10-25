@@ -501,7 +501,6 @@ try {
                 'security-prs-v4' { 'octobooth-demos' }
                 'nested-body' { 'octobooth-demos' }
                 { $_ -like 'ai-security*' } { 'octobooth-demos' }
-                { $_ -like 'blank*' } { 'octobooth-demos' }
                 'owner-override' { 'other-org' }
                 default { 'demo-user' }
             }
@@ -528,7 +527,7 @@ try {
             $topic = @(Find-Calls 'gh' 'repo edit')[0]
             Assert ($null -ne $topic -and $topic.Arguments -contains 'demo-generated') 'demo-generated topic was not added.'
             if ($scenario -like 'blank*') {
-                Assert ($create.Arguments[2] -like 'octobooth-demos/fusion-blank-*') "Blank demo created '$($create.Arguments[2])'."
+                Assert ($create.Arguments[2] -like 'demo-user/fusion-blank-*') "Blank demo created '$($create.Arguments[2])'."
                 Assert ($create.Arguments -contains '--add-readme') 'Blank repo was created without a README.'
                 Assert (-not ($create.Arguments | Where-Object { $_ -like '--template*' })) 'Blank repo was created from a template.'
                 Assert ((Find-Calls 'gh' 'pr create').Count -eq 0 -and (Find-Calls 'gh' 'issue create').Count -eq 0) 'Blank demo opened a PR or issue.'

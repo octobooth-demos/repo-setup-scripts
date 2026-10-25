@@ -262,7 +262,7 @@ try {
         $branchSelection = [string]@($config.repos).Count
         $aiIndex = [array]::IndexOf(@($config.repos | ForEach-Object { $_.key }), 'ai-security')
         $aiSelection = [string]($aiIndex + 1)
-        $blankIndex = [array]::IndexOf(@($config.repos | ForEach-Object { $_.key }), 'ensemble-blank')
+        $blankIndex = [array]::IndexOf(@($config.repos | ForEach-Object { $_.key }), 'fusion-blank')
         $selection = '1'
         $scriptArgs = @{}
         $testState.NeedsLogin = $false
@@ -329,18 +329,18 @@ try {
                 $config.repos[$aiIndex].PSObject.Properties.Remove('autofix')
                 $expectedFailure = 'prs[]'
             }
-            'blank' { $selection = $null; $scriptArgs = @{ Template = 'ensemble-blank'; NoClone = $true } }
+            'blank' { $selection = $null; $scriptArgs = @{ Template = 'fusion-blank'; NoClone = $true } }
             'blank-interactive' { $selection = [string]($blankIndex + 1) }
             'blank-missing-seed' {
                 $selection = $null
-                $scriptArgs = @{ Template = 'ensemble-blank' }
-                $config.repos[$blankIndex].seed_prompt_file = 'resources/ensemble-blank/absent.txt'
+                $scriptArgs = @{ Template = 'fusion-blank' }
+                $config.repos[$blankIndex].seed_prompt_file = 'resources/fusion-blank/absent.txt'
                 $expectedFailure = 'seed_prompt_file not found'
             }
             'blank-needs-workflow' {
                 # Only the blank workflow may omit the template.
                 $selection = $null
-                $scriptArgs = @{ Template = 'ensemble-blank' }
+                $scriptArgs = @{ Template = 'fusion-blank' }
                 $config.repos[$blankIndex].workflow = 'repo_only'
                 $expectedFailure = 'missing required config'
             }
@@ -528,7 +528,7 @@ try {
             $topic = @(Find-Calls 'gh' 'repo edit')[0]
             Assert ($null -ne $topic -and $topic.Arguments -contains 'demo-generated') 'demo-generated topic was not added.'
             if ($scenario -like 'blank*') {
-                Assert ($create.Arguments[2] -like 'octobooth-demos/ensemble-blank-*') "Blank demo created '$($create.Arguments[2])'."
+                Assert ($create.Arguments[2] -like 'octobooth-demos/fusion-blank-*') "Blank demo created '$($create.Arguments[2])'."
                 Assert ($create.Arguments -contains '--add-readme') 'Blank repo was created without a README.'
                 Assert (-not ($create.Arguments | Where-Object { $_ -like '--template*' })) 'Blank repo was created from a template.'
                 Assert ((Find-Calls 'gh' 'pr create').Count -eq 0 -and (Find-Calls 'gh' 'issue create').Count -eq 0) 'Blank demo opened a PR or issue.'

@@ -30,7 +30,7 @@ Do this once per machine (macOS):
    - `codespace` lets Tailspin Toys create its Codespace.
    - `delete_repo` lets the launcher's **Clean up** (and `--cleanup`) delete old demo repos.
    - The default scopes (`repo`, `read:org`, `gist`) cover everything else. Answer **Yes** to "Authenticate Git" so the scripts can push demo branches over HTTPS.
-   - The booth account must be a member of the `octobooth-demos` org and allowed to create repos there. Several demos (`security-octo-supply`, `security-octo-supply-v4`, `ai-security`, and `ensemble-blank`) always create their repo in that org.
+   - The booth account must be a member of the `octobooth-demos` org and allowed to create repos there. Several demos (`security-octo-supply`, `security-octo-supply-v4`, `ai-security`, and `fusion-blank`) always create their repo in that org.
    - The booth account also needs a Copilot seat (for Copilot code review and assigning issues to Copilot) and access to Codespaces (for Tailspin Toys).
    - If `GH_TOKEN` or `GITHUB_TOKEN` is set, `gh auth login`/`refresh` refuse to run and `gh` uses the token instead of the booth login. Remove them from your shell profile on booth machines too. The Demo Launcher already ignores them when a stored login exists, but terminal runs of `create-repo` don't.
 
@@ -66,7 +66,7 @@ Each entry in [`config.json`](config.json) is one demo. Pass its key to `--templ
 | `booth-bingo` | Booth Bingo (stacked PRs) | Public repo, 3 stacked PRs registered as a native stack, and GitHub Pages | [Details](#booth-bingo-stacked-prs); talk track in the template's README |
 | `octocart` | OctoCart (Copilot Code Review) | Repo with 4 feature PRs. Copilot Code Review is requested on 3 of them; the 4th is left for you to request live | [Details](#octocart-copilot-code-review); [answer key](resources/octocart/ANSWER_KEY.md) (presenters only) |
 | `ai-security` | AI Security (AI Scan + agentic autofix) | Repo in the `octobooth-demos` org with an infra PR that AI Scan reviews, plus CodeQL alerts on `main` with one already assigned to Copilot | [Details](#ai-security-ai-scan--agentic-autofix); [presenter notes](resources/ai-security/ANSWER_KEY.md). **Pre-bake it:** it takes about 20 minutes to be fully ready |
-| `ensemble-blank` | Ensemble: Blank Prompt | Empty repo (README only) in the `octobooth-demos` org, plus a seed prompt you run with the Ensemble model in autopilot | [Details](#ensemble-blank-prompt); [presenter notes](resources/ensemble-blank/ANSWER_KEY.md) |
+| `fusion-blank` | GitHub Copilot Fusion: Blank Prompt | Empty repo (README only) in the `octobooth-demos` org, plus a seed prompt you run with the GitHub Copilot Fusion model in autopilot | [Details](#github-copilot-fusion-blank-prompt); [presenter notes](resources/fusion-blank/ANSWER_KEY.md) |
 
 ## PowerShell
 
@@ -122,7 +122,7 @@ Every repository the scripts create gets the `demo-generated` topic, which is wh
 
   The card also links to the repo's pull request list and has a **🔑 Presenter answer key** button. The button opens `resources/<key>/ANSWER_KEY.md` from this repo on your machine (in VS Code if it's installed). The answer key is never copied into demo repos, so keep it off the shared screen.
 - **One-click follow-ups.** **Open session in Copilot app** has Copilot add the repo as a project and open a fresh session. **Open PR session** and **Open issue session** open those items. **Open in VS Code** runs `code <clone>`.
-- **Seed prompts.** For demos with a `seed_prompt_file` (like `ensemble-blank`), the card shows the prompt with **📋 Copy** and **▶ Run with Ensemble**. Run with Ensemble has Copilot add the repo as a project and start a new autopilot session that runs the prompt on the Ensemble model (`model: "auto"`, `auto_tier: "hydrafusion"`).
+- **Seed prompts.** For demos with a `seed_prompt_file` (like `fusion-blank`), the card shows the prompt with **📋 Copy** and **▶ Run with Fusion**. Run with Fusion has Copilot add the repo as a project and start a new autopilot session that runs the prompt on the GitHub Copilot Fusion model (`model: "auto"`, `auto_tier: "hydrafusion"`).
 - **Clean up.** This works like `--cleanup`. Pick an owner and an age cutoff (default 72 hours, or **Any age**), review the matching `demo-generated` repos, and untick any you want to keep. Then delete the rest, optionally with their clones in `~/repos`. Deleting needs the `delete_repo` scope.
 
 Runs use your stored `gh auth login`, not any `GH_TOKEN` the app injects, so they have the same scopes as a terminal run. Run history survives restarts. It's kept in `~/.copilot/extensions/demo-launcher/artifacts/runs.json`, and **Clear history** empties it. The panel is a plain loopback web page, so its URL also works in a browser, including VS Code's Simple Browser. The port changes each time the extension restarts.
@@ -255,7 +255,7 @@ Deleting repos needs the `delete_repo` scope. The scripts request it when they l
 | Where the demo repo lives | How it gets cleaned up |
 | --- | --- |
 | A booth account (`octobooth-1`, `octobooth-2`, …), the default | Run `--cleanup` / `-Cleanup` **on that machine**. Nothing else can reach it, because the [ChatOps App](#chatops) is only installed on the org. |
-| The `octobooth-demos` org (`--owner octobooth-demos`, ChatOps, `security-octo-supply`, `security-octo-supply-v4`, `ai-security`, `ensemble-blank`) | Automatic: the [nightly cleanup](.github/workflows/cleanup-demos.yml) deletes them at 08:00 UTC once they are more than 72 hours old. To clean up sooner, comment `/cleanup [hours] --confirm` or run the workflow from the Actions tab. After an event, `/cleanup --all --confirm` deletes them all regardless of age. |
+| The `octobooth-demos` org (`--owner octobooth-demos`, ChatOps, `security-octo-supply`, `security-octo-supply-v4`, `ai-security`, `fusion-blank`) | Automatic: the [nightly cleanup](.github/workflows/cleanup-demos.yml) deletes them at 08:00 UTC once they are more than 72 hours old. To clean up sooner, comment `/cleanup [hours] --confirm` or run the workflow from the Actions tab. After an event, `/cleanup --all --confirm` deletes them all regardless of age. |
 
 **Recommended booth routine (repos in each booth account):**
 
@@ -281,7 +281,7 @@ Each `repos[]` entry needs `key`, `display_name`, `template` (except for the `bl
 | `workflow` | Extra fields | What it does |
 | --- | --- | --- |
 | `repo_only` | — | Creates the repo. |
-| `blank` | Optional `seed_prompt_file` | Creates an empty repo with only a README (`gh repo create --add-readme`, no template). `seed_prompt_file` is a prompt in this repo that the Demo Launcher shows with Copy and Run with Ensemble buttons. |
+| `blank` | Optional `seed_prompt_file` | Creates an empty repo with only a README (`gh repo create --add-readme`, no template). `seed_prompt_file` is a prompt in this repo that the Demo Launcher shows with Copy and Run with Fusion buttons. |
 | `issue_and_codespace` | `issue` | Creates an issue and a Codespace. |
 | `security_prs` | `prs[]` | Enables security features (Dependabot alerts, automated security fixes, CodeQL default setup), disables the template's `codeql-advanced.yml` workflow if it has one, and opens one PR per entry against the default branch. |
 | `branch_and_codespace` | `branch` | Creates a branch and a Codespace on it. |
@@ -348,11 +348,11 @@ The script doesn't turn on CodeQL default setup, because default setup can't run
 1. **AI Scan:** on the PR, show the findings labeled **AI** on **Conversation** and **Files changed**. They cover Dockerfile, shell, Terraform, and PHP code, which CodeQL doesn't analyze. They're advisory, need no workflow, and may include Copilot Autofix suggestions. AI findings vary from run to run, so read them before visitors arrive.
 2. **Agentic autofix:** in **Security → Code scanning**, open the pre-assigned alert and Copilot's draft PR: the fix summary, plus the CodeQL rerun that validates it. Optionally, select a few more alerts and choose **Assign to Copilot** to show a session starting in the **Agents** tab.
 
-### Ensemble: Blank Prompt
+### GitHub Copilot Fusion: Blank Prompt
 
-`ensemble-blank` shows Ensemble (formerly Project HydraFusion), the Copilot model option that orchestrates several models per request (Single, Cascade, or Critique) for frontier-level quality at lower cost. The preview works best on a substantial, well-scoped, first-turn prompt in autopilot, so the demo is just that: an empty repo in `octobooth-demos` and one prompt from [`resources/ensemble-blank/seed-prompt.txt`](resources/ensemble-blank/seed-prompt.txt), which builds "Mona Merge Rush", a 2048-style Octocat game with `node:test` tests.
+`fusion-blank` shows GitHub Copilot Fusion (formerly Project HydraFusion), the Copilot model option that orchestrates several models per request (Single, Cascade, or Critique) for frontier-level quality at lower cost. The preview works best on a substantial, well-scoped, first-turn prompt in autopilot, so the demo is just that: an empty repo in `octobooth-demos` and one prompt from [`resources/fusion-blank/seed-prompt.txt`](resources/fusion-blank/seed-prompt.txt), which builds "Mona Merge Rush", a 2048-style Octocat game with `node:test` tests.
 
-After the run finishes, click **▶ Run with Ensemble** in the launcher, or copy the prompt and run it yourself with the Ensemble model in autopilot. Expect about 4-5 minutes and a playable game whose tests pass. Talking points, benchmark numbers, and alternate prompts are in the [presenter notes](resources/ensemble-blank/ANSWER_KEY.md). Use a fresh repo for each visitor; the nightly cleanup deletes them after 72 hours.
+After the run finishes, click **▶ Run with Fusion** in the launcher, or copy the prompt and run it yourself with the GitHub Copilot Fusion model in autopilot. Expect about 4-5 minutes and a playable game whose tests pass. Talking points, benchmark numbers, and alternate prompts are in the [presenter notes](resources/fusion-blank/ANSWER_KEY.md). Use a fresh repo for each visitor; the nightly cleanup deletes them after 72 hours.
 
 ## ChatOps
 

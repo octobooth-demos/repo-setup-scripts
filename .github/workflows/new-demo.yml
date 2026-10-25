@@ -16,7 +16,7 @@ on:
           - ctrl-slash
           - octocart
           - ai-security
-          - ensemble-blank
+          - fusion-blank
   issue_comment:
     types: [created]
 

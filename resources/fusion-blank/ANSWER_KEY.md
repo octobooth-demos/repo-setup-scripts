@@ -1,10 +1,10 @@
-# Ensemble blank-prompt answer key
+# GitHub Copilot Fusion blank-prompt answer key
 
 > **Presenters only.** This file lives in `repo-setup-scripts` and is never copied into
 > demo repos (the `blank` workflow creates an empty repo with only a README). Don't show it on screen.
 
-`create-repo` creates an empty repo (`ensemble-blank-xxxx`, README only) in `octobooth-demos`.
-You hand Copilot **one** prompt, pick **Ensemble**, switch to **autopilot**, and let it build a
+`create-repo` creates an empty repo (`fusion-blank-xxxx`, README only) in `octobooth-demos`.
+You hand Copilot **one** prompt, pick **GitHub Copilot Fusion**, switch to **autopilot**, and let it build a
 working, tested game from nothing while you talk.
 
 ## The seed prompt
@@ -15,18 +15,18 @@ Also in [`seed-prompt.txt`](seed-prompt.txt). The Demo Launcher shows it with a 
 
 ## Running it
 
-**Fastest: Demo Launcher.** After the run finishes, click **▶ Run with Ensemble**. Copilot opens a new
-session in the demo repo with the seed prompt, the Ensemble model, and autopilot already set.
+**Fastest: Demo Launcher.** After the run finishes, click **▶ Run with Fusion**. Copilot opens a new
+session in the demo repo with the seed prompt, the GitHub Copilot Fusion model, and autopilot already set.
 
 **By hand (Copilot app):**
 
 1. In the launcher, click **Open session in Copilot app** (or open the repo as a project).
-2. In the model picker, choose **Auto** and then the **Ensemble** tier (it may still be labeled
+2. In the model picker, choose **Auto** and then the **GitHub Copilot Fusion** tier (it may still be labeled
    **HydraFusion** in some builds).
 3. Switch the mode to **Autopilot**.
 4. Paste the seed prompt and send.
 
-**By hand (Copilot CLI):** `cd ~/repos/ensemble-blank-xxxx && copilot`, pick the Ensemble/HydraFusion
+**By hand (Copilot CLI):** `cd ~/repos/fusion-blank-xxxx && copilot`, pick the GitHub Copilot Fusion (HydraFusion in some builds)
 model with `/model`, switch to autopilot (<kbd>Shift</kbd>+<kbd>Tab</kbd>), and paste the prompt.
 
 ## What to expect
@@ -45,7 +45,7 @@ It's non-deterministic: the game will look a bit different every time, which is 
 
 ## Talking points
 
-**What it is.** Ensemble (formerly Project HydraFusion) is a Copilot model option that delivers
+**What it is.** GitHub Copilot Fusion (formerly Project HydraFusion) is a Copilot model option that delivers
 frontier-level quality by orchestrating *several* models per request. You pick it once like any
 other model; it plans the workflow behind the scenes.
 
@@ -79,7 +79,7 @@ Feedback goes to `/feedback` in Copilot CLI or the [community discussion](https:
 
 ## Alternate prompts
 
-Use these for repeat visitors or a longer slot. Same setup: fresh blank repo, Ensemble, autopilot.
+Use these for repeat visitors or a longer slot. Same setup: fresh blank repo, GitHub Copilot Fusion, autopilot.
 
 **Harder game (~6-8 min).**
 

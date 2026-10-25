@@ -38,8 +38,8 @@ function loadTemplates() {
     }));
 }
 
-// Optional "seed_prompt_file" (e.g. resources/ensemble-blank/seed-prompt.txt): the prompt the
-// presenter runs in the new repo. The canvas shows it with Copy and "Run with Ensemble".
+// Optional "seed_prompt_file" (e.g. resources/fusion-blank/seed-prompt.txt): the prompt the
+// presenter runs in the new repo. The canvas shows it with Copy and "Run with Fusion".
 function readSeedPrompt(file) {
     if (!file) return null;
     const path = resolve(REPO_ROOT, String(file));
@@ -83,10 +83,24 @@ function scriptCommand(args) {
 
 // ---------- run store (durable across reloads) ----------
 
+// Renamed template keys, so runs saved before a rename keep their seed prompt and answer key.
+const LEGACY_TEMPLATE_KEYS = { "ensemble-blank": "fusion-blank" };
+
 let runs = [];
 try {
     runs = JSON.parse(readFileSync(STORE_FILE, "utf8"));
     for (const r of runs) {
+        const renamed = LEGACY_TEMPLATE_KEYS[r.template];
+        if (renamed) {
+            r.template = renamed;
+            try {
+                const tpl = loadTemplates().find((t) => t.key === renamed);
+                if (tpl) r.templateName = tpl.displayName;
+            } catch {
+                // keep the stored name if config.json can't be read
+            }
+            if (r.result) r.result.answerKey = answerKeyPath(renamed);
+        }
         if (r.status === "running") {
             r.status = "interrupted";
             r.finishedAt = r.finishedAt || new Date().toISOString();
@@ -309,9 +323,9 @@ function sessionPrompt(run, kind, target) {
     if (kind === "issue") {
         return `[Demo Launcher] Open a Copilot app session for issue #${target} in ${r.repo}. ${where} First add it as a project in this app (create_project) if it isn't one already, then use open_issue_session (repo_full_name "${r.repo}", issue_number ${target}). Don't start any work in it (omit kickoff), then navigate me to it.`;
     }
-    if (kind === "ensemble") {
+    if (kind === "fusion") {
         const kickoff = { prompt: seedPromptFor(run), mode: "autopilot", model: "auto", auto_tier: "hydrafusion" };
-        return `[Demo Launcher] Run the ${run.templateName} seed prompt with Ensemble in ${r.repo}. ${where} Add it as a project in this app (create_project) if it isn't one already, then call create_session with that project_id, detached: true, and exactly this kickoff object (don't change the prompt text): ${JSON.stringify(kickoff)}. Then navigate me to that session. Don't do any of the work yourself.`;
+        return `[Demo Launcher] Run the ${run.templateName} seed prompt with GitHub Copilot Fusion in ${r.repo}. ${where} Add it as a project in this app (create_project) if it isn't one already, then call create_session with that project_id, detached: true, and exactly this kickoff object (don't change the prompt text): ${JSON.stringify(kickoff)}. Then navigate me to that session. Don't do any of the work yourself.`;
     }
     return `[Demo Launcher] I just created the demo repo ${r.repo} (${run.templateName}). ${where} Add it as a project in this app (create_project) if it isn't one already, create a new idle session in it (create_session with that project_id, no kickoff, detached: true), then navigate me to that session.`;
 }
@@ -541,13 +555,13 @@ const session = await joinSession({
                     handler: async (ctx) => cleanup.remove(ctx.input || {}),
                 },
                 {
-                    name: "run_with_ensemble",
-                    description: "For demos with a seed prompt: open a new autopilot session in the demo repo that runs the seed prompt with the Ensemble model (latest run by default).",
+                    name: "run_with_fusion",
+                    description: "For demos with a seed prompt: open a new autopilot session in the demo repo that runs the seed prompt with the GitHub Copilot Fusion model (latest run by default).",
                     inputSchema: runIdInput,
                     handler: async (ctx) => {
                         const run = findRun(ctx.input?.runId);
                         if (run.status !== "succeeded" || run.result.deleted) throw new CanvasError("not_ready", "That demo repo is not ready.");
-                        await askAgent(sessionPrompt(run, "ensemble"));
+                        await askAgent(sessionPrompt(run, "fusion"));
                         return { sent: true, seedPrompt: seedPromptFor(run) };
                     },
                 },

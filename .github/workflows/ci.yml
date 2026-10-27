@@ -88,9 +88,9 @@ jobs:
       - name: Install shellcheck
         run: sudo apt-get update && sudo apt-get install --yes shellcheck
       - name: Lint bash scripts
-        run: shellcheck --severity=warning -x create-repo.sh .github/extensions/demo-launcher/install.sh
+        run: shellcheck --severity=warning -x create-repo.sh .github/extensions/demo-launcher/install.sh standalone-launcher/install-service.sh
       - name: Parse bash scripts
-        run: bash -n create-repo.sh && bash -n .github/extensions/demo-launcher/install.sh
+        run: bash -n create-repo.sh && bash -n .github/extensions/demo-launcher/install.sh && bash -n standalone-launcher/install-service.sh
       - name: Smoke test create-repo.sh --help
         run: bash create-repo.sh --help > /dev/null
 
@@ -101,7 +101,7 @@ jobs:
       - uses: actions/checkout@v7
       - name: Parse Demo Launcher modules
         run: |
-          for file in .github/extensions/demo-launcher/*.mjs; do
+          for file in .github/extensions/demo-launcher/*.mjs standalone-launcher/*.mjs; do
             node --check "$file"
           done
 

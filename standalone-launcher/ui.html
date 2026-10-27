@@ -1,0 +1,362 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>Demo Launcher</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🚀</text></svg>" />
+<style>
+  :root { color-scheme: light dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 16px;
+    background: var(--background-color-default, #fff);
+    color: var(--text-color-default, #1f2328);
+    font-family: var(--font-sans, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
+    font-size: var(--text-body-medium, 14px);
+    line-height: var(--leading-body-medium, 20px);
+  }
+  h1 { font-size: var(--text-title-medium, 20px); font-weight: var(--font-weight-semibold, 600); margin: 0 0 4px; }
+  h2 { font-size: 13px; font-weight: var(--font-weight-semibold, 600); text-transform: uppercase; letter-spacing: .04em;
+       color: var(--text-color-muted, #59636e); margin: 20px 0 8px; }
+  .muted { color: var(--text-color-muted, #59636e); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; }
+  .card {
+    border: 1px solid var(--border-color-default, #d1d9e0); border-radius: 8px; padding: 12px;
+    cursor: pointer; background: transparent; color: inherit; text-align: left; font: inherit;
+    display: flex; flex-direction: column; gap: 4px;
+  }
+  .card:hover { border-color: var(--true-color-blue, #0969da); }
+  .card.selected { border-color: var(--true-color-blue, #0969da); box-shadow: 0 0 0 1px var(--true-color-blue, #0969da); }
+  .card .name { font-weight: var(--font-weight-semibold, 600); }
+  .card .hint { font-size: 12px; color: var(--text-color-muted, #59636e); }
+  .card code { font-size: 11px; }
+  .options { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; margin-top: 12px; }
+  input[type=text] {
+    padding: 5px 8px; border-radius: 6px; border: 1px solid var(--border-color-default, #d1d9e0);
+    background: transparent; color: inherit; font: inherit; width: 180px;
+  }
+  button.btn {
+    padding: 5px 12px; border-radius: 6px; border: 1px solid var(--border-color-default, #d1d9e0);
+    background: transparent; color: inherit; font: inherit; cursor: pointer;
+  }
+  button.btn:hover:not(:disabled) { border-color: var(--true-color-blue, #0969da); }
+  button.primary { background: var(--true-color-blue, #0969da); border-color: var(--true-color-blue, #0969da); color: var(--color-white, #fff); }
+  button:disabled { opacity: .5; cursor: default; }
+  .run { border: 1px solid var(--border-color-default, #d1d9e0); border-radius: 8px; padding: 12px; margin-bottom: 10px; }
+  .run-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .badge { font-size: 11px; padding: 1px 8px; border-radius: 999px; border: 1px solid currentColor; }
+  .running { color: var(--true-color-blue, #0969da); }
+  .succeeded { color: var(--true-color-green, #1a7f37); }
+  .failed, .interrupted, .cancelled { color: var(--true-color-red, #d1242f); }
+  .links { display: flex; flex-direction: column; gap: 6px; margin: 10px 0 4px; }
+  .link-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .link-row a { color: var(--true-color-blue, #0969da); text-decoration: none; }
+  .link-row a:hover { text-decoration: underline; }
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+  details summary { cursor: pointer; color: var(--text-color-muted, #59636e); margin-top: 8px; font-size: 12px; }
+  pre.log {
+    font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 11.5px;
+    max-height: 280px; overflow: auto; white-space: pre-wrap; word-break: break-word;
+    background: var(--background-color-muted, rgba(127,127,127,.08)); padding: 8px; border-radius: 6px; margin: 6px 0 0;
+  }
+  .toast { position: fixed; bottom: 12px; right: 12px; padding: 8px 12px; border-radius: 6px; font-size: 13px;
+           background: var(--text-color-default, #1f2328); color: var(--background-color-default, #fff); opacity: 0; transition: opacity .2s; }
+  .toast.show { opacity: .95; }
+  .spinner { display: inline-block; width: 10px; height: 10px; border: 2px solid currentColor; border-right-color: transparent;
+             border-radius: 50%; animation: spin .8s linear infinite; }
+  .cleanup { border: 1px solid var(--border-color-default, #d1d9e0); border-radius: 8px; padding: 12px; }
+  .cleanup input[type=number] { width: 70px; padding: 5px 8px; border-radius: 6px; border: 1px solid var(--border-color-default, #d1d9e0); background: transparent; color: inherit; font: inherit; }
+  .cand { display: flex; gap: 8px; align-items: center; padding: 3px 0; }
+  .cand code { font-size: 12px; }
+  .warn { color: var(--true-color-orange, #bc4c00); font-size: 12.5px; margin-top: 8px; }
+  button.danger { background: var(--true-color-red, #d1242f); border-color: var(--true-color-red, #d1242f); color: var(--color-white, #fff); }
+  .run.deleted { opacity: .6; }
+  .seed { margin-top: 10px; border: 1px solid var(--border-color-default, #d1d9e0); border-radius: 6px; padding: 8px 10px; }
+  .seed-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 12px; color: var(--text-color-muted, #59636e); }
+  .seed-text { margin: 6px 0 0; white-space: pre-wrap; word-break: break-word; font-size: 13px; user-select: all; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+  <h1>🚀 Demo Launcher <span class="muted" style="font-size:13px;font-weight:normal">standalone</span></h1>
+  <div class="muted">Pick a demo, create it in the background, then jump straight in.</div>
+
+  <h2>Demos</h2>
+  <div class="grid" id="templates"></div>
+  <div class="options">
+    <label>Owner <input type="text" id="owner" placeholder="default (from config / you)" /></label>
+    <label><input type="checkbox" id="noClone" /> Skip local clone</label>
+    <label><input type="checkbox" id="openBrowser" /> Let script open browser tabs</label>
+    <button class="btn primary" id="launch" disabled>Create demo</button>
+    <span class="muted" id="active"></span>
+  </div>
+
+  <h2 style="display:flex;justify-content:space-between;align-items:center">
+    <span>Runs</span>
+    <button class="btn" id="clear" style="text-transform:none;letter-spacing:0;font-weight:normal;font-size:12px;padding:2px 8px">Clear history</button>
+  </h2>
+  <div id="runs"><div class="muted">No demos created yet.</div></div>
+  <h2>Clean up</h2>
+  <div class="cleanup">
+    <div class="muted" style="font-size:12.5px">Deletes repos with the <code>demo-generated</code> topic, like <code>create-repo --cleanup</code>. You pick which ones before anything is deleted.</div>
+    <div class="options">
+      <label>Owner <input type="text" id="cOwner" list="ownerList" placeholder="you (logged-in account)" /></label>
+      <datalist id="ownerList"></datalist>
+      <label>Older than <input type="number" id="cHours" min="0" step="1" value="72" /> h</label>
+      <button class="btn" id="cAll" title="Ignore the age limit">Any age</button>
+      <button class="btn" id="cFind">Find demo repos</button>
+    </div>
+    <div id="cBody"></div>
+  </div>
+  <div class="toast" id="toast"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+let templates = [];
+let runs = [];
+let selected = new URLSearchParams(location.search).get("template");
+const openLogs = new Set();
+
+function toast(msg) {
+  const t = $("toast"); t.textContent = msg; t.classList.add("show");
+  clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove("show"), 3000);
+}
+
+async function post(path, body) {
+  const res = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || res.statusText);
+  return data;
+}
+
+function renderTemplates() {
+  const active = runs.filter((r) => r.status === "running").length;
+  $("templates").innerHTML = templates.map((t) => `
+    <button class="card ${t.key === selected ? "selected" : ""}" data-key="${esc(t.key)}">
+      <span class="name">${esc(t.displayName)}</span>
+      <span>${esc(t.description)}</span>
+      <span class="hint">→ ${esc(t.hint)}</span>
+      <code class="muted">${t.template ? esc(t.template) : "empty repo"}${t.seedPrompt ? " · seed prompt" : ""}${t.owner ? ` · owner: ${esc(t.owner)}` : ""}</code>
+    </button>`).join("");
+  const tpl = templates.find((t) => t.key === selected);
+  $("noClone").disabled = !!tpl?.requiresClone;
+  if (tpl?.requiresClone) $("noClone").checked = false;
+  $("launch").disabled = !tpl;
+  $("launch").textContent = tpl ? `Create ${tpl.displayName}` : "Select a demo";
+  $("active").textContent = active ? `${active} demo${active > 1 ? "s" : ""} being created…` : "";
+}
+
+function fmtTime(iso) { return iso ? new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : ""; }
+
+const COPY_HINT = "Copies a prompt; paste it into any Copilot app chat and Copilot opens the session for you";
+
+function renderRun(r) {
+  const agentTitle = ` title="${COPY_HINT}"`;
+  const res = r.result || {};
+  const status = r.status === "running" ? `<span class="spinner"></span> creating…` : r.status;
+  const done = r.status !== "running";
+  const links = [];
+  if (res.repoUrl) links.push(`<div class="link-row">📦 <a href="${esc(res.repoUrl)}" target="_blank">${esc(res.repo)}</a></div>`);
+  const review = {
+    requested: `<span class="succeeded" style="font-size:12px">🤖 ✓ Copilot review requested</span>`,
+    rest: `<span class="succeeded" style="font-size:12px">🤖 ✓ Copilot review requested (via REST)</span>`,
+    live: `<span class="running" style="font-size:12px" title="Left for you: request Copilot under Reviewers on the PR during the demo">👋 Request Copilot review live</span>`,
+    failed: `<span class="warn" style="margin:0" title="Open the PR and pick Copilot under Reviewers">⚠️ Copilot review not requested: pick Copilot under Reviewers on the PR</span>`,
+  };
+  for (const pr of res.prs || []) {
+    links.push(`<div class="link-row">🔀 <a href="${esc(pr.url)}" target="_blank">PR #${pr.number}${pr.title ? ` · ${esc(pr.title)}` : ""}</a>
+      ${review[pr.copilotReview] || ""}
+      ${done && !res.deleted ? `<button class="btn" data-act="session" data-kind="pr" data-target="${pr.number}" data-id="${r.id}"${agentTitle}>📋 Copy PR session prompt</button>` : ""}</div>`);
+  }
+  for (const is of res.issues || []) {
+    links.push(`<div class="link-row">🐛 <a href="${esc(is.url)}" target="_blank">Issue #${is.number}</a>
+      ${done && !res.deleted ? `<button class="btn" data-act="session" data-kind="issue" data-target="${is.number}" data-id="${r.id}"${agentTitle}>📋 Copy issue session prompt</button>` : ""}</div>`);
+  }
+  if (res.pullsUrl) links.push(`<div class="link-row">📋 <a href="${esc(res.pullsUrl)}" target="_blank">All pull requests</a></div>`);
+  if (res.alertsUrl) links.push(`<div class="link-row">🚨 <a href="${esc(res.alertsUrl)}" target="_blank">Code scanning alerts</a>${res.copilotAlert ? ` <span class="succeeded" style="font-size:12px">🤖 ✓ alert #${res.copilotAlert} assigned to Copilot</span>` : ""}</div>`);
+  if (res.pagesUrl) links.push(`<div class="link-row">🎮 <a href="${esc(res.pagesUrl)}" target="_blank">${esc(res.pagesUrl)}</a></div>`);
+  if (res.clonePath) links.push(`<div class="link-row">📁 <code>${esc(res.clonePath)}</code></div>`);
+  if (res.codespace) links.push(`<div class="link-row">☁️ Codespace created</div>`);
+
+  const canAct = done && res.repo && !res.deleted;
+  const actions = r.status === "running"
+    ? `<button class="btn" data-act="cancel" data-id="${r.id}">Cancel</button>`
+    : canAct ? `
+      <button class="btn primary" data-act="session" data-kind="repo" data-id="${r.id}"${agentTitle}>📋 Copy Copilot app prompt</button>
+      ${res.clonePath ? `<button class="btn" data-act="vscode" data-id="${r.id}">Open in VS Code</button>` : ""}` : "";
+  const seedPrompt = canAct ? templates.find((t) => t.key === r.template)?.seedPrompt : null;
+  const seed = seedPrompt ? `<div class="seed">
+      <div class="seed-head">💬 <strong>Seed prompt</strong>
+        <button class="btn" data-act="copy-seed" data-id="${r.id}">📋 Copy</button>
+        <button class="btn primary" data-act="fusion" data-id="${r.id}" title="${COPY_HINT}">📋 Copy Fusion prompt</button>
+      </div>
+      <div class="seed-text">${esc(seedPrompt)}</div>
+    </div>` : "";
+  const answerKey = res.answerKey && !res.deleted
+    ? `<button class="btn" data-act="answer-key" data-id="${r.id}" title="${esc(res.answerKey)}">🔑 Presenter answer key</button>` : "";
+
+  return `<div class="run ${res.deleted ? "deleted" : ""}">
+    <div class="run-head">
+      <strong>${esc(r.templateName)}</strong>
+      <span class="badge ${r.status}">${status}</span>${res.deleted ? ` <span class="badge muted">repo deleted</span>` : ""}
+      <span class="muted" style="font-size:12px">${fmtTime(r.startedAt)}${r.options?.owner ? ` · ${esc(r.options.owner)}` : ""}</span>
+    </div>
+    ${r.status !== "succeeded" && done && res.repo ? `<div class="muted" style="font-size:12px;margin-top:6px">⚠️ The repo was created but a later step failed; see the log.</div>` : ""}
+    ${links.length ? `<div class="links">${links.join("")}</div>` : ""}
+    ${actions || answerKey ? `<div class="actions">${actions}${answerKey}</div>` : ""}
+    ${seed}
+    <details data-log="${r.id}" ${openLogs.has(r.id) || r.status === "running" || r.status === "failed" ? "open" : ""}>
+      <summary>Log</summary>
+      <pre class="log" id="log-${r.id}">${esc(r.logTail || "")}</pre>
+    </details>
+  </div>`;
+}
+
+function renderRuns() {
+  $("runs").innerHTML = runs.length ? runs.map(renderRun).join("") : `<div class="muted">No demos created yet.</div>`;
+  for (const pre of document.querySelectorAll("pre.log")) pre.scrollTop = pre.scrollHeight;
+  renderTemplates();
+}
+
+$("templates").addEventListener("click", (e) => {
+  const card = e.target.closest(".card"); if (!card) return;
+  selected = card.dataset.key; renderTemplates();
+});
+
+$("launch").addEventListener("click", async () => {
+  try {
+    await post("/api/launch", {
+      template: selected,
+      owner: $("owner").value.trim() || undefined,
+      noClone: $("noClone").checked,
+      openBrowser: $("openBrowser").checked,
+    });
+    toast("Creating demo in the background…");
+  } catch (e) { toast(e.message); }
+});
+
+$("clear").addEventListener("click", async () => { try { await post("/api/clear"); runs = runs.filter((r) => r.status === "running"); renderRuns(); } catch (e) { toast(e.message); } });
+
+$("runs").addEventListener("toggle", (e) => {
+  const id = e.target.dataset?.log; if (!id) return;
+  e.target.open ? openLogs.add(id) : openLogs.delete(id);
+}, true);
+
+$("runs").addEventListener("click", async (e) => {
+  const b = e.target.closest("button[data-act]"); if (!b) return;
+  b.disabled = true;
+  try {
+    if (b.dataset.act === "cancel") { await post("/api/cancel", { id: b.dataset.id }); toast("Cancelling…"); }
+    if (b.dataset.act === "answer-key") { await post("/api/open-answer-key", { id: b.dataset.id }); toast("Opening the answer key locally (don't share your screen!)"); }
+    if (b.dataset.act === "copy-seed") { await copySeed(b.dataset.id); toast("Seed prompt copied"); }
+    if (b.dataset.act === "fusion") {
+      await post("/api/open-session", { id: b.dataset.id, kind: "fusion" });
+      toast("Prompt copied: paste it into any Copilot app chat.");
+    }
+    if (b.dataset.act === "vscode") { await post("/api/open-vscode", { id: b.dataset.id }); toast("Opening VS Code…"); }
+    if (b.dataset.act === "session") {
+      await post("/api/open-session", { id: b.dataset.id, kind: b.dataset.kind, target: b.dataset.target && Number(b.dataset.target) });
+      toast("Prompt copied: paste it into any Copilot app chat.");
+    }
+  } catch (err) { toast(err.message); }
+  finally { b.disabled = false; }
+});
+
+async function copySeed(id) {
+  const run = runs.find((r) => r.id === id);
+  const text = templates.find((t) => t.key === run?.template)?.seedPrompt || "";
+  try { await navigator.clipboard.writeText(text); return; } catch {}
+  await post("/api/copy-seed", { id });
+}
+
+let cleanup = null;
+let armed = false;
+const unchecked = new Set();
+
+function renderCleanup() {
+  const c = cleanup; if (!c) return;
+  const busy = c.status === "previewing" || c.status === "deleting";
+  $("cFind").disabled = busy;
+  $("cFind").innerHTML = c.status === "previewing" ? `<span class="spinner"></span> Finding…` : "Find demo repos";
+  let html = "";
+  if (c.status === "error") html += `<div class="warn">❌ ${esc(c.error)}</div>`;
+  if (["preview", "deleting", "done"].includes(c.status)) {
+    const who = esc(c.owner || "you");
+    const cutoff = c.olderThanHours === 0 ? "of any age" : `older than ${c.olderThanHours}h`;
+    if (c.deleted.length) html += `<div style="margin-top:8px">🗑️ Deleted ${c.deleted.length} repo(s).</div>`;
+    if (c.failed.length) html += `<div class="warn">❌ ${c.failed.length} could not be deleted: ${c.failed.map(esc).join(", ")}</div>`;
+    if (c.needsDeleteScope) html += `<div class="warn">🔑 Your <code>gh</code> login can't delete repos yet. In a terminal run <code>gh auth refresh -h github.com -s delete_repo</code>, then click Delete again.</div>`;
+    if (!c.candidates.length) html += `<div class="muted" style="margin-top:8px">✅ No demo repos owned by ${who} ${cutoff}${c.deleted.length ? " left" : ""}.</div>`;
+    else {
+      const sel = c.candidates.filter((x) => !unchecked.has(x.repo));
+      const clones = sel.filter((x) => x.clonePath).length;
+      html += `<div style="margin:10px 0 4px"><strong>${c.candidates.length}</strong> demo repo(s) owned by ${who} ${cutoff}:</div>`;
+      if (c.isOrg) html += `<div class="warn">⚠️ ${who} is an organization: this list includes demos created by other booths and ChatOps.</div>`;
+      html += c.candidates.map((x) => `<label class="cand"><input type="checkbox" data-repo="${esc(x.repo)}" ${unchecked.has(x.repo) ? "" : "checked"} ${busy ? "disabled" : ""}/>
+        <a href="https://github.com/${esc(x.repo)}" target="_blank" style="color:var(--true-color-blue,#0969da);text-decoration:none">${esc(x.repo)}</a>
+        <span class="muted" style="font-size:12px">${new Date(x.createdAt).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}${x.clonePath ? " · local clone" : ""}</span></label>`).join("");
+      html += `<div class="options">
+        <label><input type="checkbox" id="cClones" ${busy ? "disabled" : ""}/> Also delete local clones (${clones})</label>
+        <button class="btn danger" id="cDelete" ${busy || !sel.length ? "disabled" : ""}>${c.status === "deleting" ? `<span class="spinner"></span> Deleting…` : armed ? `Click again to delete ${sel.length} repo(s)` : `Delete ${sel.length} repo(s)…`}</button>
+      </div>`;
+    }
+  }
+  if (c.log) html += `<details ${c.status === "error" || c.failed.length ? "open" : ""}><summary>Log</summary><pre class="log">${esc(c.log)}</pre></details>`;
+  const keepClones = $("cClones")?.checked;
+  $("cBody").innerHTML = html;
+  if ($("cClones") && keepClones) $("cClones").checked = true;
+}
+
+$("cAll").addEventListener("click", () => { $("cHours").value = 0; });
+$("cFind").addEventListener("click", async () => {
+  armed = false; unchecked.clear();
+  try { await post("/api/cleanup/preview", { owner: $("cOwner").value.trim() || undefined, olderThanHours: Number($("cHours").value || 0) }); }
+  catch (e) { toast(e.message); }
+});
+$("cBody").addEventListener("change", (e) => {
+  const repo = e.target.dataset?.repo; if (!repo) return;
+  e.target.checked ? unchecked.delete(repo) : unchecked.add(repo);
+  armed = false; renderCleanup();
+});
+$("cBody").addEventListener("click", async (e) => {
+  if (e.target.id !== "cDelete") return;
+  if (!armed) { armed = true; renderCleanup(); setTimeout(() => { if (armed) { armed = false; renderCleanup(); } }, 5000); return; }
+  armed = false;
+  const repos = cleanup.candidates.map((x) => x.repo).filter((r) => !unchecked.has(r));
+  try { await post("/api/cleanup/delete", { repos, removeClones: !!$("cClones")?.checked }); }
+  catch (err) { toast(err.message); }
+});
+
+async function load() {
+  const res = await fetch("/api/state");
+  const data = await res.json();
+  templates = data.templates; runs = data.runs; cleanup = data.cleanup;
+  $("ownerList").innerHTML = [...new Set(templates.map((t) => t.owner).filter(Boolean))].map((o) => `<option value="${esc(o)}">`).join("");
+  renderCleanup();
+  if (selected && !templates.some((t) => t.key === selected)) selected = null;
+  renderRuns();
+}
+
+function connect() {
+  const es = new EventSource("/events");
+  es.addEventListener("run", (e) => {
+    const r = JSON.parse(e.data);
+    const i = runs.findIndex((x) => x.id === r.id);
+    const statusChanged = i < 0 || runs[i].status !== r.status || JSON.stringify(runs[i].result) !== JSON.stringify(r.result);
+    if (i < 0) runs.unshift(r); else runs[i] = r;
+    if (statusChanged) renderRuns();
+    else {
+      const pre = $(`log-${r.id}`);
+      if (pre) { const atBottom = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 30; pre.textContent = r.logTail; if (atBottom) pre.scrollTop = pre.scrollHeight; }
+    }
+  });
+  es.addEventListener("reset", load);
+  es.addEventListener("cleanup", (e) => { cleanup = JSON.parse(e.data); renderCleanup(); });
+  es.onerror = () => { es.close(); setTimeout(() => { load().catch(() => {}); connect(); }, 2000); };
+}
+
+load().then(connect);
+</script>
+</body>
+</html>

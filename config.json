@@ -17,35 +17,36 @@
       ]
     },
     {
-      "key": "security-octo-supply",
+      "key": "security-octo-supply-v4",
       "owner": "org",
       "display_name": "Security Supply Chain",
-      "description_short": "Security demo with TypeScript and PHP vulnerabilities",
+      "description_short": "Security demo on the v4 OctoCAT Supply template: Copilot Autofix (TypeScript) + AI code scanning (PHP)",
       "workflow_hint": "Creates repo + two demo PRs",
-      "template": "security-octo-supply",
-      "repo_base_name": "security-octo-supply",
-      "repo_description": "Security supply chain demo",
+      "template": "security-octo-supply-v4",
+      "repo_base_name": "security-octo-supply-v4",
+      "repo_description": "Security supply chain demo (v4)",
       "workflow": "security_prs",
       "enable_security_features": true,
       "prs": [
         {
           "branch": "feature-add-tos-download",
-          "resource_dir": "resources/security-octo-supply/pr-typescript",
+          "resource_dir": "resources/security-octo-supply-v4/pr-typescript",
           "commit_message": "feat: Adds terms of services download",
           "title": "Demo: Preventing Vulnerabilities in TypeScript",
-          "body_file": "resources/security-octo-supply/pr-typescript/pr-body.md"
+          "body_file": "resources/security-octo-supply-v4/pr-typescript/pr-body.md"
         },
         {
           "branch": "feature/supplier-notes",
-          "resource_dir": "resources/security-octo-supply/pr-php",
+          "resource_dir": "resources/security-octo-supply-v4/pr-php",
           "commit_message": "feat: add supplier notes feature for internal communication",
           "title": "Demo: Preventing Vulnerabilities in PHP",
-          "body_file": "resources/security-octo-supply/pr-php/pr-body.md"
+          "body_file": "resources/security-octo-supply-v4/pr-php/pr-body.md"
         }
       ],
       "summary_lines": [
-        "Security features: Enabled",
-        "PRs: TypeScript + PHP demo PRs created"
+        "Security features: Enabled (CodeQL default setup; codeql-advanced.yml disabled)",
+        "PRs: TypeScript + PHP demo PRs created",
+        "PHP findings need AI Code Scanning enabled for the org; push an edit to the PHP PR to trigger it"
       ]
     },
     {
@@ -167,39 +168,6 @@
         "PRs: promo codes, order export, wishlist, and product reviews feature PRs created",
         "Copilot Code Review: requested on the first three PRs (check warnings); request it live on \"Add product reviews\" (Reviewers -> Copilot)",
         "Presenter answer key: resources/octocart/ANSWER_KEY.md in repo-setup-scripts"
-      ]
-    },
-    {
-      "key": "security-octo-supply-v4",
-      "owner": "org",
-      "display_name": "Security Supply Chain (v4)",
-      "description_short": "Security demo on the v4 OctoCAT Supply template: Copilot Autofix (TypeScript) + AI code scanning (PHP)",
-      "workflow_hint": "Creates repo + two demo PRs",
-      "template": "security-octo-supply-v4",
-      "repo_base_name": "security-octo-supply-v4",
-      "repo_description": "Security supply chain demo (v4)",
-      "workflow": "security_prs",
-      "enable_security_features": true,
-      "prs": [
-        {
-          "branch": "feature-add-tos-download",
-          "resource_dir": "resources/security-octo-supply-v4/pr-typescript",
-          "commit_message": "feat: Adds terms of services download",
-          "title": "Demo: Preventing Vulnerabilities in TypeScript",
-          "body_file": "resources/security-octo-supply-v4/pr-typescript/pr-body.md"
-        },
-        {
-          "branch": "feature/supplier-notes",
-          "resource_dir": "resources/security-octo-supply/pr-php",
-          "commit_message": "feat: add supplier notes feature for internal communication",
-          "title": "Demo: Preventing Vulnerabilities in PHP",
-          "body_file": "resources/security-octo-supply/pr-php/pr-body.md"
-        }
-      ],
-      "summary_lines": [
-        "Security features: Enabled (CodeQL default setup; codeql-advanced.yml disabled)",
-        "PRs: TypeScript + PHP demo PRs created",
-        "PHP findings need AI Code Scanning enabled for the org; push an edit to the PHP PR to trigger it"
       ]
     },
     {

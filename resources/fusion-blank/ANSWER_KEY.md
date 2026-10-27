@@ -18,6 +18,8 @@ Also in [`seed-prompt.txt`](seed-prompt.txt). The Demo Launcher shows it with a 
 
 **Fastest: Demo Launcher.** After the run finishes, click **▶ Run with Fusion**. Copilot opens a new
 session in the demo repo with the seed prompt, the GitHub Copilot Fusion model, and autopilot already set.
+If you opened the launcher from the canvas picker (no chat), it copies the prompt and opens the repo in the
+app instead. Follow the "by hand" steps below and paste.
 
 **By hand (Copilot app):**
 

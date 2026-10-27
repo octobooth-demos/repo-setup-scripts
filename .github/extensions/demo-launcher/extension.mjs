@@ -258,7 +258,7 @@ function startRun({ template, owner, noClone = false, openBrowser = false }) {
         delete run._pendingPrTitle;
         broadcast("run", summary(run));
         persist();
-        session?.log(
+        chatLog(
             run.status === "succeeded"
                 ? `Demo ready: ${run.templateName} → ${run.result.repoUrl}`
                 : `Demo ${run.status}: ${run.templateName} (exit ${code ?? "?"})`,
@@ -304,7 +304,7 @@ const cleanup = createCleanup({
         }
         persist();
     },
-    log: (message, level) => session?.log(message, { level }),
+    log: (message, level) => chatLog(message, { level }),
 });
 
 // ---------- follow-ups ----------
@@ -328,9 +328,75 @@ function sessionPrompt(run, kind, target) {
     return `[Demo Launcher] I just created the demo repo ${r.repo} (${run.templateName}). ${where} Add it as a project in this app (create_project) if it isn't one already, create a new idle session in it (create_session with that project_id, no kickoff, detached: true), then navigate me to that session.`;
 }
 
-async function askAgent(prompt) {
+// Opened from the app-wide canvas picker (no chat), the canvas is hosted by a hidden
+// control session that the app runs under ~/.copilot/app-extension-control/ with
+// `--no-auto-login`. That session can't run agent turns: session.send() starts one, it
+// fails ("Session was not created with authentication info"), and the app then tears
+// down the whole canvas activation ("Runtime canvas control session failed").
+let standaloneCache;
+function isStandalone() {
+    if (standaloneCache !== undefined) return standaloneCache;
+    const mark = `${sep}app-extension-control${sep}`;
+    if ([session?.workspacePath, process.env.COPILOT_HOME].some((p) => p && p.includes(mark))) return (standaloneCache = true);
+    if (process.platform !== "win32") {
+        const res = spawnSync("ps", ["-o", "args=", "-p", String(process.ppid)], { encoding: "utf8", timeout: 3000 });
+        if (res.status === 0 && /(^|\s)--no-auto-login(\s|$)/.test(res.stdout)) return (standaloneCache = true);
+    }
+    return (standaloneCache = false);
+}
+
+// Logs only reach a chat; in standalone mode there is none, so don't touch the control session.
+function chatLog(message, options) {
+    if (session && !isStandalone()) session.log(message, options);
+}
+
+// App deep links (verified routes: repository clone/add prompt, PR detail, issue detail).
+function appDeepLink(run, kind, target) {
+    const base = `ghapp://github.com/${run.result.repo}`;
+    if (kind === "pr" && target) return `${base}/pull/${target}`;
+    if (kind === "issue" && target) return `${base}/issues/${target}`;
+    return base;
+}
+
+function openExternalUrl(url) {
+    const [cmd, args] = process.platform === "darwin" ? ["open", [url]]
+        : process.platform === "win32" ? ["cmd", ["/c", "start", "", url]]
+        : ["xdg-open", [url]];
+    const res = spawnSync(cmd, args, { stdio: "ignore", timeout: 10000 });
+    return res.status === 0;
+}
+
+// In a chat: ask the agent (it can add the project, create the session, and navigate).
+// Standalone: no agent is available, so open the closest app deep link instead.
+async function openSession(run, kind, target) {
+    const prompt = sessionPrompt(run, kind, target);
     if (!session) throw new CanvasError("no_session", "Extension is not connected to a session.");
-    await session.send({ prompt });
+    if (!isStandalone()) {
+        await session.send({ prompt });
+        return { sent: true };
+    }
+    const deepLink = appDeepLink(run, kind, target);
+    const opened = openExternalUrl(deepLink);
+    let copied = false;
+    if (kind === "fusion") {
+        try {
+            copied = copyToClipboard(seedPromptFor(run)).copied;
+        } catch {}
+    }
+    const what = kind === "pr" ? `PR #${target}` : kind === "issue" ? `issue #${target}` : run.result.repo;
+    const next = kind === "pr" || kind === "issue"
+        ? `start a session from it there`
+        : kind === "fusion"
+            ? `add the repo, start a session with the GitHub Copilot Fusion model, and paste the ${copied ? "copied " : ""}seed prompt`
+            : `add the repo as a project, then start a session`;
+    return {
+        sent: false,
+        standalone: true,
+        deepLink,
+        opened,
+        copied,
+        message: `No chat is attached to this launcher, so it opened ${what} in the Copilot app instead — ${next}.${opened ? "" : ` (Couldn't open ${deepLink}.)`}`,
+    };
 }
 
 function which(bin) {
@@ -418,7 +484,7 @@ async function handle(req, res) {
             return res.end(readFileSync(UI_FILE, "utf8"));
         }
         if (req.method === "GET" && url.pathname === "/api/state") {
-            return json(res, 200, { templates: loadTemplates(), runs: runs.map((r) => summary(r)), cleanup: cleanup.state });
+            return json(res, 200, { templates: loadTemplates(), runs: runs.map((r) => summary(r)), cleanup: cleanup.state, standalone: isStandalone() });
         }
         if (req.method === "GET" && url.pathname.startsWith("/api/runs/")) {
             return json(res, 200, findRun(url.pathname.split("/")[3]));
@@ -441,9 +507,7 @@ async function handle(req, res) {
             if (url.pathname === "/api/launch") return json(res, 200, summary(startRun(body)));
             if (url.pathname === "/api/cancel") return json(res, 200, cancelRun(body.id));
             if (url.pathname === "/api/open-session") {
-                const run = findRun(body.id);
-                await askAgent(sessionPrompt(run, body.kind || "repo", body.target));
-                return json(res, 200, { sent: true });
+                return json(res, 200, await openSession(findRun(body.id), body.kind || "repo", body.target));
             }
             if (url.pathname === "/api/copy-seed") return json(res, 200, copyToClipboard(seedPromptFor(findRun(body.id))));
             if (url.pathname === "/api/open-vscode") return json(res, 200, openInVSCode(findRun(body.id)));
@@ -559,8 +623,7 @@ const session = await joinSession({
                     handler: async (ctx) => {
                         const run = findRun(ctx.input?.runId);
                         if (run.status !== "succeeded" || run.result.deleted) throw new CanvasError("not_ready", "That demo repo is not ready.");
-                        await askAgent(sessionPrompt(run, "fusion"));
-                        return { sent: true, seedPrompt: seedPromptFor(run) };
+                        return { ...(await openSession(run, "fusion")), seedPrompt: seedPromptFor(run) };
                     },
                 },
                 {

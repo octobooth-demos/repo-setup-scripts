@@ -121,7 +121,7 @@ Every repository the scripts create gets the `demo-generated` topic, which is wh
   - 👋 deliberately left for a live review
 
   The card also links to the repo's pull request list and has a **🔑 Presenter answer key** button. The button opens `resources/<key>/ANSWER_KEY.md` from this repo on your machine (in VS Code if it's installed). The answer key is never copied into demo repos, so keep it off the shared screen.
-- **One-click follow-ups.** **Open session in Copilot app** has Copilot add the repo as a project and open a fresh session. **Open PR session** and **Open issue session** open those items. **Open in VS Code** runs `code <clone>`.
+- **One-click follow-ups.** **Open session in Copilot app** has Copilot add the repo as a project and open a fresh session. **Open PR session** and **Open issue session** open those items. **Open in VS Code** runs `code <clone>`. The session buttons and **Run with Fusion** need a chat behind the launcher; see [Opened without a chat](#opened-without-a-chat) for what they do otherwise.
 - **Seed prompts.** For demos with a `seed_prompt_file` (like `fusion-blank`), the card shows the prompt with **📋 Copy** and **▶ Run with Fusion**. Run with Fusion has Copilot add the repo as a project and start a new autopilot session that runs the prompt on the GitHub Copilot Fusion model (`model: "auto"`, `auto_tier: "hydrafusion"`).
 - **Clean up.** This works like `--cleanup`. Pick an owner and an age cutoff (default 72 hours, or **Any age**), review the matching `demo-generated` repos, and untick any you want to keep. Then delete the rest, optionally with their clones in `~/repos`. Deleting needs the `delete_repo` scope.
 
@@ -139,6 +139,18 @@ On booth machines (macOS or Linux), set up both: add the repo as a project **and
 #### Two Demo Launcher canvases
 
 App builds that can open canvases without a session (staff builds) may list two "Demo Launcher" canvases when both are set up: `user:demo-launcher` (the loader) and `project:demo-launcher` (the project's copy). If you added the existing `~/repos/repo-setup-scripts` folder as the project, they're the same launcher from the same checkout, so either works. To hide one, remove `repo-setup-scripts` from the app's projects (keep the clone; the loader runs from it) and restart the app.
+
+#### Opened without a chat
+
+When you open the launcher from the app's canvas picker instead of from a chat, there's no Copilot chat behind it. The app hosts it in a hidden control session that can't run Copilot turns, and sending that session a prompt makes the app close the launcher. So in this mode the follow-up buttons open the app directly instead of asking Copilot:
+
+| Button | Without a chat |
+| --- | --- |
+| **Open session in Copilot app** | Opens `ghapp://github.com/<owner>/<repo>`. The app offers to add the repo as a project. Then start a session in it. |
+| **Open PR session** / **Open issue session** | Opens the PR or issue in the app (`…/pull/<n>`, `…/issues/<n>`). Start a session from there. |
+| **▶ Run with Fusion** | Copies the seed prompt and opens the repo in the app. Start a session with the GitHub Copilot Fusion model in autopilot, then paste the prompt. |
+
+Opened from a chat, the buttons work as described above, and Copilot sets everything up.
 
 ### Make it available in every session
 

@@ -142,15 +142,15 @@ App builds that can open canvases without a session (staff builds) may list two 
 
 #### Opened without a chat
 
-When you open the launcher from the app's canvas picker instead of from a chat, there's no Copilot chat behind it. The app hosts it in a hidden control session that can't run Copilot turns, and sending that session a prompt makes the app close the launcher. So in this mode the follow-up buttons open the app directly instead of asking Copilot:
+When you open the launcher from the app's canvas picker instead of from a chat, there's no Copilot chat behind it. The app hosts it in a hidden control session that can't run Copilot turns, and sending that session a prompt makes the app close the launcher. So in this mode the follow-up buttons open the demo's local clone in the app (like dropping the folder on the app's Dock icon). The app adds it as a project if needed, with no confirmation, and shows its new-session composer:
 
 | Button | Without a chat |
 | --- | --- |
-| **Open session in Copilot app** | Opens `ghapp://github.com/<owner>/<repo>`. The app offers to add the repo as a project. Then start a session in it. |
-| **Open PR session** / **Open issue session** | Opens the PR or issue in the app (`…/pull/<n>`, `…/issues/<n>`). Start a session from there. |
-| **▶ Run with Fusion** | Copies the seed prompt and opens the repo in the app. Start a session with the GitHub Copilot Fusion model in autopilot, then paste the prompt. |
+| **Open session in Copilot app** | Opens the repo's project, ready for a new session. Type your first prompt. |
+| **Open PR session** / **Open issue session** | Adds the project, then opens the PR or issue in the app. Start a session from there. |
+| **▶ Run with Fusion** | Copies the seed prompt and opens the project's new-session composer. Pick **Auto → GitHub Copilot Fusion** and **Autopilot**, paste, and send. |
 
-Opened from a chat, the buttons work as described above, and Copilot sets everything up.
+This needs macOS and a local clone. Without a clone (**Skip local clone**), the buttons fall back to `ghapp://github.com/<owner>/<repo>`, and the app asks you to **Allow** adding the repo. Extensions have no supported API to create an app session or pick its model, so the composer is as far as the launcher can take you without a chat. Opened from a chat, the buttons work as described above, and Copilot sets everything up.
 
 ### Make it available in every session
 

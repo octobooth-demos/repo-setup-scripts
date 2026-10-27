@@ -19,7 +19,7 @@
     {
       "key": "security-octo-supply-v4",
       "owner": "org",
-      "display_name": "Security Supply Chain",
+      "display_name": "Security Supply Chain (v4)",
       "description_short": "Security demo on the v4 OctoCAT Supply template: Copilot Autofix (TypeScript) + AI code scanning (PHP)",
       "workflow_hint": "Creates repo + two demo PRs",
       "template": "security-octo-supply-v4",

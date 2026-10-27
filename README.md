@@ -59,7 +59,7 @@ Each entry in [`config.json`](config.json) is one demo. Pass its key to `--templ
 | Key | Demo | What gets created | Presenter notes |
 | --- | --- | --- | --- |
 | `securing-your-code` | Secure Code | Repo only, from `github-samples/securing-your-code` | Labs live in the repo |
-| `security-octo-supply-v4` | Security Supply Chain | Repo in the `octobooth-demos` org from the v4 OctoCAT Supply template (Express 5, React 19, Vite 8) with Dependabot, autofix, and CodeQL turned on, plus two vulnerable PRs (TypeScript and PHP) | Pinned to the org. PHP findings need AI Code Scanning ([details](#security-supply-chain)) |
+| `security-octo-supply-v4` | Security Supply Chain (v4) | Repo in the `octobooth-demos` org from the v4 OctoCAT Supply template (Express 5, React 19, Vite 8) with Dependabot, autofix, and CodeQL turned on, plus two vulnerable PRs (TypeScript and PHP) | Pinned to the org. PHP findings need AI Code Scanning ([details](#security-supply-chain-v4)) |
 | `tailspin-toys` | Tailspin Toys | Repo, an issue assigned to Copilot coding agent, and a Codespace | Needs coding agent and Codespaces on the owner ([note](#where-repos-are-created)) |
 | `ctrl-slash` | Ctrl Slash | Repo only | |
 | `booth-bingo` | Booth Bingo (stacked PRs) | Public repo, 3 stacked PRs registered as a native stack, and GitHub Pages | [Details](#booth-bingo-stacked-prs); talk track in the template's README |
@@ -300,7 +300,7 @@ Each `repos[]` entry needs `key`, `display_name`, `template` (except for the `bl
 
 Each overlay holds the cumulative files for its layer. The booth talk track is in the template's README. The game is served from [GitHub Pages](#showing-the-game) and updates itself after the stack is merged. Merge stacks from the GitHub UI, not `gh pr merge`.
 
-### Security Supply Chain
+### Security Supply Chain (v4)
 
 `security-octo-supply-v4` creates a repo from [`octobooth-demos/security-octo-supply-v4`](https://github.com/octobooth-demos/security-octo-supply-v4), which is the v4 [OctoCAT Supply](https://github.com/octodemo-framework/demo_octocat_supply) template (Node.js API) plus a vulnerable PHP app. The script opens two PRs:
 

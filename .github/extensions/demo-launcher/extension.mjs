@@ -366,8 +366,21 @@ function openExternalUrl(url) {
     return res.status === 0;
 }
 
+const APP_BUNDLE_ID = "com.github.githubapp";
+
+// The app registers folders as a document type. Opening one (like `open -a` or a Dock drop)
+// adds it as a project if needed — no confirmation — and shows its new-session composer.
+function openFolderInApp(path) {
+    if (process.platform !== "darwin" || !path || !existsSync(path)) return false;
+    return spawnSync("open", ["-b", APP_BUNDLE_ID, path], { stdio: "ignore", timeout: 10000 }).status === 0;
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
 // In a chat: ask the agent (it can add the project, create the session, and navigate).
-// Standalone: no agent is available, so open the closest app deep link instead.
+// Standalone: no agent is available, so open the local clone in the app (adds the project and
+// lands on its new-session composer), then the PR/issue if one was picked. Without a clone,
+// fall back to the GitHub deep link, which asks the user to confirm adding the repo.
 async function openSession(run, kind, target) {
     const prompt = sessionPrompt(run, kind, target);
     if (!session) throw new CanvasError("no_session", "Extension is not connected to a session.");
@@ -375,28 +388,37 @@ async function openSession(run, kind, target) {
         await session.send({ prompt });
         return { sent: true };
     }
-    const deepLink = appDeepLink(run, kind, target);
-    const opened = openExternalUrl(deepLink);
+    const r = run.result;
+    const folderOpened = openFolderInApp(r.clonePath);
+    const itemLink = (kind === "pr" || kind === "issue") && target ? appDeepLink(run, kind, target) : null;
+    let deepLink = null;
+    if (itemLink) {
+        if (folderOpened) await sleep(2500);
+        deepLink = itemLink;
+    } else if (!folderOpened) {
+        deepLink = appDeepLink(run, kind, target);
+    }
+    const linkOpened = deepLink ? openExternalUrl(deepLink) : false;
     let copied = false;
     if (kind === "fusion") {
         try {
             copied = copyToClipboard(seedPromptFor(run)).copied;
         } catch {}
     }
-    const what = kind === "pr" ? `PR #${target}` : kind === "issue" ? `issue #${target}` : run.result.repo;
-    const next = kind === "pr" || kind === "issue"
-        ? `start a session from it there`
-        : kind === "fusion"
-            ? `add the repo, start a session with the GitHub Copilot Fusion model, and paste the ${copied ? "copied " : ""}seed prompt`
-            : `add the repo as a project, then start a session`;
-    return {
-        sent: false,
-        standalone: true,
-        deepLink,
-        opened,
-        copied,
-        message: `No chat is attached to this launcher, so it opened ${what} in the Copilot app instead — ${next}.${opened ? "" : ` (Couldn't open ${deepLink}.)`}`,
-    };
+    const opened = folderOpened || linkOpened;
+    let message;
+    if (!opened) {
+        message = `Couldn't open the Copilot app. Add ${r.clonePath || r.repo} as a project there and start a session.`;
+    } else if (itemLink) {
+        message = `Opened ${kind === "pr" ? `PR #${target}` : `issue #${target}`} in the Copilot app${folderOpened ? ` (${r.repo} is added as a project)` : ""}. Start a session from it there.`;
+    } else if (folderOpened) {
+        message = kind === "fusion"
+            ? `Opened ${r.repo} in the Copilot app, ready for a new session. Pick Auto → GitHub Copilot Fusion and Autopilot, then paste the ${copied ? "copied " : ""}seed prompt and send.`
+            : `Opened ${r.repo} in the Copilot app, ready for a new session — type your first prompt there.`;
+    } else {
+        message = `No local clone, so this opened ${r.repo} on GitHub in the Copilot app. Click Allow to add it as a project, then start a session${kind === "fusion" ? ` and paste the ${copied ? "copied " : ""}seed prompt` : ""}.`;
+    }
+    return { sent: false, standalone: true, folderOpened, deepLink, opened, copied, message };
 }
 
 function which(bin) {

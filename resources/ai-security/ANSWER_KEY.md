@@ -75,6 +75,6 @@ AI findings vary, so treat the first table as the intended targets, not as a gua
 | --- | --- |
 | Template: `api/src/db/sqlite.ts` | `js/sql-injection` (pre-assigned to Copilot) |
 | Template: `.github/workflows/deploy.yml` | `actions/missing-workflow-permissions` |
-| Seed: `api/src/routes/supplierPortal.ts` | `js/path-injection`, `js/reflected-xss`, `js/request-forgery`, `js/missing-rate-limiting` |
+| Seed: `api/src/routes/supplierPortal.ts` | `js/path-injection`, `js/reflected-xss`, `js/missing-rate-limiting` |
 
-A typical run has 6 open alerts on `main`. The seed file lives in [`seed/`](seed), and the PR overlay in [`pr-infra/`](pr-infra).
+A typical run has 5 open alerts on `main`. The seed file lives in [`seed/`](seed), and the PR overlay in [`pr-infra/`](pr-infra).

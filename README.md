@@ -254,7 +254,7 @@ Deleting repos needs the `delete_repo` scope. The scripts request it when they l
 
 | Where the demo repo lives | How it gets cleaned up |
 | --- | --- |
-| A booth account (`octobooth-1`, `octobooth-2`, …), the default | Run `--cleanup` / `-Cleanup` **on that machine**. Nothing else can reach it, because the [ChatOps App](#chatops) is only installed on the org. |
+| A booth account (`octobooth-1`, `octobooth-2`, …), the default | Run `--cleanup` / `-Cleanup` **on that machine**. Nothing in this repo can reach it from elsewhere, because the [ChatOps App](#chatops) is only installed on the org. After an event, admins can reset every booth account at once with the private [`octobooth-demos/admin-tasks`](https://github.com/octobooth-demos/admin-tasks) repo, which deletes every repo in each booth account, tagged or not (admin-only, post-event). |
 | The `octobooth-demos` org (`--owner octobooth-demos`, ChatOps, `security-octo-supply`, `security-octo-supply-v4`, `ai-security`) | Automatic: the [nightly cleanup](.github/workflows/cleanup-demos.yml) deletes them at 08:00 UTC once they are more than 72 hours old. To clean up sooner, comment `/cleanup [hours] --confirm` or run the workflow from the Actions tab. After an event, `/cleanup --all --confirm` deletes them all regardless of age. |
 
 **Recommended booth routine (repos in each booth account):**

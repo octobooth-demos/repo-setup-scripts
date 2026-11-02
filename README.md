@@ -30,7 +30,7 @@ Do this once per machine (macOS):
    - `codespace` lets Tailspin Toys create its Codespace.
    - `delete_repo` lets the launcher's **Clean up** (and `--cleanup`) delete old demo repos.
    - The default scopes (`repo`, `read:org`, `gist`) cover everything else. Answer **Yes** to "Authenticate Git" so the scripts can push demo branches over HTTPS.
-   - The booth account must be a member of the `octobooth-demos` org and allowed to create repos there. The security demos (`security-octo-supply`, `security-octo-supply-v4`, and `ai-security`) always create their repo in that org.
+   - The booth account must be a member of the `octobooth-demos` org and allowed to create repos there. The security demos (`security-octo-supply-v4` and `ai-security`) always create their repo in that org.
    - The booth account also needs a Copilot seat (for Copilot code review and assigning issues to Copilot) and access to Codespaces (for Tailspin Toys).
    - If `GH_TOKEN` or `GITHUB_TOKEN` is set, `gh auth login`/`refresh` refuse to run and `gh` uses the token instead of the booth login. Remove them from your shell profile on booth machines too. The Demo Launcher already ignores them when a stored login exists, but terminal runs of `create-repo` don't.
 
@@ -50,7 +50,7 @@ Do this once per machine (macOS):
 
    Then restart the Copilot app (or reload extensions in open sessions). The project and the loader now use the same checkout.
 
-Before each booth day, run `git -C ~/repos/repo-setup-scripts pull` and restart the app; that updates both. Then ask Copilot to **"open the demo launcher"**. If a session outside the project can't find it, open it from a session in the `repo-setup-scripts` project instead. At the end of the day, use the launcher's **Clean up** section or `bash ./create-repo.sh --cleanup` (see [Cleaning up](#cleaning-up)).
+Before each booth day, run `git -C ~/repos/repo-setup-scripts pull` and restart the app; that updates both. Then start a chat (a blank new chat works) and ask Copilot to **"open the demo launcher"**. Opening it from a chat is the recommended booth path: the session, PR, and Fusion buttons are one click because Copilot sets up the project and session for you. Opening it from the app's canvas picker also works, but only as a fallback (see [Opened without a chat](#opened-without-a-chat)). If a session outside the project can't find it, open it from a session in the `repo-setup-scripts` project instead. At the end of the day, use the launcher's **Clean up** section or `bash ./create-repo.sh --cleanup` (see [Cleaning up](#cleaning-up)).
 
 ## Demos
 
@@ -59,8 +59,7 @@ Each entry in [`config.json`](config.json) is one demo. Pass its key to `--templ
 | Key | Demo | What gets created | Presenter notes |
 | --- | --- | --- | --- |
 | `securing-your-code` | Secure Code | Repo only, from `github-samples/securing-your-code` | Labs live in the repo |
-| `security-octo-supply` | Security Supply Chain | Repo in the `octobooth-demos` org with Dependabot, autofix, and CodeQL turned on, plus two vulnerable PRs (TypeScript and PHP) | Pinned to the org for code scanning |
-| `security-octo-supply-v4` | Security Supply Chain (v4) | Same as `security-octo-supply`, but built on the v4 OctoCAT Supply template (Express 5, React 19, Vite 8) | Pinned to the org. PHP findings need AI Code Scanning ([details](#security-supply-chain-v4)) |
+| `security-octo-supply-v4` | Security Supply Chain (v4) | Repo in the `octobooth-demos` org from the v4 OctoCAT Supply template (Express 5, React 19, Vite 8) with Dependabot, autofix, and CodeQL turned on, plus two vulnerable PRs (TypeScript and PHP) | Pinned to the org. PHP findings need AI Code Scanning ([details](#security-supply-chain-v4)) |
 | `tailspin-toys` | Tailspin Toys | Repo, an issue assigned to Copilot coding agent, and a Codespace | Needs coding agent and Codespaces on the owner ([note](#where-repos-are-created)) |
 | `ctrl-slash` | Ctrl Slash | Repo only | |
 | `booth-bingo` | Booth Bingo (stacked PRs) | Public repo, 3 stacked PRs registered as a native stack, and GitHub Pages | [Details](#booth-bingo-stacked-prs); talk track in the template's README |
@@ -108,7 +107,9 @@ Every repository the scripts create gets the `demo-generated` topic, which is wh
 
 ## Demo Launcher canvas
 
-[`.github/extensions/demo-launcher/`](.github/extensions/demo-launcher/) is a Copilot extension that adds a **Demo Launcher** canvas, a side panel, to the GitHub Copilot app and Copilot CLI. To open it, ask Copilot to **"open the demo launcher"**, or "open the demo launcher for octocart" to preselect a demo.
+[`.github/extensions/demo-launcher/`](.github/extensions/demo-launcher/) is a Copilot extension that adds a **Demo Launcher** canvas, a side panel, to the GitHub Copilot app and Copilot CLI. To open it, ask Copilot in a chat to **"open the demo launcher"**, or "open the demo launcher for octocart" to preselect a demo. A blank new chat works, because the loader makes it available in every session.
+
+**Recommended: open it from a chat.** Then the follow-up buttons are one click, and Copilot adds the project and opens the session, PR, or Fusion run for you. Opening the launcher from the app's canvas picker (no chat) is a fallback with more manual steps; see [Opened without a chat](#opened-without-a-chat). This stays the guidance until standalone canvases ship to non-staff builds with the app access they need to create sessions themselves.
 
 ### What it does
 
@@ -121,11 +122,11 @@ Every repository the scripts create gets the `demo-generated` topic, which is wh
   - 👋 deliberately left for a live review
 
   The card also links to the repo's pull request list and has a **🔑 Presenter answer key** button. The button opens `resources/<key>/ANSWER_KEY.md` from this repo on your machine (in VS Code if it's installed). The answer key is never copied into demo repos, so keep it off the shared screen.
-- **One-click follow-ups.** **Open session in Copilot app** has Copilot add the repo as a project and open a fresh session. **Open PR session** and **Open issue session** open those items. **Open in VS Code** runs `code <clone>`.
+- **One-click follow-ups.** **Open session in Copilot app** has Copilot add the repo as a project and open a fresh session. **Open PR session** and **Open issue session** open those items. **Open in VS Code** runs `code <clone>`. The session buttons and **Run with Fusion** need a chat behind the launcher; see [Opened without a chat](#opened-without-a-chat) for what they do otherwise.
 - **Seed prompts.** For demos with a `seed_prompt_file` (like `fusion-blank`), the card shows the prompt with **📋 Copy** and **▶ Run with Fusion**. Run with Fusion has Copilot add the repo as a project and start a new autopilot session that runs the prompt on the GitHub Copilot Fusion model (`model: "auto"`, `auto_tier: "hydrafusion"`).
 - **Clean up.** This works like `--cleanup`. Pick an owner and an age cutoff (default 72 hours, or **Any age**), review the matching `demo-generated` repos, and untick any you want to keep. Then delete the rest, optionally with their clones in `~/repos`. Deleting needs the `delete_repo` scope.
 
-Runs use your stored `gh auth login`, not any `GH_TOKEN` the app injects, so they have the same scopes as a terminal run. Run history survives restarts. It's kept in `~/.copilot/extensions/demo-launcher/artifacts/runs.json`, and **Clear history** empties it. The panel is a plain loopback web page, so its URL also works in a browser, including VS Code's Simple Browser. The port changes each time the extension restarts.
+Runs use your stored `gh auth login`, not any `GH_TOKEN` the app injects, so they have the same scopes as a terminal run. When they do, git pushes also go through `gh auth git-credential`, so git and `gh` always act as the same account even if the app is signed in as someone else. Nothing extra to set up: this only changes the environment of the scripts the launcher starts, not your git config or keychain. Run history survives restarts. It's kept in `~/.copilot/extensions/demo-launcher/artifacts/runs.json` and shared by every open launcher (each chat runs its own copy of the extension), so a demo created from one panel shows up in the others. **Clear history** clears finished runs in all of them. A run is only marked *interrupted* when the launcher that started it has exited; cancel a run from the panel or chat that started it. The panel is a plain loopback web page, so its URL also works in a browser, including VS Code's Simple Browser. The port changes each time the extension restarts.
 
 ### Where it's available
 
@@ -139,6 +140,24 @@ On booth machines (macOS or Linux), set up both: add the repo as a project **and
 #### Two Demo Launcher canvases
 
 App builds that can open canvases without a session (staff builds) may list two "Demo Launcher" canvases when both are set up: `user:demo-launcher` (the loader) and `project:demo-launcher` (the project's copy). If you added the existing `~/repos/repo-setup-scripts` folder as the project, they're the same launcher from the same checkout, so either works. To hide one, remove `repo-setup-scripts` from the app's projects (keep the clone; the loader runs from it) and restart the app.
+
+#### Opened without a chat
+
+This is the fallback. For booth demos, [open the launcher from a chat](#demo-launcher-canvas) instead.
+
+When you open the launcher from the app's canvas picker instead of from a chat, there's no Copilot chat behind it. The app hosts it in a hidden control session that can't run Copilot turns, and sending that session a prompt makes the app close the launcher. So in this mode the follow-up buttons open the demo's local clone in the app (like dropping the folder on the app's Dock icon). The app adds it as a project if needed, with no confirmation, and shows its new-session composer:
+
+| Button | Without a chat |
+| --- | --- |
+| **Open session in Copilot app** | Opens the repo's project, ready for a new session. Type your first prompt. |
+| **Open PR session** / **Open issue session** | Adds the project, then opens the PR or issue in the app. Start a session from there. |
+| **▶ Run with Fusion** | Copies the seed prompt and opens the project's new-session composer. Pick **Auto → GitHub Copilot Fusion** and **Autopilot**, paste, and send. |
+
+This needs macOS and a local clone. Without a clone (**Skip local clone**), the buttons fall back to `ghapp://github.com/<owner>/<repo>`, and the app asks you to **Allow** adding the repo. For **Open PR session** / **Open issue session**, click **Allow**, then click the button again to open the PR or issue. If the launcher can't copy the seed prompt or open the PR or issue, its message says so and tells you what to do instead. Extensions have no supported API to create an app session or pick its model, so the composer is as far as the launcher can take you without a chat.
+
+The app may also show **Link not found** when the launcher opens the project folder. That's harmless: the app routes the folder through its link handler too, which doesn't match a link route, but the project (and the PR or issue) still opens.
+
+Opened from a chat, the buttons work as described above, and Copilot sets everything up.
 
 ### Make it available in every session
 
@@ -172,6 +191,7 @@ How the loader works:
 | Copilot can't find the Demo Launcher outside this project | Run `install.sh`, then restart the app or reload extensions. Check that `~/.copilot/extensions/demo-launcher/extension.mjs` exists and that the path it imports exists. If it still doesn't appear, your app build may not load user-level extensions; open it from a session in the `repo-setup-scripts` project. |
 | The panel shows old behavior | Run `git pull` in the main checkout and reload extensions. Sessions inside this project use their own checkout, so update that branch. |
 | A run fails with an auth or scope error, or cleanup asks for `delete_repo` | Run `gh auth status` in a terminal, then `gh auth refresh -h github.com -s codespace,delete_repo`. |
+| A run fails at **Creating PR** or a push, or stops with "git would push as 'X', but gh is logged in as 'Y'" | git and `gh` are signed in as different accounts (often the Copilot app's account vs. the booth login). The Demo Launcher handles this itself; update to the latest version. For terminal runs started from the app, check `gh auth status` and the account selected in the app. |
 | The demo was created in the wrong account | Repos go to the [logged-in account](#where-repos-are-created) unless you set **Owner**. Check `gh auth status`. |
 | The panel URL stopped working | The extension restarted on a new port. Reopen the canvas. |
 | A card says **interrupted** | The app or extension restarted mid-run. The repo may be half set up. Delete it with **Clean up** and run it again. |
@@ -196,6 +216,7 @@ For example: "launch octocart in the demo launcher and tell me when Copilot has 
 | [`extension.mjs`](.github/extensions/demo-launcher/extension.mjs) | Registers the canvas and its actions, runs `create-repo` in the background, parses its output, and serves the panel on a loopback port |
 | [`ui.html`](.github/extensions/demo-launcher/ui.html) | The panel UI |
 | [`cleanup.mjs`](.github/extensions/demo-launcher/cleanup.mjs) | The Clean up section (preview and delete through `create-repo --cleanup`) |
+| [`run-store.mjs`](.github/extensions/demo-launcher/run-store.mjs) | Run history in `runs.json`, shared safely by every launcher process (locked read-merge-write, atomic replace, file watching) |
 | [`install.sh`](.github/extensions/demo-launcher/install.sh) | Installs or uninstalls the user-level loader |
 
 If you change what the scripts print (repo, clone, `PR #N created: <url>`, Copilot review lines, and so on), update `parseLine` in `extension.mjs` to match.
@@ -205,7 +226,7 @@ If you change what the scripts print (repo, clone, `PR #N created: <url>`, Copil
 By default, repos are created in **the account that is logged in** (`gh api user`), so each booth machine (`octobooth-1`, `octobooth-2`, …) gets its own copies. The owner is resolved in this order:
 
 1. `--owner <name>` / `-Owner <name>`
-2. The config entry's `owner` field. `"owner": "org"` means the top-level `org`; any other value is used as-is. `security-octo-supply`, `security-octo-supply-v4`, and `ai-security` are pinned to the org because they need code scanning; everything else (including `fusion-blank`) goes to the logged-in booth account.
+2. The config entry's `owner` field. `"owner": "org"` means the top-level `org`; any other value is used as-is. `security-octo-supply-v4` and `ai-security` are pinned to the org because they need code scanning; everything else (including `fusion-blank`) goes to the logged-in booth account.
 3. The logged-in account.
 4. The top-level `org` (only when there is no user account, such as a GitHub App token in Actions).
 
@@ -255,7 +276,7 @@ Deleting repos needs the `delete_repo` scope. The scripts request it when they l
 | Where the demo repo lives | How it gets cleaned up |
 | --- | --- |
 | A booth account (`octobooth-1`, `octobooth-2`, …), the default | Automatic: each booth account's private `demo-cleanup` repo runs a weekly workflow (Mondays 08:00 UTC) that deletes its `demo-generated` repos older than 7 days. To run it sooner, use that repo's **Actions** tab. Between runs, use `--cleanup` / `-Cleanup` **on that machine** (nothing in this repo can reach booth accounts, because the [ChatOps App](#chatops) is only installed on the org). After an event, admins can reset every booth account with the private [`octobooth-demos/admin-tasks`](https://github.com/octobooth-demos/admin-tasks) repo, which deletes every repo in each account except `demo-cleanup`, tagged or not. See the [booth playbook](https://github.com/octobooth-demos/machine-setup/blob/main/docs/booth-playbook.md) for all of it. |
-| The `octobooth-demos` org (`--owner octobooth-demos`, ChatOps, `security-octo-supply`, `security-octo-supply-v4`, `ai-security`) | Automatic: the [nightly cleanup](.github/workflows/cleanup-demos.yml) deletes them at 08:00 UTC once they are more than 72 hours old. To clean up sooner, comment `/cleanup [hours] --confirm` or run the workflow from the Actions tab. After an event, `/cleanup --all --confirm` deletes them all regardless of age. |
+| The `octobooth-demos` org (`--owner octobooth-demos`, ChatOps, `security-octo-supply-v4`, `ai-security`) | Automatic: the [nightly cleanup](.github/workflows/cleanup-demos.yml) deletes them at 08:00 UTC once they are more than 72 hours old. To clean up sooner, comment `/cleanup [hours] --confirm` or run the workflow from the Actions tab. After an event, `/cleanup --all --confirm` deletes them all regardless of age. |
 
 **Recommended booth routine (repos in each booth account):**
 
@@ -303,10 +324,10 @@ Each overlay holds the cumulative files for its layer. The booth talk track is i
 
 ### Security Supply Chain (v4)
 
-`security-octo-supply-v4` creates a repo from [`octobooth-demos/security-octo-supply-v4`](https://github.com/octobooth-demos/security-octo-supply-v4), which is the v4 [OctoCAT Supply](https://github.com/octodemo-framework/demo_octocat_supply) template (Node.js API) plus the vulnerable PHP app from `security-octo-supply`. The older `security-octo-supply` option is still available. The script opens two PRs:
+`security-octo-supply-v4` creates a repo from [`octobooth-demos/security-octo-supply-v4`](https://github.com/octobooth-demos/security-octo-supply-v4), which is the v4 [OctoCAT Supply](https://github.com/octodemo-framework/demo_octocat_supply) template (Node.js API) plus a vulnerable PHP app. The script opens two PRs:
 
 1. `feature-add-tos-download` (from [`resources/security-octo-supply-v4/pr-typescript`](resources/security-octo-supply-v4/pr-typescript)): a terms-of-service download with a path traversal for CodeQL and Copilot Autofix. It matches upstream's `feature-add-tos-download` branch and includes intentional code-quality issues in `userDetailsRepo.ts`, so the API build fails on that PR.
-2. `feature/supplier-notes` (reuses [`resources/security-octo-supply/pr-php`](resources/security-octo-supply/pr-php)): supplier notes in the PHP app. CodeQL doesn't analyze PHP, so these findings come from AI Code Scanning.
+2. `feature/supplier-notes` (from [`resources/security-octo-supply-v4/pr-php`](resources/security-octo-supply-v4/pr-php)): supplier notes in the PHP app. CodeQL doesn't analyze PHP, so these findings come from AI Code Scanning.
 
 Before the demo:
 
@@ -395,6 +416,7 @@ On macOS or Linux, run the same file with `pwsh -File tests/create-repo.Tests.ps
 ```bash
 bash -n create-repo.sh
 for f in .github/extensions/demo-launcher/*.mjs; do node --check "$f"; done
+node --test tests/run-store.test.mjs   # run history shared across several launcher processes
 bash -n .github/extensions/demo-launcher/install.sh
 shellcheck --severity=warning -x create-repo.sh .github/extensions/demo-launcher/install.sh
 ```
@@ -403,4 +425,4 @@ shellcheck --severity=warning -x create-repo.sh .github/extensions/demo-launcher
 Invoke-ScriptAnalyzer -Path .\create-repo.ps1 -Settings .\PSScriptAnalyzerSettings.psd1
 ```
 
-The [CI workflow](.github/workflows/ci.yml) runs these checks on every pull request and push to `main`, and also validates `config.json` (required fields, workflow names, and that every referenced resource file and directory exists). CI never creates repos or uses secrets.
+The [CI workflow](.github/workflows/ci.yml) runs these checks on every pull request and push to `main` (the run-store tests on Linux, macOS, and Windows), and also validates `config.json` (required fields, workflow names, and that every referenced resource file and directory exists). CI never creates repos or uses secrets.

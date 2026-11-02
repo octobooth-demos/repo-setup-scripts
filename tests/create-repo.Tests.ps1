@@ -12,7 +12,7 @@ $testState = [pscustomobject]@{
     NextPr = 1; StackNumbers = @(); StackMismatch = $false; GitEmail = $null; ReviewApiFailure = $false
     CleanupRepos = @(); NpmCalls = $null; PagesDisabled = $false; Opened = $null
     CodeqlConclusion = 'success'; AssignFailure = $false; AutofixBotMissing = $false; AnalysesCount = '2'; LateRulePolls = 0
-    StalePushRun = $false
+    StalePushRun = $false; GitCredentialUser = $null
 }
 Remove-Item Env:DEMO_NO_BROWSER -ErrorAction SilentlyContinue
 # Behave the same locally and in CI: the script skips browsers under Actions and
@@ -104,6 +104,7 @@ function gh {
         return $assignee
     }
     if ($arguments[0] -eq 'api' -and $arguments[1] -eq 'user') {
+        if ($env:GH_TOKEN -eq 'git-helper-token') { return $testState.GitCredentialUser }
         return 'demo-user'
     }
     if ($arguments[0] -eq 'api' -and $arguments[1] -eq '--paginate') {
@@ -148,6 +149,10 @@ function git {
     if ($testState.Failure -eq "git $($arguments[0])") {
         $global:LASTEXITCODE = 42
         return
+    }
+    if (($arguments -join ' ') -like '*credential fill') {
+        if (-not $testState.GitCredentialUser) { $global:LASTEXITCODE = 1; return }
+        return @('protocol=https', 'host=github.com', 'username=x-access-token', 'password=git-helper-token')
     }
     if ($arguments[0] -eq 'rev-parse') {
         return 'abc1234'
@@ -245,6 +250,7 @@ try {
         'missing-template', 'missing-body', 'empty-prs', 'unknown-workflow',
         'outside-body', 'invalid-json', 'missing-org', 'empty-repos',
         'create-failure', 'topic-failure', 'push-failure', 'login-failure',
+        'git-account-match', 'git-account-mismatch', 'blank-git-account-mismatch',
         'stacked-prs', 'stack-one-layer', 'stack-missing-field', 'stack-api-failure', 'stack-verify-mismatch',
         'non-interactive', 'unknown-template', 'non-interactive-login', 'no-clone-branch',
         'owner-override', 'serve', 'serve-no-clone', 'pages-failure', 'bad-visibility', 'dry-run-without-cleanup', 'cleanup-with-template',
@@ -279,6 +285,7 @@ try {
         $testState.AnalysesCount = '2'
         $testState.LateRulePolls = 0
         $testState.StalePushRun = $false
+        $testState.GitCredentialUser = $null
         $testState.Opened = New-Object 'System.Collections.Generic.List[string]'
         $testState.NpmCalls = New-Object 'System.Collections.Generic.List[object]'
         $old = '2020-01-01T00:00:00Z'
@@ -367,7 +374,18 @@ try {
             'empty-repos' { $config.repos = @(); $expectedFailure = 'no repos' }
             'create-failure' { $testState.Failure = 'repo create'; $expectedFailure = 'exit code 42' }
             'topic-failure' { $selection = '5'; $testState.Failure = 'repo edit'; $expectedFailure = 'cleanup would never find it' }
-            'push-failure' { $selection = '2'; $testState.Failure = 'git push'; $expectedFailure = 'exit code 42' }
+            'push-failure' { $selection = '2'; $testState.Failure = 'git push'; $expectedFailure = 'different GitHub account than gh' }
+            'git-account-match' { $selection = '5'; $testState.GitCredentialUser = 'demo-user' }
+            'blank-git-account-mismatch' {
+                $selection = $null
+                $scriptArgs = @{ Template = 'fusion-blank'; NoClone = $true }
+                $testState.GitCredentialUser = 'app-user'
+            }
+            'git-account-mismatch' {
+                $selection = '5'
+                $testState.GitCredentialUser = 'app-user'
+                $expectedFailure = "git would push as 'app-user', but gh is logged in as 'demo-user'"
+            }
             'login-failure' { $testState.NeedsLogin = $true; $testState.Failure = 'auth login'; $expectedFailure = 'exit code 42' }
             'stacked-prs' { $selection = '5' }
             'stack-one-layer' {
@@ -443,7 +461,7 @@ try {
         Assert ((Get-Location).Path -eq $originalLocation.Path) "$scenario did not restore location."
         if ($expectedFailure) {
             Assert ($null -ne $caught -and $caught.Contains($expectedFailure)) "$scenario expected '$expectedFailure', got '$caught'."
-            if ($scenario -notin @('create-failure', 'topic-failure', 'push-failure', 'login-failure', 'stack-api-failure', 'stack-verify-mismatch', 'non-interactive-login', 'ai-security-codeql-failure')) {
+            if ($scenario -notin @('create-failure', 'topic-failure', 'push-failure', 'login-failure', 'git-account-mismatch', 'stack-api-failure', 'stack-verify-mismatch', 'non-interactive-login', 'ai-security-codeql-failure')) {
                 Assert ($testState.Calls.Count -eq 0) "$scenario invoked a remote command before validation."
             }
             if ($scenario -eq 'non-interactive-login') {
@@ -452,6 +470,9 @@ try {
             }
             if ($scenario -in @('stack-api-failure', 'stack-verify-mismatch')) {
                 Assert ((Find-Calls 'gh' 'pr create').Count -eq 3) 'Dependent PR chain was not created before stack registration.'
+            }
+            if ($scenario -eq 'git-account-mismatch') {
+                Assert ((Find-Calls 'gh' 'repo create').Count -eq 0) 'Created a repo although git and gh use different accounts.'
             }
             if ($scenario -eq 'push-failure') {
                 Assert ((Find-Calls 'gh' 'pr create').Count -eq 0) 'Created a PR after push failed.'
@@ -495,6 +516,9 @@ try {
         }
         else {
             Assert ($null -eq $caught) "$scenario failed: $caught"
+            if ($scenario -eq 'blank-git-account-mismatch') {
+                Assert ((Find-Calls 'git' '-c').Count -eq 0) 'Checked the git account for a gh-only run.'
+            }
             $create = @(Find-Calls 'gh' 'repo create')[0]
             $expectedOwner = switch ($scenario) {
                 'security-prs' { 'octobooth-demos' }

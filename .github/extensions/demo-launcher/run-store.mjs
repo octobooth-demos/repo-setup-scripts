@@ -209,10 +209,9 @@ export function createRunStore({ file, maxRuns, normalize = () => {}, isOwned = 
             try {
                 if (tryCreate(lockFile)) return true;
                 const h = holderOf(lockFile);
-                if (h && abandoned(h)) {
-                    reclaim(h);
-                    continue;
-                }
+                // Even after a reclaim, go through the deadline and backoff below: a stalled
+                // reclaimer must make flush() give up and retry later, not spin.
+                if (h && abandoned(h)) reclaim(h);
             } catch {
                 return false;
             }

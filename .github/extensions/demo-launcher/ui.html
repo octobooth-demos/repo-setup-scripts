@@ -347,7 +347,10 @@ function connect() {
     const r = JSON.parse(e.data);
     const i = runs.findIndex((x) => x.id === r.id);
     const statusChanged = i < 0 || runs[i].status !== r.status || JSON.stringify(runs[i].result) !== JSON.stringify(r.result);
-    if (i < 0) runs.unshift(r); else runs[i] = r;
+    if (i < 0) {
+      runs.push(r);
+      runs.sort((a, b) => (Date.parse(b.startedAt) || 0) - (Date.parse(a.startedAt) || 0)); // match /api/state
+    } else runs[i] = r;
     if (statusChanged) renderRuns();
     else {
       const pre = $(`log-${r.id}`);

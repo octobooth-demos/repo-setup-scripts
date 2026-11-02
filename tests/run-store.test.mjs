@@ -67,6 +67,7 @@ if (process.argv[2] === "worker") {
         memory: () => view(store.runs),
         changes: () => changes,
         pid: () => process.pid,
+        cpu: () => { const u = process.cpuUsage(); return u.user + u.system; },
     };
     const rl = createInterface({ input: process.stdin });
     rl.on("line", (line) => {
@@ -293,6 +294,24 @@ function defineTests() {
         assert.equal(await a.call("flush"), true);
         assert.deepEqual(ids(readFile(file).runs), ["x"]);
         assert.equal(existsSync(`${file}.lock`), false);
+    });
+
+    test("a stalled live reclaimer makes flush give up on time instead of spinning", async () => {
+        const file = join(dir, "runs.json");
+        const keeper = worker(join(dir, "unused.json"));
+        const livePid = await keeper.call("pid");
+        const a = worker(file);
+        writeFileSync(`${file}.lock`, "999999999 dead-writer"); // abandoned main lock
+        writeFileSync(`${file}.lock.reclaim`, `${livePid} stalled-reclaimer`);
+        await a.call("add", { id: "x" });
+        const startCpu = await a.call("cpu");
+        const started = Date.now();
+        assert.equal(await a.call("flush"), false);
+        const elapsed = Date.now() - started;
+        const cpuMs = ((await a.call("cpu")) - startCpu) / 1000;
+        assert.ok(elapsed < 2000 + 1500, `flush took ${elapsed}ms`);
+        assert.ok(cpuMs < elapsed / 2, `busy-spun: ${cpuMs}ms CPU in ${elapsed}ms`);
+        assert.equal(readFileSync(`${file}.lock.reclaim`, "utf8"), `${livePid} stalled-reclaimer`);
     });
 
     test("an unreadable runs.json isn't treated as empty history", async () => {

@@ -368,23 +368,52 @@ const cleanup = createCleanup({
 
 // ---------- follow-ups ----------
 
-function sessionPrompt(run, kind, target) {
+const REPO_NAME_RE = /^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/;
+const REPOS_ROOT = resolve(homedir(), "repos");
+// eslint-disable-next-line no-control-regex
+const CONTROL_CHARS = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/;
+
+// Everything interpolated into agent prompts or app links comes from script output and
+// request bodies, so validate it first and refuse rather than send anything unexpected.
+function safeRunFields(run, kind, target) {
     const r = run.result;
     if (!r.repo) throw new CanvasError("no_repo", "This run did not create a repository.");
-    const where = r.clonePath
-        ? `It is cloned locally at ${r.clonePath} (use that path for create_project).`
-        : `It is not cloned locally; create the project from the GitHub repo ${r.repo}.`;
+    const repo = String(r.repo);
+    if (!REPO_NAME_RE.test(repo)) throw new CanvasError("bad_repo", "This run's repository name isn't a valid owner/name.");
+    let clonePath = null;
+    if (r.clonePath) {
+        const raw = String(r.clonePath);
+        const abs = resolve(raw);
+        if (CONTROL_CHARS.test(raw) || !abs.startsWith(REPOS_ROOT + sep)) {
+            throw new CanvasError("bad_clone_path", `This run's clone path isn't under ${REPOS_ROOT}.`);
+        }
+        clonePath = abs;
+    }
+    let number = null;
+    if (kind === "pr" || kind === "issue") {
+        number = Number(target);
+        if (!Number.isSafeInteger(number) || number <= 0) throw new CanvasError("bad_target", `That ${kind === "pr" ? "PR" : "issue"} number isn't valid.`);
+    }
+    const templateName = String(run.templateName || run.template || "demo").replace(new RegExp(CONTROL_CHARS.source, "g"), " ").trim().slice(0, 100);
+    return { repo, clonePath, number, templateName };
+}
+
+function sessionPrompt(run, kind, target) {
+    const { repo, clonePath, number, templateName } = safeRunFields(run, kind, target);
+    const where = clonePath
+        ? `It is cloned locally at ${JSON.stringify(clonePath)} (use that path for create_project).`
+        : `It is not cloned locally; create the project from the GitHub repo ${repo}.`;
     if (kind === "pr") {
-        return `[Demo Launcher] Open a Copilot app session for pull request #${target} in ${r.repo}. ${where} First add it as a project in this app (create_project) if it isn't one already, then use open_pr_session (repo_full_name "${r.repo}", pr_number ${target}). Don't start any work in it (omit kickoff), then navigate me to it.`;
+        return `[Demo Launcher] Open a Copilot app session for pull request #${number} in ${repo}. ${where} First add it as a project in this app (create_project) if it isn't one already, then use open_pr_session (repo_full_name "${repo}", pr_number ${number}). Don't start any work in it (omit kickoff), then navigate me to it.`;
     }
     if (kind === "issue") {
-        return `[Demo Launcher] Open a Copilot app session for issue #${target} in ${r.repo}. ${where} First add it as a project in this app (create_project) if it isn't one already, then use open_issue_session (repo_full_name "${r.repo}", issue_number ${target}). Don't start any work in it (omit kickoff), then navigate me to it.`;
+        return `[Demo Launcher] Open a Copilot app session for issue #${number} in ${repo}. ${where} First add it as a project in this app (create_project) if it isn't one already, then use open_issue_session (repo_full_name "${repo}", issue_number ${number}). Don't start any work in it (omit kickoff), then navigate me to it.`;
     }
     if (kind === "fusion") {
         const kickoff = { prompt: seedPromptFor(run), mode: "autopilot", model: "auto", auto_tier: "hydrafusion" };
-        return `[Demo Launcher] Run the ${run.templateName} seed prompt with GitHub Copilot Fusion in ${r.repo}. ${where} Add it as a project in this app (create_project) if it isn't one already, then call create_session with that project_id, detached: true, and exactly this kickoff object (don't change the prompt text): ${JSON.stringify(kickoff)}. Then navigate me to that session. Don't do any of the work yourself.`;
+        return `[Demo Launcher] Run the ${JSON.stringify(templateName)} seed prompt with GitHub Copilot Fusion in ${repo}. ${where} Add it as a project in this app (create_project) if it isn't one already, then call create_session with that project_id, detached: true, and exactly this kickoff object (don't change the prompt text): ${JSON.stringify(kickoff)}. Then navigate me to that session. Don't do any of the work yourself.`;
     }
-    return `[Demo Launcher] I just created the demo repo ${r.repo} (${run.templateName}). ${where} Add it as a project in this app (create_project) if it isn't one already, create a new idle session in it (create_session with that project_id, no kickoff, detached: true), then navigate me to that session.`;
+    return `[Demo Launcher] I just created the demo repo ${repo} (${JSON.stringify(templateName)}). ${where} Add it as a project in this app (create_project) if it isn't one already, create a new idle session in it (create_session with that project_id, no kickoff, detached: true), then navigate me to that session.`;
 }
 
 // Opened from the app-wide canvas picker (no chat), the canvas is hosted by a hidden
@@ -413,7 +442,7 @@ function chatLog(message, options) {
 // Built only from a validated owner/name and an integer, so the URL can't carry arguments.
 function appDeepLink(run, kind, target) {
     const repo = String(run.result.repo || "");
-    if (!/^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/.test(repo)) throw new CanvasError("bad_repo", "This run has no valid repository name.");
+    if (!REPO_NAME_RE.test(repo)) throw new CanvasError("bad_repo", "This run has no valid repository name.");
     const base = `ghapp://github.com/${repo}`;
     const n = Number(target);
     if ((kind === "pr" || kind === "issue") && Number.isSafeInteger(n) && n > 0) return `${base}/${kind === "pr" ? "pull" : "issues"}/${n}`;
@@ -452,38 +481,65 @@ async function openSession(run, kind, target) {
         await session.send({ prompt });
         return { sent: true };
     }
-    const r = run.result;
-    const folderOpened = openFolderInApp(r.clonePath);
-    const itemNumber = Number(target);
-    const itemLink = (kind === "pr" || kind === "issue") && Number.isSafeInteger(itemNumber) && itemNumber > 0 ? appDeepLink(run, kind, itemNumber) : null;
-    let deepLink = null;
-    if (itemLink) {
-        if (folderOpened) await sleep(2500);
-        deepLink = itemLink;
-    } else if (!folderOpened) {
-        deepLink = appDeepLink(run, kind, target);
+    const { repo, clonePath, number } = safeRunFields(run, kind, target);
+    const isItem = kind === "pr" || kind === "issue";
+    const itemLabel = isItem ? `${kind === "pr" ? "PR" : "issue"} #${number}` : null;
+    const itemLink = isItem ? appDeepLink(run, kind, number) : null;
+    const itemUrl = isItem ? `https://github.com/${repo}/${kind === "pr" ? "pull" : "issues"}/${number}` : null;
+    const repoLink = appDeepLink(run, "repo");
+
+    const folderOpened = openFolderInApp(clonePath);
+    // Without a clone the repo link asks the user to Allow adding the project. Opening the
+    // item link right away would replace that prompt, so the first click opens the repo and
+    // a second click (after Allow) opens the PR/issue.
+    const awaitingAllow = !folderOpened && isItem && !run._repoLinkOpened;
+    let repoLinkOpened = false;
+    let linkOpened = false;
+    if (!folderOpened && (!isItem || awaitingAllow)) {
+        repoLinkOpened = openExternalUrl(repoLink);
+        if (repoLinkOpened) run._repoLinkOpened = true;
     }
-    const linkOpened = deepLink ? openExternalUrl(deepLink) : false;
+    if (isItem && !awaitingAllow) {
+        if (folderOpened) await sleep(2500);
+        linkOpened = openExternalUrl(itemLink);
+    }
+
     let copied = false;
     if (kind === "fusion") {
         try {
             copied = copyToClipboard(seedPromptFor(run)).copied;
         } catch {}
     }
-    const opened = folderOpened || linkOpened;
+    const fusionSteps = "Pick Auto → GitHub Copilot Fusion and Autopilot, then";
+    const fusionTail = (didCopy) => didCopy
+        ? `${fusionSteps} paste the copied seed prompt and send.`
+        : `${fusionSteps} copy the seed prompt from this card (📋 Copy, or select it) and send it.`;
+
+    const opened = folderOpened || repoLinkOpened || linkOpened;
     let message;
+    let messageIfCopied;
     if (!opened) {
-        message = `Couldn't open the Copilot app. Add ${r.clonePath || r.repo} as a project there and start a session.`;
-    } else if (itemLink) {
-        message = `Opened ${kind === "pr" ? `PR #${itemNumber}` : `issue #${itemNumber}`} in the Copilot app${folderOpened ? ` (${r.repo} is added as a project)` : ""}. Start a session from it there.`;
-    } else if (folderOpened) {
-        message = kind === "fusion"
-            ? `Opened ${r.repo} in the Copilot app, ready for a new session. Pick Auto → GitHub Copilot Fusion and Autopilot, then paste the ${copied ? "copied " : ""}seed prompt and send.`
-            : `Opened ${r.repo} in the Copilot app, ready for a new session — type your first prompt there.`;
+        message = `Couldn't open the Copilot app. Add ${clonePath || repo} as a project there and start a session.`;
+    } else if (isItem && awaitingAllow) {
+        message = `No local clone, so this opened ${repo} on GitHub in the Copilot app. Click Allow to add it as a project, then click this button again to open ${itemLabel}.`;
+    } else if (isItem && linkOpened) {
+        message = `Opened ${itemLabel} in the Copilot app${folderOpened ? ` (${repo} is added as a project)` : ""}. Start a session from it there.`;
+    } else if (isItem) {
+        message = folderOpened
+            ? `Opened ${repo} in the Copilot app, but couldn't open ${itemLabel}. Open it from the project, or at ${itemUrl}.`
+            : `Couldn't open ${itemLabel} in the Copilot app. Open it at ${itemUrl}.`;
     } else {
-        message = `No local clone, so this opened ${r.repo} on GitHub in the Copilot app. Click Allow to add it as a project, then start a session${kind === "fusion" ? ` and paste the ${copied ? "copied " : ""}seed prompt` : ""}.`;
+        const lead = folderOpened
+            ? `Opened ${repo} in the Copilot app, ready for a new session.`
+            : `No local clone, so this opened ${repo} on GitHub in the Copilot app. Click Allow to add it as a project, then start a new session.`;
+        if (kind === "fusion") {
+            message = `${lead} ${fusionTail(copied)}`;
+            if (!copied) messageIfCopied = `${lead} ${fusionTail(true)}`;
+        } else {
+            message = folderOpened ? `${lead} Type your first prompt there.` : lead;
+        }
     }
-    return { sent: false, standalone: true, folderOpened, deepLink, opened, copied, message };
+    return { sent: false, standalone: true, folderOpened, repoLinkOpened, linkOpened, itemLink, itemUrl, opened, copied, message, ...(messageIfCopied ? { messageIfCopied } : {}) };
 }
 
 function openInVSCode(run) {

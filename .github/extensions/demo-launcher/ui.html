@@ -248,7 +248,14 @@ $("runs").addEventListener("click", async (e) => {
     if (b.dataset.act === "copy-seed") { await copySeed(b.dataset.id); toast("Seed prompt copied"); }
     if (b.dataset.act === "fusion") {
       const r = await post("/api/open-session", { id: b.dataset.id, kind: "fusion" });
-      r.standalone ? toast(r.message, 9000) : toast("Asked Copilot to start a GitHub Copilot Fusion autopilot session — check the chat.");
+      if (!r.standalone) toast("Asked Copilot to start a GitHub Copilot Fusion autopilot session — check the chat.");
+      else if (r.copied || !r.messageIfCopied) toast(r.message, 9000);
+      else {
+        // The server couldn't copy; try the browser clipboard before telling the user to paste.
+        let copied = false;
+        try { await copySeed(b.dataset.id); copied = true; } catch {}
+        toast(copied ? r.messageIfCopied : r.message, 9000);
+      }
     }
     if (b.dataset.act === "vscode") { await post("/api/open-vscode", { id: b.dataset.id }); toast("Opening VS Code…"); }
     if (b.dataset.act === "session") {

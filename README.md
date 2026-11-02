@@ -153,7 +153,7 @@ When you open the launcher from the app's canvas picker instead of from a chat, 
 | **Open PR session** / **Open issue session** | Adds the project, then opens the PR or issue in the app. Start a session from there. |
 | **▶ Run with Fusion** | Copies the seed prompt and opens the project's new-session composer. Pick **Auto → GitHub Copilot Fusion** and **Autopilot**, paste, and send. |
 
-This needs macOS and a local clone. Without a clone (**Skip local clone**), the buttons fall back to `ghapp://github.com/<owner>/<repo>`, and the app asks you to **Allow** adding the repo. Extensions have no supported API to create an app session or pick its model, so the composer is as far as the launcher can take you without a chat.
+This needs macOS and a local clone. Without a clone (**Skip local clone**), the buttons fall back to `ghapp://github.com/<owner>/<repo>`, and the app asks you to **Allow** adding the repo. For **Open PR session** / **Open issue session**, click **Allow**, then click the button again to open the PR or issue. If the launcher can't copy the seed prompt or open the PR or issue, its message says so and tells you what to do instead. Extensions have no supported API to create an app session or pick its model, so the composer is as far as the launcher can take you without a chat.
 
 The app may also show **Link not found** when the launcher opens the project folder. That's harmless: the app routes the folder through its link handler too, which doesn't match a link route, but the project (and the PR or issue) still opens.
 

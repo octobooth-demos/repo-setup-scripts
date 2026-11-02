@@ -60,19 +60,77 @@ function answerKeyPath(key) {
     return existsSync(file) ? file : null;
 }
 
+// ---------- tool discovery ----------
+
+// The app can launch extensions with a minimal PATH (/usr/bin:/bin:...), so gh from Homebrew
+// isn't found. Add the same locations create-repo.sh adds, plus the login shell's PATH.
+const PATH_SEP = process.platform === "win32" ? ";" : ":";
+const TOOL_PATH = buildToolPath();
+const GH = which("gh") || "gh";
+
+function buildToolPath() {
+    const current = process.env.PATH || process.env.Path || "";
+    if (process.platform === "win32") return current;
+    const dirs = current.split(PATH_SEP).filter(Boolean);
+    const add = (d) => d && !dirs.includes(d) && dirs.push(d);
+    for (const d of ["/opt/homebrew/bin", "/usr/local/bin", join(homedir(), ".local", "bin"), join(homedir(), "bin")]) {
+        if (existsSync(d)) add(d);
+    }
+    if (!dirs.some((d) => existsSync(join(d, "gh"))) && process.env.SHELL && existsSync(process.env.SHELL)) {
+        const out = spawnSync(process.env.SHELL, ["-lic", 'printf "\\n__DEMO_PATH__%s\\n" "$PATH"'], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 10000 });
+        const login = (out.stdout || "").match(/^__DEMO_PATH__(.*)$/m)?.[1] || "";
+        login.split(PATH_SEP).forEach(add);
+    }
+    return dirs.join(PATH_SEP);
+}
+
+function which(bin) {
+    const extra = ["/usr/local/bin", "/opt/homebrew/bin", "/Applications/Visual Studio Code.app/Contents/Resources/app/bin"];
+    // Prefer .exe on Windows: spawning a .cmd without a shell fails.
+    const names = process.platform === "win32" ? [`${bin}.exe`, `${bin}.cmd`] : [bin];
+    for (const p of [...TOOL_PATH.split(PATH_SEP), ...extra]) {
+        if (!p) continue;
+        for (const name of names) {
+            if (existsSync(join(p, name))) return join(p, name);
+        }
+    }
+    return null;
+}
+
 // The app may inject its own GH_TOKEN (without scopes like `codespace` or `delete_repo`),
 // which would override the user's `gh auth login`. Prefer the stored login, like a terminal run.
+// The app also points git's github.com credential helper at its own account (via
+// GIT_CONFIG_PARAMETERS), so when gh uses the stored login, make git use gh too.
+// Otherwise pushes run as the app's account and fail with 403 on the booth account's repos.
 function scriptEnv(extra = {}) {
-    const env = { ...process.env, NO_COLOR: "1", ...extra };
+    const env = { ...process.env, PATH: TOOL_PATH, NO_COLOR: "1", ...extra };
+    if (process.platform === "win32") delete env.Path;
     delete env.GITHUB_ACTIONS;
     if (env.GH_TOKEN || env.GITHUB_TOKEN) {
         const stored = { ...env };
         delete stored.GH_TOKEN;
         delete stored.GITHUB_TOKEN;
-        const probe = spawnSync("gh", ["auth", "token", "-h", "github.com"], { env: stored, stdio: "ignore", timeout: 10000 });
-        if (probe.status === 0) return stored;
+        const probe = spawnSync(GH, ["auth", "token", "-h", "github.com"], { env: stored, stdio: "ignore", timeout: 10000 });
+        if (probe.status === 0) return withGhGitCredentials(stored);
     }
     return env;
+}
+
+// Append (rather than replace) so other app-injected settings survive. An empty helper
+// value resets the helper list, so only `gh auth git-credential` answers for github.com.
+function withGhGitCredentials(env) {
+    const key = "credential.https://github.com.helper";
+    const params = [`${key}=`, `${key}=!${shellQuote(GH)} auth git-credential`];
+    // GIT_CONFIG_PARAMETERS entries use the same single-quote escaping as sh.
+    const quoted = params.map(shellQuote).join(" ");
+    env.GIT_CONFIG_PARAMETERS = env.GIT_CONFIG_PARAMETERS ? `${env.GIT_CONFIG_PARAMETERS} ${quoted}` : quoted;
+    return env;
+}
+
+// Git runs `!` helpers with sh (Git Bash on Windows), so single quotes keep paths with
+// spaces or backslashes intact. This matches what `gh auth setup-git` writes.
+function shellQuote(s) {
+    return `'${s.replace(/'/g, `'\\''`)}'`;
 }
 
 function scriptCommand(args) {
@@ -294,6 +352,7 @@ const cleanup = createCleanup({
     repoRoot: REPO_ROOT,
     scriptEnv,
     scriptCommand,
+    gh: GH,
     broadcast,
     onRepoDeleted(repo) {
         for (const r of runs) {
@@ -419,17 +478,6 @@ async function openSession(run, kind, target) {
         message = `No local clone, so this opened ${r.repo} on GitHub in the Copilot app. Click Allow to add it as a project, then start a session${kind === "fusion" ? ` and paste the ${copied ? "copied " : ""}seed prompt` : ""}.`;
     }
     return { sent: false, standalone: true, folderOpened, deepLink, opened, copied, message };
-}
-
-function which(bin) {
-    const paths = (process.env.PATH || "").split(process.platform === "win32" ? ";" : ":");
-    const extra = ["/usr/local/bin", "/opt/homebrew/bin", "/Applications/Visual Studio Code.app/Contents/Resources/app/bin"];
-    for (const p of [...paths, ...extra]) {
-        for (const name of process.platform === "win32" ? [`${bin}.cmd`, `${bin}.exe`] : [bin]) {
-            if (existsSync(join(p, name))) return join(p, name);
-        }
-    }
-    return null;
 }
 
 function openInVSCode(run) {

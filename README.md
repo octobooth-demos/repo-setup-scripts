@@ -30,7 +30,7 @@ Do this once per machine (macOS):
    - `codespace` lets Tailspin Toys create its Codespace.
    - `delete_repo` lets the launcher's **Clean up** (and `--cleanup`) delete old demo repos.
    - The default scopes (`repo`, `read:org`, `gist`) cover everything else. Answer **Yes** to "Authenticate Git" so the scripts can push demo branches over HTTPS.
-   - The booth account must be a member of the `octobooth-demos` org and allowed to create repos there. The security demos (`security-octo-supply`, `security-octo-supply-v4`, and `ai-security`) always create their repo in that org.
+   - The booth account must be a member of the `octobooth-demos` org and allowed to create repos there. The security demos (`security-octo-supply-v4` and `ai-security`) always create their repo in that org.
    - The booth account also needs a Copilot seat (for Copilot code review and assigning issues to Copilot) and access to Codespaces (for Tailspin Toys).
    - If `GH_TOKEN` or `GITHUB_TOKEN` is set, `gh auth login`/`refresh` refuse to run and `gh` uses the token instead of the booth login. Remove them from your shell profile on booth machines too. The Demo Launcher already ignores them when a stored login exists, but terminal runs of `create-repo` don't.
 
@@ -59,8 +59,7 @@ Each entry in [`config.json`](config.json) is one demo. Pass its key to `--templ
 | Key | Demo | What gets created | Presenter notes |
 | --- | --- | --- | --- |
 | `securing-your-code` | Secure Code | Repo only, from `github-samples/securing-your-code` | Labs live in the repo |
-| `security-octo-supply` | Security Supply Chain | Repo in the `octobooth-demos` org with Dependabot, autofix, and CodeQL turned on, plus two vulnerable PRs (TypeScript and PHP) | Pinned to the org for code scanning |
-| `security-octo-supply-v4` | Security Supply Chain (v4) | Same as `security-octo-supply`, but built on the v4 OctoCAT Supply template (Express 5, React 19, Vite 8) | Pinned to the org. PHP findings need AI Code Scanning ([details](#security-supply-chain-v4)) |
+| `security-octo-supply-v4` | Security Supply Chain (v4) | Repo in the `octobooth-demos` org from the v4 OctoCAT Supply template (Express 5, React 19, Vite 8) with Dependabot, autofix, and CodeQL turned on, plus two vulnerable PRs (TypeScript and PHP) | Pinned to the org. PHP findings need AI Code Scanning ([details](#security-supply-chain-v4)) |
 | `tailspin-toys` | Tailspin Toys | Repo, an issue assigned to Copilot coding agent, and a Codespace | Needs coding agent and Codespaces on the owner ([note](#where-repos-are-created)) |
 | `ctrl-slash` | Ctrl Slash | Repo only | |
 | `booth-bingo` | Booth Bingo (stacked PRs) | Public repo, 3 stacked PRs registered as a native stack, and GitHub Pages | [Details](#booth-bingo-stacked-prs); talk track in the template's README |
@@ -125,7 +124,7 @@ Every repository the scripts create gets the `demo-generated` topic, which is wh
 - **Seed prompts.** For demos with a `seed_prompt_file` (like `fusion-blank`), the card shows the prompt with **📋 Copy** and **▶ Run with Fusion**. Run with Fusion has Copilot add the repo as a project and start a new autopilot session that runs the prompt on the GitHub Copilot Fusion model (`model: "auto"`, `auto_tier: "hydrafusion"`).
 - **Clean up.** This works like `--cleanup`. Pick an owner and an age cutoff (default 72 hours, or **Any age**), review the matching `demo-generated` repos, and untick any you want to keep. Then delete the rest, optionally with their clones in `~/repos`. Deleting needs the `delete_repo` scope.
 
-Runs use your stored `gh auth login`, not any `GH_TOKEN` the app injects, so they have the same scopes as a terminal run. Run history survives restarts. It's kept in `~/.copilot/extensions/demo-launcher/artifacts/runs.json`, and **Clear history** empties it. The panel is a plain loopback web page, so its URL also works in a browser, including VS Code's Simple Browser. The port changes each time the extension restarts.
+Runs use your stored `gh auth login`, not any `GH_TOKEN` the app injects, so they have the same scopes as a terminal run. When they do, git pushes also go through `gh auth git-credential`, so git and `gh` always act as the same account even if the app is signed in as someone else. Nothing extra to set up: this only changes the environment of the scripts the launcher starts, not your git config or keychain. Run history survives restarts. It's kept in `~/.copilot/extensions/demo-launcher/artifacts/runs.json`, and **Clear history** empties it. The panel is a plain loopback web page, so its URL also works in a browser, including VS Code's Simple Browser. The port changes each time the extension restarts.
 
 ### Where it's available
 
@@ -184,6 +183,7 @@ How the loader works:
 | Copilot can't find the Demo Launcher outside this project | Run `install.sh`, then restart the app or reload extensions. Check that `~/.copilot/extensions/demo-launcher/extension.mjs` exists and that the path it imports exists. If it still doesn't appear, your app build may not load user-level extensions; open it from a session in the `repo-setup-scripts` project. |
 | The panel shows old behavior | Run `git pull` in the main checkout and reload extensions. Sessions inside this project use their own checkout, so update that branch. |
 | A run fails with an auth or scope error, or cleanup asks for `delete_repo` | Run `gh auth status` in a terminal, then `gh auth refresh -h github.com -s codespace,delete_repo`. |
+| A run fails at **Creating PR** or a push, or stops with "git would push as 'X', but gh is logged in as 'Y'" | git and `gh` are signed in as different accounts (often the Copilot app's account vs. the booth login). The Demo Launcher handles this itself; update to the latest version. For terminal runs started from the app, check `gh auth status` and the account selected in the app. |
 | The demo was created in the wrong account | Repos go to the [logged-in account](#where-repos-are-created) unless you set **Owner**. Check `gh auth status`. |
 | The panel URL stopped working | The extension restarted on a new port. Reopen the canvas. |
 | A card says **interrupted** | The app or extension restarted mid-run. The repo may be half set up. Delete it with **Clean up** and run it again. |
@@ -217,7 +217,7 @@ If you change what the scripts print (repo, clone, `PR #N created: <url>`, Copil
 By default, repos are created in **the account that is logged in** (`gh api user`), so each booth machine (`octobooth-1`, `octobooth-2`, …) gets its own copies. The owner is resolved in this order:
 
 1. `--owner <name>` / `-Owner <name>`
-2. The config entry's `owner` field. `"owner": "org"` means the top-level `org`; any other value is used as-is. `security-octo-supply`, `security-octo-supply-v4`, and `ai-security` are pinned to the org because they need code scanning; everything else (including `fusion-blank`) goes to the logged-in booth account.
+2. The config entry's `owner` field. `"owner": "org"` means the top-level `org`; any other value is used as-is. `security-octo-supply-v4` and `ai-security` are pinned to the org because they need code scanning; everything else (including `fusion-blank`) goes to the logged-in booth account.
 3. The logged-in account.
 4. The top-level `org` (only when there is no user account, such as a GitHub App token in Actions).
 
@@ -266,8 +266,8 @@ Deleting repos needs the `delete_repo` scope. The scripts request it when they l
 
 | Where the demo repo lives | How it gets cleaned up |
 | --- | --- |
-| A booth account (`octobooth-1`, `octobooth-2`, …), the default | Run `--cleanup` / `-Cleanup` **on that machine**. Nothing else can reach it, because the [ChatOps App](#chatops) is only installed on the org. |
-| The `octobooth-demos` org (`--owner octobooth-demos`, ChatOps, `security-octo-supply`, `security-octo-supply-v4`, `ai-security`) | Automatic: the [nightly cleanup](.github/workflows/cleanup-demos.yml) deletes them at 08:00 UTC once they are more than 72 hours old. To clean up sooner, comment `/cleanup [hours] --confirm` or run the workflow from the Actions tab. After an event, `/cleanup --all --confirm` deletes them all regardless of age. |
+| A booth account (`octobooth-1`, `octobooth-2`, …), the default | Run `--cleanup` / `-Cleanup` **on that machine**. Nothing in this repo can reach it from elsewhere, because the [ChatOps App](#chatops) is only installed on the org. After an event, admins can reset every booth account at once with the private [`octobooth-demos/admin-tasks`](https://github.com/octobooth-demos/admin-tasks) repo, which deletes every repo in each booth account, tagged or not (admin-only, post-event). |
+| The `octobooth-demos` org (`--owner octobooth-demos`, ChatOps, `security-octo-supply-v4`, `ai-security`) | Automatic: the [nightly cleanup](.github/workflows/cleanup-demos.yml) deletes them at 08:00 UTC once they are more than 72 hours old. To clean up sooner, comment `/cleanup [hours] --confirm` or run the workflow from the Actions tab. After an event, `/cleanup --all --confirm` deletes them all regardless of age. |
 
 **Recommended booth routine (repos in each booth account):**
 
@@ -315,10 +315,10 @@ Each overlay holds the cumulative files for its layer. The booth talk track is i
 
 ### Security Supply Chain (v4)
 
-`security-octo-supply-v4` creates a repo from [`octobooth-demos/security-octo-supply-v4`](https://github.com/octobooth-demos/security-octo-supply-v4), which is the v4 [OctoCAT Supply](https://github.com/octodemo-framework/demo_octocat_supply) template (Node.js API) plus the vulnerable PHP app from `security-octo-supply`. The older `security-octo-supply` option is still available. The script opens two PRs:
+`security-octo-supply-v4` creates a repo from [`octobooth-demos/security-octo-supply-v4`](https://github.com/octobooth-demos/security-octo-supply-v4), which is the v4 [OctoCAT Supply](https://github.com/octodemo-framework/demo_octocat_supply) template (Node.js API) plus a vulnerable PHP app. The script opens two PRs:
 
 1. `feature-add-tos-download` (from [`resources/security-octo-supply-v4/pr-typescript`](resources/security-octo-supply-v4/pr-typescript)): a terms-of-service download with a path traversal for CodeQL and Copilot Autofix. It matches upstream's `feature-add-tos-download` branch and includes intentional code-quality issues in `userDetailsRepo.ts`, so the API build fails on that PR.
-2. `feature/supplier-notes` (reuses [`resources/security-octo-supply/pr-php`](resources/security-octo-supply/pr-php)): supplier notes in the PHP app. CodeQL doesn't analyze PHP, so these findings come from AI Code Scanning.
+2. `feature/supplier-notes` (from [`resources/security-octo-supply-v4/pr-php`](resources/security-octo-supply-v4/pr-php)): supplier notes in the PHP app. CodeQL doesn't analyze PHP, so these findings come from AI Code Scanning.
 
 Before the demo:
 

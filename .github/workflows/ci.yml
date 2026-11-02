@@ -105,6 +105,23 @@ jobs:
             node --check "$file"
           done
 
+  test-node:
+    name: Test Demo Launcher run store (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        # Booth machines run the launcher on macOS and Windows.
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Run run-store tests
+        # Several worker processes share a temp runs.json; nothing touches GitHub or ~/.copilot.
+        run: node --test tests/run-store.test.mjs
+
   lint-powershell:
     name: Lint PowerShell
     runs-on: windows-latest

@@ -425,4 +425,4 @@ shellcheck --severity=warning -x create-repo.sh .github/extensions/demo-launcher
 Invoke-ScriptAnalyzer -Path .\create-repo.ps1 -Settings .\PSScriptAnalyzerSettings.psd1
 ```
 
-The [CI workflow](.github/workflows/ci.yml) runs these checks on every pull request and push to `main`, and also validates `config.json` (required fields, workflow names, and that every referenced resource file and directory exists). CI never creates repos or uses secrets.
+The [CI workflow](.github/workflows/ci.yml) runs these checks on every pull request and push to `main` (the run-store tests on Linux, macOS, and Windows), and also validates `config.json` (required fields, workflow names, and that every referenced resource file and directory exists). CI never creates repos or uses secrets.

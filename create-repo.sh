@@ -202,6 +202,44 @@ ensure_git_identity() {
     git config user.email "$email"
 }
 
+# Pushes go through git's credential helper, which can be a different account than gh's
+# (for example when the GitHub Copilot app points git at its own signed-in account).
+# Output is shown only on failure, so GitHub's "Create a pull request" hint doesn't clutter the log.
+git_push() {
+    local output
+    if ! output=$(git push "$@" 2>&1); then
+        echo "$output"
+        echo "❌ git push failed for $FULL_REPO_NAME."
+        echo "   Most likely git authenticated as a different GitHub account than gh ($CURRENT_USER)."
+        echo "   Check 'gh auth status' and the account selected in the GitHub Copilot app."
+        exit 1
+    fi
+}
+
+# Fail before creating anything if git would push as a different account than gh.
+# Only checks HTTPS (gh's default); a missing credential is left for git push to report.
+# Skipped for workflows that never touch git (no push, no clone): they only use gh.
+check_git_account() {
+    [ "$USER_TOKEN" = true ] || return 0
+    case "$WORKFLOW" in
+        repo_only|blank|issue_and_codespace) [ "$NO_CLONE" = true ] && return 0 ;;
+    esac
+    [ "$(gh config get git_protocol -h github.com 2>/dev/null || true)" = "ssh" ] && return 0
+    local token git_user
+    token=$(printf 'protocol=https\nhost=github.com\n\n' \
+        | GIT_TERMINAL_PROMPT=0 git -c credential.interactive=never credential fill 2>/dev/null \
+        | sed -n 's/^password=//p') || token=""
+    [ -n "$token" ] || return 0
+    git_user=$(GH_TOKEN="$token" gh api user --jq '.login' 2>/dev/null) || git_user=""
+    if [ -n "$git_user" ] && [ "$git_user" != "$CURRENT_USER" ]; then
+        echo "❌ git would push as '$git_user', but gh is logged in as '$CURRENT_USER'."
+        echo "   Pushes to the new repo would fail. Use the same account for both: check"
+        echo "   'gh auth status' and the account selected in the GitHub Copilot app, or run"
+        echo "   this from the Demo Launcher, which points git at gh's login automatically."
+        exit 1
+    fi
+}
+
 # Start a codespace for the current repo.
 # Usage: start_codespace [branch]
 start_codespace() {
@@ -251,7 +289,7 @@ create_pr_from_resources() {
     rm -f "$rel_body_file"
     git add -A
     git commit -m "$commit_msg" --quiet
-    git push -u origin "$branch_name" --quiet 2>/dev/null
+    git_push -u origin "$branch_name" --quiet
 
     CREATED_PR_URL=$(gh pr create \
         --repo "$FULL_REPO_NAME" \
@@ -963,6 +1001,7 @@ done < <(jq -r ".repos[$SELECTED_INDEX].summary_lines[]? // empty" "$CONFIG_FILE
 # --- Validate before any remote side effects ---
 
 validate_selected_repo
+check_git_account
 
 # --- Repository creation ---
 
@@ -1027,7 +1066,7 @@ case $WORKFLOW in
         echo "🌿 Creating branch: $BRANCH_NAME from $DEFAULT_BRANCH"
         git checkout "$DEFAULT_BRANCH"
         git checkout -b "$BRANCH_NAME"
-        git push -u origin "$BRANCH_NAME"
+        git_push -u origin "$BRANCH_NAME"
         echo "✅ Branch created and pushed: $BRANCH_NAME"
 
         start_codespace "$BRANCH_NAME"
@@ -1136,7 +1175,7 @@ case $WORKFLOW in
                 cp -R "$SCRIPT_DIR/$SEED_DIR"/. .
                 git add -A
                 git commit -m "$(repo_cfg '.seed.commit_message')" --quiet
-                git push origin "$DEFAULT_BRANCH" --quiet 2>/dev/null
+                git_push origin "$DEFAULT_BRANCH" --quiet
             else
                 gh workflow run "$CODEQL_WORKFLOW" --repo "$FULL_REPO_NAME" --ref "$DEFAULT_BRANCH" > /dev/null
                 CODEQL_EVENT="workflow_dispatch"

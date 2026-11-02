@@ -10,7 +10,7 @@ import { CanvasError } from "@github/copilot-sdk/extension";
 
 const REPOS_DIR = join(homedir(), "repos");
 
-export function createCleanup({ repoRoot, scriptEnv, scriptCommand, broadcast, onRepoDeleted, log }) {
+export function createCleanup({ repoRoot, scriptEnv, scriptCommand, gh = "gh", broadcast, onRepoDeleted, log }) {
     let state = idle();
 
     function idle() {
@@ -35,7 +35,7 @@ export function createCleanup({ repoRoot, scriptEnv, scriptCommand, broadcast, o
 
     // true/false for classic OAuth tokens; null when scopes can't be read (e.g. fine-grained tokens).
     function hasDeleteScope() {
-        const out = spawnSync("gh", ["api", "-i", "user"], { env: scriptEnv(), encoding: "utf8", timeout: 15000 });
+        const out = spawnSync(gh, ["api", "-i", "user"], { env: scriptEnv(), encoding: "utf8", timeout: 15000 });
         const header = (out.stdout || "").match(/^x-oauth-scopes:(.*)$/im);
         if (!header) return null;
         return header[1].split(",").map((x) => x.trim()).includes("delete_repo");
@@ -52,7 +52,12 @@ export function createCleanup({ repoRoot, scriptEnv, scriptCommand, broadcast, o
             };
             child.stdout.on("data", onData);
             child.stderr.on("data", onData);
-            child.on("error", (e) => done({ code: null, out: out + e.message }));
+            child.on("error", (e) => {
+                const msg = e.code === "ENOENT" ? `${cmd} not found. Install it or add its folder to PATH (PATH: ${env?.PATH || ""})` : e.message;
+                append(`❌ ${msg}\n`);
+                publish();
+                done({ code: null, out: out + msg });
+            });
             child.on("close", (code) => done({ code, out }));
         });
     }
@@ -80,7 +85,7 @@ export function createCleanup({ repoRoot, scriptEnv, scriptCommand, broadcast, o
         state.owner = resolvedOwner || owner;
         state.isOrg = false;
         if (state.owner) {
-            const who = spawnSync("gh", ["api", `users/${state.owner}`, "--jq", ".type"], { env: scriptEnv(), encoding: "utf8" });
+            const who = spawnSync(gh, ["api", `users/${state.owner}`, "--jq", ".type"], { env: scriptEnv(), encoding: "utf8" });
             state.isOrg = (who.stdout || "").trim() === "Organization";
         }
         state.candidates = [...out.matchAll(/^\s+([\w.-]+\/[\w.-]+)\s+\(created (\S+)\)\s*$/gm)].map((m) => ({
@@ -96,6 +101,7 @@ export function createCleanup({ repoRoot, scriptEnv, scriptCommand, broadcast, o
     }
 
     async function remove({ repos, removeClones = false } = {}) {
+        if (state.status === "deleting") throw new CanvasError("busy", "Already deleting repos.");
         if (state.status !== "preview" && state.status !== "done") throw new CanvasError("no_preview", "Find repos to clean up first.");
         const allowed = new Map(state.candidates.map((c) => [c.repo, c]));
         const selected = (repos ?? [...allowed.keys()]).filter((r) => allowed.has(r));
@@ -116,7 +122,7 @@ export function createCleanup({ repoRoot, scriptEnv, scriptCommand, broadcast, o
 
         const env = scriptEnv();
         for (const repo of selected) {
-            const { code, out } = await run("gh", ["repo", "delete", repo, "--yes"], env);
+            const { code, out } = await run(gh, ["repo", "delete", repo, "--yes"], env);
             if (code === 0) {
                 state.deleted.push(repo);
                 append(`🗑️  Deleted ${repo}\n`);
@@ -132,6 +138,7 @@ export function createCleanup({ repoRoot, scriptEnv, scriptCommand, broadcast, o
                 }
             } else {
                 state.failed.push(repo);
+                append(`❌ Could not delete ${repo} (exit ${code ?? "?"})${out.trim() ? "" : ": no output from gh"}\n`);
                 if (/delete_repo/.test(out)) state.needsDeleteScope = true;
             }
             publish();

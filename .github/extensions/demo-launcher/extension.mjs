@@ -410,18 +410,23 @@ function chatLog(message, options) {
 }
 
 // App deep links (verified routes: repository clone/add prompt, PR detail, issue detail).
+// Built only from a validated owner/name and an integer, so the URL can't carry arguments.
 function appDeepLink(run, kind, target) {
-    const base = `ghapp://github.com/${run.result.repo}`;
-    if (kind === "pr" && target) return `${base}/pull/${target}`;
-    if (kind === "issue" && target) return `${base}/issues/${target}`;
+    const repo = String(run.result.repo || "");
+    if (!/^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/.test(repo)) throw new CanvasError("bad_repo", "This run has no valid repository name.");
+    const base = `ghapp://github.com/${repo}`;
+    const n = Number(target);
+    if ((kind === "pr" || kind === "issue") && Number.isSafeInteger(n) && n > 0) return `${base}/${kind === "pr" ? "pull" : "issues"}/${n}`;
     return base;
 }
 
 function openExternalUrl(url) {
+    if (!/^ghapp:\/\/github\.com\/[A-Za-z0-9._\/-]+$/.test(url)) return false;
+    // No shell: on Windows, hand the URL to the protocol handler directly instead of `cmd /c start`.
     const [cmd, args] = process.platform === "darwin" ? ["open", [url]]
-        : process.platform === "win32" ? ["cmd", ["/c", "start", "", url]]
+        : process.platform === "win32" ? ["rundll32.exe", ["url.dll,FileProtocolHandler", url]]
         : ["xdg-open", [url]];
-    const res = spawnSync(cmd, args, { stdio: "ignore", timeout: 10000 });
+    const res = spawnSync(cmd, args, { stdio: "ignore", timeout: 10000, shell: false });
     return res.status === 0;
 }
 
@@ -449,7 +454,8 @@ async function openSession(run, kind, target) {
     }
     const r = run.result;
     const folderOpened = openFolderInApp(r.clonePath);
-    const itemLink = (kind === "pr" || kind === "issue") && target ? appDeepLink(run, kind, target) : null;
+    const itemNumber = Number(target);
+    const itemLink = (kind === "pr" || kind === "issue") && Number.isSafeInteger(itemNumber) && itemNumber > 0 ? appDeepLink(run, kind, itemNumber) : null;
     let deepLink = null;
     if (itemLink) {
         if (folderOpened) await sleep(2500);
@@ -469,7 +475,7 @@ async function openSession(run, kind, target) {
     if (!opened) {
         message = `Couldn't open the Copilot app. Add ${r.clonePath || r.repo} as a project there and start a session.`;
     } else if (itemLink) {
-        message = `Opened ${kind === "pr" ? `PR #${target}` : `issue #${target}`} in the Copilot app${folderOpened ? ` (${r.repo} is added as a project)` : ""}. Start a session from it there.`;
+        message = `Opened ${kind === "pr" ? `PR #${itemNumber}` : `issue #${itemNumber}`} in the Copilot app${folderOpened ? ` (${r.repo} is added as a project)` : ""}. Start a session from it there.`;
     } else if (folderOpened) {
         message = kind === "fusion"
             ? `Opened ${r.repo} in the Copilot app, ready for a new session. Pick Auto → GitHub Copilot Fusion and Autopilot, then paste the ${copied ? "copied " : ""}seed prompt and send.`

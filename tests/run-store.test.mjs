@@ -276,6 +276,23 @@ function defineTests() {
         }
     });
 
+    test("a stale running copy changed after Clear history doesn't bring the run back", async () => {
+        const file = join(dir, "runs.json");
+        const a = worker(file);
+        const b = worker(file);
+        const c = worker(file);
+        await a.call("add", { id: "r", repo: "me/demo" });
+        await a.call("flush");
+        assert.equal(byId(await c.call("list"), "r").status, "running"); // C's copy goes stale
+        await a.call("finish", { id: "r" });
+        await a.call("flush");
+        await b.call("clear");
+        await c.call("bump", { id: "r" }); // e.g. cleanup marking C's stale copy deleted
+        await c.call("flush");
+        assert.deepEqual(ids(readFile(file).runs), []);
+        for (const w of [a, b, c]) assert.deepEqual(ids(await w.call("list")), []);
+    });
+
     test("a live writer keeps its lock however old it is; a dead writer's lock is reclaimed", async () => {
         const file = join(dir, "runs.json");
         const keeper = worker(join(dir, "unused.json"));

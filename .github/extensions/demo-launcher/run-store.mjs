@@ -122,8 +122,10 @@ export function createRunStore({ file, maxRuns, normalize = () => {}, isOwned = 
             stickyDeleted(pick, mine, d);
             next.set(d.id, pick);
         }
+        // Only the launcher that started a run adds it to the file, so another launcher's run
+        // that's missing from disk was cleared or trimmed; don't write a stale copy back.
         for (const r of runs) {
-            if (!next.has(r.id) && (isOwned(r.id) || dirty.has(r.id))) next.set(r.id, r);
+            if (!next.has(r.id) && (isOwned(r.id) || (dirty.has(r.id) && r.ownerPid === process.pid))) next.set(r.id, r);
         }
         const now = new Date().toISOString();
         for (const r of next.values()) {

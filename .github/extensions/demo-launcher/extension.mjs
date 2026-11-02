@@ -62,6 +62,9 @@ function answerKeyPath(key) {
 
 // The app may inject its own GH_TOKEN (without scopes like `codespace` or `delete_repo`),
 // which would override the user's `gh auth login`. Prefer the stored login, like a terminal run.
+// The app also points git's github.com credential helper at its own account (via
+// GIT_CONFIG_PARAMETERS), so when gh uses the stored login, make git use gh too.
+// Otherwise pushes run as the app's account and fail with 403 on the booth account's repos.
 function scriptEnv(extra = {}) {
     const env = { ...process.env, NO_COLOR: "1", ...extra };
     delete env.GITHUB_ACTIONS;
@@ -70,9 +73,26 @@ function scriptEnv(extra = {}) {
         delete stored.GH_TOKEN;
         delete stored.GITHUB_TOKEN;
         const probe = spawnSync("gh", ["auth", "token", "-h", "github.com"], { env: stored, stdio: "ignore", timeout: 10000 });
-        if (probe.status === 0) return stored;
+        if (probe.status === 0) return withGhGitCredentials(stored);
     }
     return env;
+}
+
+// Append (rather than replace) so other app-injected settings survive. An empty helper
+// value resets the helper list, so only `gh auth git-credential` answers for github.com.
+function withGhGitCredentials(env) {
+    const key = "credential.https://github.com.helper";
+    const params = [`${key}=`, `${key}=!${shellQuote(which("gh") || "gh")} auth git-credential`];
+    // GIT_CONFIG_PARAMETERS entries use the same single-quote escaping as sh.
+    const quoted = params.map(shellQuote).join(" ");
+    env.GIT_CONFIG_PARAMETERS = env.GIT_CONFIG_PARAMETERS ? `${env.GIT_CONFIG_PARAMETERS} ${quoted}` : quoted;
+    return env;
+}
+
+// Git runs `!` helpers with sh (Git Bash on Windows), so single quotes keep paths with
+// spaces or backslashes intact. This matches what `gh auth setup-git` writes.
+function shellQuote(s) {
+    return `'${s.replace(/'/g, `'\\''`)}'`;
 }
 
 function scriptCommand(args) {

@@ -313,6 +313,54 @@ function Set-GitIdentity {
     Invoke-Native 'git' @('config', 'user.email', $email) | Out-Host
 }
 
+# Pushes go through git's credential helper, which can be a different account than gh's
+# (for example when the GitHub Copilot app points git at its own signed-in account).
+function Invoke-GitPush {
+    param([string[]]$Arguments)
+
+    & git push @Arguments | Out-Host
+    if ($LASTEXITCODE -ne 0) {
+        throw ("git push failed for $fullRepoName with exit code $LASTEXITCODE. Most likely git authenticated as a different GitHub " +
+            "account than gh ($currentUser). Check 'gh auth status' and the account selected in the GitHub Copilot app.")
+    }
+}
+
+# Fail before creating anything if git would push as a different account than gh.
+# Only checks HTTPS (gh's default); a missing credential is left for git push to report.
+# Skipped for workflows that never touch git (no push, no clone): they only use gh.
+function Assert-GitAccount {
+    if (-not $userToken) { return }
+    if ($NoClone -and $selectedRepo.workflow -in @('repo_only', 'blank', 'issue_and_codespace')) { return }
+    # Local to this function: keep redirected native stderr from terminating on Windows PowerShell 5.1.
+    $ErrorActionPreference = 'Continue'
+    $protocol = & gh config get git_protocol -h github.com 2>$null
+    if ($LASTEXITCODE -eq 0 -and "$protocol".Trim() -eq 'ssh') { return }
+    $savedPrompt = $env:GIT_TERMINAL_PROMPT
+    $savedToken = $env:GH_TOKEN
+    try {
+        $env:GIT_TERMINAL_PROMPT = '0'
+        $credential = "protocol=https`nhost=github.com`n`n" |
+            & git -c credential.interactive=never credential fill 2>$null
+        if ($LASTEXITCODE -ne 0) { return }
+        $token = @($credential) | Where-Object { $_ -like 'password=*' } |
+            ForEach-Object { $_.Substring('password='.Length) } | Select-Object -First 1
+        if (-not $token) { return }
+        $env:GH_TOKEN = $token
+        $gitUser = & gh api user --jq '.login' 2>$null
+        if ($LASTEXITCODE -ne 0) { return }
+    }
+    finally {
+        $env:GIT_TERMINAL_PROMPT = $savedPrompt
+        $env:GH_TOKEN = $savedToken
+    }
+    $gitUser = "$gitUser".Trim()
+    if ($gitUser -and $gitUser -ne $currentUser) {
+        throw ("git would push as '$gitUser', but gh is logged in as '$currentUser', so pushes to the new repo " +
+            "would fail. Use the same account for both: check 'gh auth status' and the account selected in the " +
+            "GitHub Copilot app, or run this from the Demo Launcher, which points git at gh's login automatically.")
+    }
+}
+
 function New-ResourcePullRequest {
     param($PullRequest, [string]$BaseBranch = $defaultBranch)
 
@@ -329,7 +377,7 @@ function New-ResourcePullRequest {
     Remove-Item -LiteralPath (Join-Path (Get-Location).Path $relativeBodyPath) -Force
     Invoke-Native 'git' @('add', '-A') | Out-Host
     Invoke-Native 'git' @('commit', '-m', $PullRequest.commit_message, '--quiet') | Out-Host
-    Invoke-Native 'git' @('push', '-u', 'origin', $PullRequest.branch, '--quiet') | Out-Host
+    Invoke-GitPush @('-u', 'origin', $PullRequest.branch, '--quiet')
     $url = Invoke-Native 'gh' @(
         'pr', 'create', '--repo', $fullRepoName,
         '--head', $PullRequest.branch, '--base', $BaseBranch,
@@ -689,6 +737,7 @@ try {
     $account = Connect-GitHubAccount
     $currentUser = $account.User
     $userToken = $account.UserToken
+    Assert-GitAccount
 
     # Owner precedence: -Owner, then the entry's "owner" ("org" = top-level org),
     # then the logged-in account. App tokens have no account, so they use the org.
@@ -779,7 +828,7 @@ try {
             $branch = $selectedRepo.branch_name
             Invoke-Native 'git' @('checkout', $defaultBranch)
             Invoke-Native 'git' @('checkout', '-b', $branch)
-            Invoke-Native 'git' @('push', '-u', 'origin', $branch)
+            Invoke-GitPush @('-u', 'origin', $branch)
             Start-DemoCodespace $branch
         }
         'issue_and_codespace' {
@@ -883,7 +932,7 @@ try {
                     Get-ChildItem -LiteralPath $seedPath -Force | Copy-Item -Destination . -Recurse -Force
                     Invoke-Native 'git' @('add', '-A') | Out-Host
                     Invoke-Native 'git' @('commit', '-m', $selectedRepo.seed.commit_message, '--quiet') | Out-Host
-                    Invoke-Native 'git' @('push', 'origin', $defaultBranch, '--quiet') | Out-Host
+                    Invoke-GitPush @('origin', $defaultBranch, '--quiet')
                 }
                 else {
                     Invoke-Native 'gh' @('workflow', 'run', $codeqlWorkflow, '--repo', $fullRepoName, '--ref', $defaultBranch) | Out-Null

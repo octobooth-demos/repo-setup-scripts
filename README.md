@@ -50,7 +50,7 @@ Do this once per machine (macOS):
 
    Then restart the Copilot app (or reload extensions in open sessions). The project and the loader now use the same checkout.
 
-Before each booth day, run `git -C ~/repos/repo-setup-scripts pull` and restart the app; that updates both. Then ask Copilot to **"open the demo launcher"**. If a session outside the project can't find it, open it from a session in the `repo-setup-scripts` project instead. At the end of the day, use the launcher's **Clean up** section or `bash ./create-repo.sh --cleanup` (see [Cleaning up](#cleaning-up)).
+Before each booth day, run `git -C ~/repos/repo-setup-scripts pull` and restart the app; that updates both. Then start a chat (a blank new chat works) and ask Copilot to **"open the demo launcher"**. Opening it from a chat is the recommended booth path: the session, PR, and Fusion buttons are one click because Copilot sets up the project and session for you. Opening it from the app's canvas picker also works, but only as a fallback (see [Opened without a chat](#opened-without-a-chat)). If a session outside the project can't find it, open it from a session in the `repo-setup-scripts` project instead. At the end of the day, use the launcher's **Clean up** section or `bash ./create-repo.sh --cleanup` (see [Cleaning up](#cleaning-up)).
 
 ## Demos
 
@@ -107,7 +107,9 @@ Every repository the scripts create gets the `demo-generated` topic, which is wh
 
 ## Demo Launcher canvas
 
-[`.github/extensions/demo-launcher/`](.github/extensions/demo-launcher/) is a Copilot extension that adds a **Demo Launcher** canvas, a side panel, to the GitHub Copilot app and Copilot CLI. To open it, ask Copilot to **"open the demo launcher"**, or "open the demo launcher for octocart" to preselect a demo.
+[`.github/extensions/demo-launcher/`](.github/extensions/demo-launcher/) is a Copilot extension that adds a **Demo Launcher** canvas, a side panel, to the GitHub Copilot app and Copilot CLI. To open it, ask Copilot in a chat to **"open the demo launcher"**, or "open the demo launcher for octocart" to preselect a demo. A blank new chat works, because the loader makes it available in every session.
+
+**Recommended: open it from a chat.** Then the follow-up buttons are one click, and Copilot adds the project and opens the session, PR, or Fusion run for you. Opening the launcher from the app's canvas picker (no chat) is a fallback with more manual steps; see [Opened without a chat](#opened-without-a-chat). This stays the guidance until standalone canvases ship to non-staff builds with the app access they need to create sessions themselves.
 
 ### What it does
 
@@ -141,6 +143,8 @@ App builds that can open canvases without a session (staff builds) may list two 
 
 #### Opened without a chat
 
+This is the fallback. For booth demos, [open the launcher from a chat](#demo-launcher-canvas) instead.
+
 When you open the launcher from the app's canvas picker instead of from a chat, there's no Copilot chat behind it. The app hosts it in a hidden control session that can't run Copilot turns, and sending that session a prompt makes the app close the launcher. So in this mode the follow-up buttons open the demo's local clone in the app (like dropping the folder on the app's Dock icon). The app adds it as a project if needed, with no confirmation, and shows its new-session composer:
 
 | Button | Without a chat |
@@ -149,7 +153,11 @@ When you open the launcher from the app's canvas picker instead of from a chat, 
 | **Open PR session** / **Open issue session** | Adds the project, then opens the PR or issue in the app. Start a session from there. |
 | **▶ Run with Fusion** | Copies the seed prompt and opens the project's new-session composer. Pick **Auto → GitHub Copilot Fusion** and **Autopilot**, paste, and send. |
 
-This needs macOS and a local clone. Without a clone (**Skip local clone**), the buttons fall back to `ghapp://github.com/<owner>/<repo>`, and the app asks you to **Allow** adding the repo. Extensions have no supported API to create an app session or pick its model, so the composer is as far as the launcher can take you without a chat. Opened from a chat, the buttons work as described above, and Copilot sets everything up.
+This needs macOS and a local clone. Without a clone (**Skip local clone**), the buttons fall back to `ghapp://github.com/<owner>/<repo>`, and the app asks you to **Allow** adding the repo. Extensions have no supported API to create an app session or pick its model, so the composer is as far as the launcher can take you without a chat.
+
+The app may also show **Link not found** when the launcher opens the project folder. That's harmless: the app routes the folder through its link handler too, which doesn't match a link route, but the project (and the PR or issue) still opens.
+
+Opened from a chat, the buttons work as described above, and Copilot sets everything up.
 
 ### Make it available in every session
 

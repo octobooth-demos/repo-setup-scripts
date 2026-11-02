@@ -391,19 +391,19 @@ function safeRunFields(run, kind, target) {
 function sessionPrompt(run, kind, target) {
     const { repo, clonePath, number, templateName } = safeRunFields(run, kind, target);
     const where = clonePath
-        ? `It is cloned locally at ${JSON.stringify(clonePath)} (use that path for create_project).`
+        ? `It is cloned locally at ${JSON.stringify(clonePath)} (use add_repository with that path).`
         : `It is not cloned locally; create the project from the GitHub repo ${repo}.`;
     if (kind === "pr") {
-        return `[Demo Launcher] Open a Copilot app session for pull request #${number} in ${repo}. ${where} First add it as a project in this app (create_project) if it isn't one already, then use open_pr_session (repo_full_name "${repo}", pr_number ${number}). Don't start any work in it (omit kickoff), then navigate me to it.`;
+        return `[Demo Launcher] Open a Copilot app session for pull request #${number} in ${repo}. ${where} First add it as a project in this app if it isn't one already, then use open_pr_session (repo_full_name "${repo}", pr_number ${number}). Don't start any work in it (omit kickoff), then navigate me to it.`;
     }
     if (kind === "issue") {
-        return `[Demo Launcher] Open a Copilot app session for issue #${number} in ${repo}. ${where} First add it as a project in this app (create_project) if it isn't one already, then use open_issue_session (repo_full_name "${repo}", issue_number ${number}). Don't start any work in it (omit kickoff), then navigate me to it.`;
+        return `[Demo Launcher] Open a Copilot app session for issue #${number} in ${repo}. ${where} First add it as a project in this app if it isn't one already, then use open_issue_session (repo_full_name "${repo}", issue_number ${number}). Don't start any work in it (omit kickoff), then navigate me to it.`;
     }
     if (kind === "fusion") {
         const kickoff = { prompt: seedPromptFor(run), mode: "autopilot", model: "auto", auto_tier: "hydrafusion" };
-        return `[Demo Launcher] Run the ${JSON.stringify(templateName)} seed prompt with GitHub Copilot Fusion in ${repo}. ${where} Add it as a project in this app (create_project) if it isn't one already, then call create_session with that project_id, detached: true, and exactly this kickoff object (don't change the prompt text): ${JSON.stringify(kickoff)}. Then navigate me to that session. Don't do any of the work yourself.`;
+        return `[Demo Launcher] Run the ${JSON.stringify(templateName)} seed prompt with GitHub Copilot Fusion in ${repo}. ${where} Add it as a project in this app if it isn't one already, then call create_session with that project_id, detached: true, and exactly this kickoff object (don't change the prompt text): ${JSON.stringify(kickoff)}. Then navigate me to that session. Don't do any of the work yourself.`;
     }
-    return `[Demo Launcher] I just created the demo repo ${repo} (${JSON.stringify(templateName)}). ${where} Add it as a project in this app (create_project) if it isn't one already, create a new idle session in it (create_session with that project_id, no kickoff, detached: true), then navigate me to that session.`;
+    return `[Demo Launcher] I just created the demo repo ${repo} (${JSON.stringify(templateName)}). ${where} Add it as a project in this app if it isn't one already, create a new idle session in it (create_session with that project_id, no kickoff, detached: true), then navigate me to that session.`;
 }
 
 // Opened from the app-wide canvas picker (no chat), the canvas is hosted by a hidden

@@ -124,7 +124,7 @@ Every repository the scripts create gets the `demo-generated` topic, which is wh
 - **Seed prompts.** For demos with a `seed_prompt_file` (like `fusion-blank`), the card shows the prompt with **📋 Copy** and **▶ Run with Fusion**. Run with Fusion has Copilot add the repo as a project and start a new autopilot session that runs the prompt on the GitHub Copilot Fusion model (`model: "auto"`, `auto_tier: "hydrafusion"`).
 - **Clean up.** This works like `--cleanup`. Pick an owner and an age cutoff (default 72 hours, or **Any age**), review the matching `demo-generated` repos, and untick any you want to keep. Then delete the rest, optionally with their clones in `~/repos`. Deleting needs the `delete_repo` scope.
 
-Runs use your stored `gh auth login`, not any `GH_TOKEN` the app injects, so they have the same scopes as a terminal run. When they do, git pushes also go through `gh auth git-credential`, so git and `gh` always act as the same account even if the app is signed in as someone else. Nothing extra to set up: this only changes the environment of the scripts the launcher starts, not your git config or keychain. Run history survives restarts. It's kept in `~/.copilot/extensions/demo-launcher/artifacts/runs.json`, and **Clear history** empties it. The panel is a plain loopback web page, so its URL also works in a browser, including VS Code's Simple Browser. The port changes each time the extension restarts.
+Runs use your stored `gh auth login`, not any `GH_TOKEN` the app injects, so they have the same scopes as a terminal run. When they do, git pushes also go through `gh auth git-credential`, so git and `gh` always act as the same account even if the app is signed in as someone else. Nothing extra to set up: this only changes the environment of the scripts the launcher starts, not your git config or keychain. Run history survives restarts. It's kept in `~/.copilot/extensions/demo-launcher/artifacts/runs.json` and shared by every open launcher (each chat runs its own copy of the extension), so a demo created from one panel shows up in the others. **Clear history** clears finished runs in all of them. A run is only marked *interrupted* when the launcher that started it has exited; cancel a run from the panel or chat that started it. The panel is a plain loopback web page, so its URL also works in a browser, including VS Code's Simple Browser. The port changes each time the extension restarts.
 
 ### Where it's available
 
@@ -196,6 +196,7 @@ For example: "launch octocart in the demo launcher and tell me when Copilot has 
 | [`extension.mjs`](.github/extensions/demo-launcher/extension.mjs) | Registers the canvas and its actions, runs `create-repo` in the background, parses its output, and serves the panel on a loopback port |
 | [`ui.html`](.github/extensions/demo-launcher/ui.html) | The panel UI |
 | [`cleanup.mjs`](.github/extensions/demo-launcher/cleanup.mjs) | The Clean up section (preview and delete through `create-repo --cleanup`) |
+| [`run-store.mjs`](.github/extensions/demo-launcher/run-store.mjs) | Run history in `runs.json`, shared safely by every launcher process (locked read-merge-write, atomic replace, file watching) |
 | [`install.sh`](.github/extensions/demo-launcher/install.sh) | Installs or uninstalls the user-level loader |
 
 If you change what the scripts print (repo, clone, `PR #N created: <url>`, Copilot review lines, and so on), update `parseLine` in `extension.mjs` to match.
@@ -395,6 +396,7 @@ On macOS or Linux, run the same file with `pwsh -File tests/create-repo.Tests.ps
 ```bash
 bash -n create-repo.sh
 for f in .github/extensions/demo-launcher/*.mjs; do node --check "$f"; done
+node --test tests/run-store.test.mjs   # run history shared across several launcher processes
 bash -n .github/extensions/demo-launcher/install.sh
 shellcheck --severity=warning -x create-repo.sh .github/extensions/demo-launcher/install.sh
 ```

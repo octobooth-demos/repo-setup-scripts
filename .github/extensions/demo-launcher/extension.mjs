@@ -3,13 +3,14 @@
 
 import { createServer } from "node:http";
 import { spawn, spawnSync } from "node:child_process";
-import { readFileSync, existsSync, mkdirSync, writeFileSync, mkdtempSync, rmSync } from "node:fs";
+import { readFileSync, existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir, homedir } from "node:os";
 import { join, dirname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 import { joinSession, createCanvas, CanvasError } from "@github/copilot-sdk/extension";
 import { createCleanup } from "./cleanup.mjs";
+import { createRunStore } from "./run-store.mjs";
 
 const EXT_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(EXT_DIR, "..", "..", "..");
@@ -144,45 +145,35 @@ function scriptCommand(args) {
 // Renamed template keys, so runs saved before a rename keep their seed prompt and answer key.
 const LEGACY_TEMPLATE_KEYS = { "ensemble-blank": "fusion-blank" };
 
-let runs = [];
-try {
-    runs = JSON.parse(readFileSync(STORE_FILE, "utf8"));
-    for (const r of runs) {
-        const renamed = LEGACY_TEMPLATE_KEYS[r.template];
-        if (renamed) {
-            r.template = renamed;
-            try {
-                const tpl = loadTemplates().find((t) => t.key === renamed);
-                if (tpl) r.templateName = tpl.displayName;
-            } catch {
-                // keep the stored name if config.json can't be read
-            }
-            if (r.result) r.result.answerKey = answerKeyPath(renamed);
-        }
-        if (r.status === "running") {
-            r.status = "interrupted";
-            r.finishedAt = r.finishedAt || new Date().toISOString();
-        }
-    }
-} catch {
-    runs = [];
-}
-
-let saveTimer = null;
-function persist() {
-    clearTimeout(saveTimer);
-    saveTimer = setTimeout(() => {
-        try {
-            mkdirSync(STORE_DIR, { recursive: true });
-            writeFileSync(STORE_FILE, JSON.stringify(runs.slice(0, MAX_RUNS), null, 2));
-        } catch {
-            // best effort
-        }
-    }, 250);
-}
-
 const processes = new Map(); // runId -> ChildProcess
 const clients = new Set(); // SSE responses
+
+function normalizeRun(r) {
+    const renamed = LEGACY_TEMPLATE_KEYS[r.template];
+    if (!renamed) return;
+    r.template = renamed;
+    try {
+        const tpl = loadTemplates().find((t) => t.key === renamed);
+        if (tpl) r.templateName = tpl.displayName;
+    } catch {
+        // keep the stored name if config.json can't be read
+    }
+    if (r.result) r.result.answerKey = answerKeyPath(renamed);
+}
+
+// Shared with every other Demo Launcher process (one per chat, plus standalone canvases).
+const store = createRunStore({
+    file: STORE_FILE,
+    maxRuns: MAX_RUNS,
+    normalize: normalizeRun,
+    isOwned: (id) => processes.has(id),
+    onChange({ removed, changed }) {
+        if (removed) broadcast("reset", {});
+        else for (const r of changed) broadcast("run", summary(r));
+    },
+});
+store.watch();
+const allRuns = () => store.sync();
 
 function summary(run, { withLog = false } = {}) {
     const { log, ...rest } = run;
@@ -271,15 +262,13 @@ function startRun({ template, owner, noClone = false, openBrowser = false }) {
         result: { repo: null, repoUrl: null, owner: null, clonePath: null, pagesUrl: null, topPrUrl: null, pullsUrl: null, alertsUrl: null, copilotAlert: null, prs: [], issues: [], codespace: false, answerKey: tpl.answerKey },
         log: "",
     };
-    runs.unshift(run);
-    runs = runs.slice(0, MAX_RUNS);
-
     const env = scriptEnv({ GITHUB_OUTPUT: outFile });
     if (!openBrowser) env.DEMO_NO_BROWSER = "1";
     else delete env.DEMO_NO_BROWSER;
 
     const child = spawn(cmd, args, { cwd: REPO_ROOT, env, stdio: ["ignore", "pipe", "pipe"] });
     processes.set(run.id, child);
+    store.add(run);
 
     let partial = "";
     const onData = (chunk) => {
@@ -290,14 +279,13 @@ function startRun({ template, owner, noClone = false, openBrowser = false }) {
         partial = lines.pop();
         for (const l of lines) parseLine(run, l);
         broadcast("run", summary(run));
-        persist();
+        store.touch(run);
     };
     child.stdout.on("data", onData);
     child.stderr.on("data", onData);
 
     const finish = (code, err) => {
         if (run.status !== "running") return;
-        processes.delete(run.id);
         if (partial) parseLine(run, partial);
         if (err) run.log += `\n❌ ${err.message}\n`;
         const outputs = readOutputs(outFile);
@@ -314,8 +302,9 @@ function startRun({ template, owner, noClone = false, openBrowser = false }) {
         run.status = run.cancelled ? "cancelled" : code === 0 ? "succeeded" : "failed";
         run.finishedAt = new Date().toISOString();
         delete run._pendingPrTitle;
+        store.touch(run);
+        processes.delete(run.id);
         broadcast("run", summary(run));
-        persist();
         session?.log(
             run.status === "succeeded"
                 ? `Demo ready: ${run.templateName} → ${run.result.repoUrl}`
@@ -327,13 +316,13 @@ function startRun({ template, owner, noClone = false, openBrowser = false }) {
     child.on("close", (code) => finish(code));
 
     broadcast("run", summary(run));
-    persist();
     return run;
 }
 
 function cancelRun(id) {
     const child = processes.get(id);
-    const run = runs.find((r) => r.id === id);
+    const run = allRuns().find((r) => r.id === id);
+    if (!child && run?.status === "running") throw new CanvasError("not_running", "That run was started from another Demo Launcher panel or chat; cancel it there.");
     if (!child || !run) throw new CanvasError("not_running", "That run is not in progress.");
     run.cancelled = true;
     child.kill("SIGTERM");
@@ -341,6 +330,7 @@ function cancelRun(id) {
 }
 
 function findRun(id) {
+    const runs = allRuns();
     const run = id ? runs.find((r) => r.id === id) : runs[0];
     if (!run) throw new CanvasError("not_found", id ? `No run '${id}'.` : "No runs yet.");
     return run;
@@ -355,13 +345,13 @@ const cleanup = createCleanup({
     gh: GH,
     broadcast,
     onRepoDeleted(repo) {
-        for (const r of runs) {
-            if (r.result.repo?.toLowerCase() === repo.toLowerCase()) {
+        for (const r of allRuns()) {
+            if (r.result.repo?.toLowerCase() === repo.toLowerCase() && !r.result.deleted) {
                 r.result.deleted = true;
+                store.touch(r);
                 broadcast("run", summary(r));
             }
         }
-        persist();
     },
     log: (message, level) => session?.log(message, { level }),
 });
@@ -466,7 +456,7 @@ async function handle(req, res) {
             return res.end(readFileSync(UI_FILE, "utf8"));
         }
         if (req.method === "GET" && url.pathname === "/api/state") {
-            return json(res, 200, { templates: loadTemplates(), runs: runs.map((r) => summary(r)), cleanup: cleanup.state });
+            return json(res, 200, { templates: loadTemplates(), runs: allRuns().map((r) => summary(r)), cleanup: cleanup.state });
         }
         if (req.method === "GET" && url.pathname.startsWith("/api/runs/")) {
             return json(res, 200, findRun(url.pathname.split("/")[3]));
@@ -500,8 +490,7 @@ async function handle(req, res) {
             if (url.pathname === "/api/cleanup/delete") return json(res, 200, await cleanup.remove(body));
             if (url.pathname === "/api/cleanup/reset") return json(res, 200, cleanup.reset());
             if (url.pathname === "/api/clear") {
-                runs = runs.filter((r) => r.status === "running");
-                persist();
+                store.clear();
                 broadcast("reset", {});
                 return json(res, 200, { ok: true });
             }
@@ -574,7 +563,7 @@ const session = await joinSession({
                 {
                     name: "list_runs",
                     description: "List recent demo runs with their status and links.",
-                    handler: async () => runs.map((r) => summary(r)).map(({ logTail, ...r }) => r),
+                    handler: async () => allRuns().map((r) => summary(r)).map(({ logTail, ...r }) => r),
                 },
                 {
                     name: "cleanup_preview",

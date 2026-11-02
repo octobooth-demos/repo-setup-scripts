@@ -12,6 +12,7 @@
 
 import { readFileSync, writeFileSync, renameSync, unlinkSync, openSync, closeSync, statSync, mkdirSync, watch } from "node:fs";
 import { basename, dirname } from "node:path";
+import { randomUUID } from "node:crypto";
 
 const LOCK_STALE_MS = 10_000;
 const LOCK_WAIT_MS = 2_000;
@@ -49,6 +50,7 @@ export function createRunStore({ file, maxRuns, normalize = () => {}, isOwned = 
     let writeTimer = null;
     let watcher = null;
     let poller = null;
+    let corruptReads = 0;
 
     function statKey() {
         try {
@@ -59,7 +61,8 @@ export function createRunStore({ file, maxRuns, normalize = () => {}, isOwned = 
         }
     }
 
-    // Returns null when the file exists but can't be parsed (keep what we have).
+    // A missing file is an empty history. Returns null when the file can't be read right now
+    // and { corrupt: true } when it isn't valid JSON; callers keep what they have and retry.
     function readDisk() {
         let text;
         try {
@@ -70,9 +73,10 @@ export function createRunStore({ file, maxRuns, normalize = () => {}, isOwned = 
         try {
             const data = JSON.parse(text);
             if (Array.isArray(data)) return { clearedAt: 0, runs: data }; // format before v2
+            if (!data || typeof data !== "object") return { corrupt: true };
             return { clearedAt: Number(data.clearedAt) || 0, runs: Array.isArray(data.runs) ? data.runs : [] };
         } catch {
-            return null;
+            return { corrupt: true };
         }
     }
 
@@ -83,6 +87,15 @@ export function createRunStore({ file, maxRuns, normalize = () => {}, isOwned = 
 
     function clearedAway(run) {
         return run.status !== "running" && time(run.finishedAt || run.startedAt) <= clearedAt;
+    }
+
+    // Finished beats interrupted beats running, so a stale copy that only had cleanup's
+    // deleted flag added can't undo a completion; within the same state, newest wins.
+    const RANK = { running: 0, interrupted: 1 };
+    const rank = (r) => RANK[r.status] ?? 2;
+    function newer(a, b) {
+        if (rank(a) !== rank(b)) return rank(a) > rank(b) ? a : b;
+        return (a.updatedAt || 0) > (b.updatedAt || 0) ? a : b;
     }
 
     function stickyDeleted(target, ...others) {
@@ -105,8 +118,7 @@ export function createRunStore({ file, maxRuns, normalize = () => {}, isOwned = 
             normalize(d);
             d.result ||= {};
             const mine = local.get(d.id);
-            let pick = d;
-            if (mine && (isOwned(mine.id) || (mine.updatedAt || 0) > (d.updatedAt || 0))) pick = mine;
+            const pick = !mine ? d : isOwned(mine.id) ? mine : newer(mine, d) === mine ? mine : d;
             stickyDeleted(pick, mine, d);
             next.set(d.id, pick);
         }
@@ -141,34 +153,68 @@ export function createRunStore({ file, maxRuns, normalize = () => {}, isOwned = 
         if (change.removed || change.changed.length) onChange(change);
     }
 
+    // Lock files hold "<pid> <token>". A lock is only reclaimed when its holder is dead, or
+    // it has no holder (a crash between create and write) and is old. Reclaiming happens
+    // under a second lock and re-checks the token, so it can't remove a successor's lock.
+    const token = `${process.pid} ${randomUUID()}`;
+    const reclaimFile = `${lockFile}.reclaim`;
+
+    function tryCreate(path) {
+        try {
+            const fd = openSync(path, "wx");
+            try {
+                writeFileSync(fd, token);
+            } finally {
+                closeSync(fd);
+            }
+            return true;
+        } catch (e) {
+            if (e.code === "EEXIST") return false;
+            throw e;
+        }
+    }
+
+    function holderOf(path) {
+        try {
+            const text = readFileSync(path, "utf8");
+            return { text, pid: Number(text.split(" ")[0]), age: Date.now() - statSync(path).mtimeMs };
+        } catch {
+            return null; // gone
+        }
+    }
+
+    const abandoned = (h) => (h.pid > 0 ? !pidAlive(h.pid) : h.age > LOCK_STALE_MS);
+
+    function removeIfSame(path, text) {
+        const now = holderOf(path);
+        if (now && now.text === text) unlinkSync(path);
+    }
+
+    function reclaim(stale) {
+        if (!tryCreate(reclaimFile)) {
+            const r = holderOf(reclaimFile);
+            if (r && abandoned(r)) removeIfSame(reclaimFile, r.text);
+            return;
+        }
+        try {
+            removeIfSame(lockFile, stale.text);
+        } finally {
+            removeIfSame(reclaimFile, token);
+        }
+    }
+
     function lock() {
         const deadline = Date.now() + LOCK_WAIT_MS;
         for (;;) {
             try {
-                const fd = openSync(lockFile, "wx");
-                try {
-                    writeFileSync(fd, String(process.pid));
-                } finally {
-                    closeSync(fd);
+                if (tryCreate(lockFile)) return true;
+                const h = holderOf(lockFile);
+                if (h && abandoned(h)) {
+                    reclaim(h);
+                    continue;
                 }
-                return true;
-            } catch (e) {
-                if (e.code !== "EEXIST") return false;
-            }
-            let stale = false;
-            try {
-                const holder = Number(readFileSync(lockFile, "utf8"));
-                stale = Date.now() - statSync(lockFile).mtimeMs > LOCK_STALE_MS || (holder > 0 && !pidAlive(holder));
             } catch {
-                continue; // released between our checks; try again
-            }
-            if (stale) {
-                try {
-                    unlinkSync(lockFile);
-                } catch {
-                    // another process got there first
-                }
-                continue;
+                return false;
             }
             if (Date.now() > deadline) return false;
             sleep(10);
@@ -177,13 +223,14 @@ export function createRunStore({ file, maxRuns, normalize = () => {}, isOwned = 
 
     function unlock() {
         try {
-            unlinkSync(lockFile);
+            removeIfSame(lockFile, token);
         } catch {
             // already gone
         }
     }
 
-    // Windows can refuse a rename while another process has the target open; retry briefly.
+    // Windows can refuse a rename while another process has the target open, so retry
+    // briefly. Never fall back to rewriting runs.json in place: readers don't lock.
     function replaceFile(text) {
         const tmp = `${file}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
         writeFileSync(tmp, text);
@@ -194,15 +241,11 @@ export function createRunStore({ file, maxRuns, normalize = () => {}, isOwned = 
             } catch (e) {
                 if (i >= 10 || !["EPERM", "EACCES", "EBUSY"].includes(e.code)) {
                     try {
-                        writeFileSync(file, text);
-                    } finally {
-                        try {
-                            unlinkSync(tmp);
-                        } catch {
-                            // best effort
-                        }
+                        unlinkSync(tmp);
+                    } catch {
+                        // best effort
                     }
-                    return;
+                    throw e;
                 }
                 sleep(25);
             }
@@ -222,7 +265,20 @@ export function createRunStore({ file, maxRuns, normalize = () => {}, isOwned = 
             return false;
         }
         try {
-            const disk = readDisk() || { clearedAt: 0, runs: [] };
+            let disk = readDisk();
+            if (!disk) throw new Error("runs.json is unreadable right now");
+            if (disk.corrupt) {
+                // A torn write from an older launcher heals on retry; a really broken file is
+                // set aside (not deleted) after a few tries so history can be saved again.
+                if (++corruptReads < 3) throw new Error("runs.json is not valid JSON");
+                try {
+                    renameSync(file, `${file}.corrupt-${Date.now()}`);
+                } catch {
+                    // replaceFile below replaces it anyway
+                }
+                disk = { clearedAt, runs: [...runs] }; // rebuild from what this process knows
+            }
+            corruptReads = 0;
             const change = reconcile(disk);
             replaceFile(JSON.stringify({ version: 2, clearedAt, runs }, null, 2));
             dirty.clear();
@@ -246,7 +302,7 @@ export function createRunStore({ file, maxRuns, normalize = () => {}, isOwned = 
         const key = statKey();
         if (key !== seenKey) {
             const disk = readDisk();
-            if (disk) {
+            if (disk && !disk.corrupt) {
                 seenKey = key;
                 report(reconcile(disk));
             }

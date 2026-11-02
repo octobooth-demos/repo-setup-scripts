@@ -6,7 +6,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync, readdirSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -256,6 +256,62 @@ function defineTests() {
         await b.call("add", { id: "x" });
         await b.call("flush");
         await waitFor(async () => (await a.call("changes")) > before && byId(await a.call("memory"), "x"), "A to see B's run without asking");
+    });
+
+    test("a completion isn't undone by a stale copy that cleanup marked deleted", async () => {
+        const file = join(dir, "runs.json");
+        const a = worker(file);
+        const b = worker(file);
+        await a.call("add", { id: "r", repo: "me/demo" });
+        await a.call("flush");
+        assert.equal(byId(await b.call("list"), "r").status, "running");
+        await a.call("finish", { id: "r" }); // not saved yet
+        await b.call("markDeleted", { repo: "me/demo" }); // newer, but still "running"
+        await b.call("flush");
+        await a.call("flush");
+        for (const list of [readFile(file).runs.map((r) => ({ ...r, deleted: r.result.deleted })), await a.call("list"), await b.call("list")]) {
+            assert.equal(byId(list, "r").status, "succeeded");
+            assert.equal(byId(list, "r").deleted, true);
+        }
+    });
+
+    test("a live writer keeps its lock however old it is; a dead writer's lock is reclaimed", async () => {
+        const file = join(dir, "runs.json");
+        const keeper = worker(join(dir, "unused.json"));
+        const livePid = await keeper.call("pid");
+        const a = worker(file);
+        writeFileSync(`${file}.lock`, `${livePid} someone-else`);
+        const old = new Date(Date.now() - 60 * 60 * 1000);
+        utimesSync(`${file}.lock`, old, old);
+        await a.call("add", { id: "x" });
+        assert.equal(await a.call("flush"), false);
+        assert.equal(existsSync(file), false);
+        assert.equal(readFileSync(`${file}.lock`, "utf8"), `${livePid} someone-else`);
+
+        keeper.kill();
+        await delay(100);
+        assert.equal(await a.call("flush"), true);
+        assert.deepEqual(ids(readFile(file).runs), ["x"]);
+        assert.equal(existsSync(`${file}.lock`), false);
+    });
+
+    test("an unreadable runs.json isn't treated as empty history", async () => {
+        const file = join(dir, "runs.json");
+        const a = worker(file);
+        const b = worker(file);
+        await b.call("add", { id: "kept" });
+        await b.call("finish", { id: "kept" });
+        await b.call("flush");
+        assert.deepEqual(ids(await a.call("list")), ["kept"]);
+        writeFileSync(file, '{"version":2,"runs":[{"id":"kep'); // torn write
+        assert.deepEqual(ids(await a.call("list")), ["kept"]);
+        await a.call("add", { id: "new" });
+        assert.equal(await a.call("flush"), false); // waits rather than overwriting
+        assert.equal(readFileSync(file, "utf8"), '{"version":2,"runs":[{"id":"kep');
+        // If it stays broken, it's set aside and history is saved again from memory.
+        await waitFor(() => existsSync(file) && readFileSync(file, "utf8").startsWith("{\n"), "runs.json to be rewritten");
+        assert.deepEqual(ids(readFile(file).runs), ["kept", "new"]);
+        assert.ok(readdirSync(dir).some((f) => f.startsWith("runs.json.corrupt-")));
     });
 
     test("history is trimmed to the newest runs", async () => {

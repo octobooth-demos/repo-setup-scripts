@@ -250,7 +250,7 @@ try {
         'missing-template', 'missing-body', 'empty-prs', 'unknown-workflow',
         'outside-body', 'invalid-json', 'missing-org', 'empty-repos',
         'create-failure', 'topic-failure', 'push-failure', 'login-failure',
-        'git-account-match', 'git-account-mismatch',
+        'git-account-match', 'git-account-mismatch', 'blank-git-account-mismatch',
         'stacked-prs', 'stack-one-layer', 'stack-missing-field', 'stack-api-failure', 'stack-verify-mismatch',
         'non-interactive', 'unknown-template', 'non-interactive-login', 'no-clone-branch',
         'owner-override', 'serve', 'serve-no-clone', 'pages-failure', 'bad-visibility', 'dry-run-without-cleanup', 'cleanup-with-template',
@@ -376,6 +376,11 @@ try {
             'topic-failure' { $selection = '5'; $testState.Failure = 'repo edit'; $expectedFailure = 'cleanup would never find it' }
             'push-failure' { $selection = '2'; $testState.Failure = 'git push'; $expectedFailure = 'different GitHub account than gh' }
             'git-account-match' { $selection = '5'; $testState.GitCredentialUser = 'demo-user' }
+            'blank-git-account-mismatch' {
+                $selection = $null
+                $scriptArgs = @{ Template = 'fusion-blank'; NoClone = $true }
+                $testState.GitCredentialUser = 'app-user'
+            }
             'git-account-mismatch' {
                 $selection = '5'
                 $testState.GitCredentialUser = 'app-user'
@@ -511,6 +516,9 @@ try {
         }
         else {
             Assert ($null -eq $caught) "$scenario failed: $caught"
+            if ($scenario -eq 'blank-git-account-mismatch') {
+                Assert ((Find-Calls 'git' '-c').Count -eq 0) 'Checked the git account for a gh-only run.'
+            }
             $create = @(Find-Calls 'gh' 'repo create')[0]
             $expectedOwner = switch ($scenario) {
                 'security-prs' { 'octobooth-demos' }

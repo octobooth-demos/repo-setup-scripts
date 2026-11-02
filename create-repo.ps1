@@ -327,8 +327,10 @@ function Invoke-GitPush {
 
 # Fail before creating anything if git would push as a different account than gh.
 # Only checks HTTPS (gh's default); a missing credential is left for git push to report.
+# Skipped for workflows that never touch git (no push, no clone): they only use gh.
 function Assert-GitAccount {
     if (-not $userToken) { return }
+    if ($NoClone -and $selectedRepo.workflow -in @('repo_only', 'blank', 'issue_and_codespace')) { return }
     # Local to this function: keep redirected native stderr from terminating on Windows PowerShell 5.1.
     $ErrorActionPreference = 'Continue'
     $protocol = & gh config get git_protocol -h github.com 2>$null

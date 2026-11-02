@@ -218,8 +218,12 @@ git_push() {
 
 # Fail before creating anything if git would push as a different account than gh.
 # Only checks HTTPS (gh's default); a missing credential is left for git push to report.
+# Skipped for workflows that never touch git (no push, no clone): they only use gh.
 check_git_account() {
     [ "$USER_TOKEN" = true ] || return 0
+    case "$WORKFLOW" in
+        repo_only|blank|issue_and_codespace) [ "$NO_CLONE" = true ] && return 0 ;;
+    esac
     [ "$(gh config get git_protocol -h github.com 2>/dev/null || true)" = "ssh" ] && return 0
     local token git_user
     token=$(printf 'protocol=https\nhost=github.com\n\n' \

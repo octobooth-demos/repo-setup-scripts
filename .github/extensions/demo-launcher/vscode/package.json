@@ -1,0 +1,138 @@
+{
+  "name": "demo-launcher",
+  "displayName": "Demo Launcher",
+  "description": "Create booth demo repos from repo-setup-scripts, watch progress, and jump into the repo, PRs, or Copilot Chat.",
+  "version": "0.1.0",
+  "publisher": "octobooth-demos",
+  "license": "UNLICENSED",
+  "private": true,
+  "repository": { "type": "git", "url": "https://github.com/octobooth-demos/repo-setup-scripts" },
+  "engines": { "vscode": "^1.99.0" },
+  "categories": ["Other"],
+  "extensionKind": ["workspace"],
+  "main": "./extension.js",
+  "activationEvents": ["onStartupFinished"],
+  "contributes": {
+    "commands": [
+      { "command": "demoLauncher.open", "title": "Open Demo Launcher", "category": "Demo Launcher" }
+    ],
+    "configuration": {
+      "title": "Demo Launcher",
+      "properties": {
+        "demoLauncher.repoPath": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Path to your `repo-setup-scripts` checkout. Leave empty to use an open workspace folder that is that repo, or the checkout the installer recorded."
+        }
+      }
+    },
+    "languageModelTools": [
+      {
+        "name": "demoLauncher_open",
+        "displayName": "Open Demo Launcher",
+        "toolReferenceName": "demoLauncherOpen",
+        "canBeReferencedInPrompt": true,
+        "userDescription": "Open the Demo Launcher panel.",
+        "modelDescription": "Open the Demo Launcher panel in VS Code, optionally preselecting a demo template by key.",
+        "inputSchema": {
+          "type": "object",
+          "properties": { "template": { "type": "string", "description": "Optional template key to preselect (see demoLauncher_listTemplates)." } }
+        }
+      },
+      {
+        "name": "demoLauncher_listTemplates",
+        "displayName": "List demo templates",
+        "toolReferenceName": "demoLauncherTemplates",
+        "canBeReferencedInPrompt": true,
+        "userDescription": "List booth demo templates from config.json.",
+        "modelDescription": "List the booth demo templates defined in repo-setup-scripts' config.json, with their keys, descriptions, and whether they have a seed prompt.",
+        "inputSchema": { "type": "object", "properties": {} }
+      },
+      {
+        "name": "demoLauncher_launch",
+        "displayName": "Create a demo repo",
+        "toolReferenceName": "demoLauncherLaunch",
+        "canBeReferencedInPrompt": true,
+        "userDescription": "Create a booth demo repo in the background.",
+        "modelDescription": "Create a booth demo repo in the background by running create-repo non-interactively for a template key. Opens the Demo Launcher panel to show progress and returns the run (id, status, links). Poll with demoLauncher_getRun; runs take a few minutes.",
+        "inputSchema": {
+          "type": "object",
+          "required": ["template"],
+          "properties": {
+            "template": { "type": "string", "description": "Template key from demoLauncher_listTemplates." },
+            "owner": { "type": "string", "description": "Account or org to create the repo in." },
+            "noClone": { "type": "boolean", "description": "Skip the local clone in ~/repos." },
+            "openBrowser": { "type": "boolean", "description": "Let the script open browser tabs." }
+          }
+        }
+      },
+      {
+        "name": "demoLauncher_getRun",
+        "displayName": "Get demo run",
+        "toolReferenceName": "demoLauncherRun",
+        "canBeReferencedInPrompt": true,
+        "userDescription": "Get status, links, and log of a demo run.",
+        "modelDescription": "Get status, links (repo, PRs, issues, Pages, clone path, Copilot review state), and the log of a demo run. Defaults to the latest run.",
+        "inputSchema": { "type": "object", "properties": { "runId": { "type": "string", "description": "Run id; defaults to the latest run." } } }
+      },
+      {
+        "name": "demoLauncher_listRuns",
+        "displayName": "List demo runs",
+        "toolReferenceName": "demoLauncherRuns",
+        "canBeReferencedInPrompt": true,
+        "userDescription": "List recent demo runs.",
+        "modelDescription": "List recent demo runs with their status and links.",
+        "inputSchema": { "type": "object", "properties": {} }
+      },
+      {
+        "name": "demoLauncher_cancel",
+        "displayName": "Cancel demo run",
+        "toolReferenceName": "demoLauncherCancel",
+        "canBeReferencedInPrompt": true,
+        "userDescription": "Stop an in-progress demo run.",
+        "modelDescription": "Stop an in-progress demo run. Defaults to the latest run.",
+        "inputSchema": { "type": "object", "properties": { "runId": { "type": "string", "description": "Run id; defaults to the latest run." } } }
+      },
+      {
+        "name": "demoLauncher_runSeedPrompt",
+        "displayName": "Run demo seed prompt",
+        "toolReferenceName": "demoLauncherRunSeed",
+        "canBeReferencedInPrompt": true,
+        "userDescription": "Open a demo's clone in a new window and run its seed prompt in Copilot Chat.",
+        "modelDescription": "For demos with a seed prompt and a local clone: open the clone in a new VS Code window and run the seed prompt there in Copilot Chat agent mode. Defaults to the latest run.",
+        "inputSchema": { "type": "object", "properties": { "runId": { "type": "string", "description": "Run id; defaults to the latest run." } } }
+      },
+      {
+        "name": "demoLauncher_cleanupPreview",
+        "displayName": "Preview demo cleanup",
+        "toolReferenceName": "demoLauncherCleanupPreview",
+        "canBeReferencedInPrompt": true,
+        "userDescription": "List demo-generated repos that cleanup would delete.",
+        "modelDescription": "List repos with the demo-generated topic older than the cutoff that cleanup would delete. Nothing is deleted. Show the list to the user before calling demoLauncher_cleanupDelete.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "owner": { "type": "string", "description": "Account or org; defaults to the logged-in account." },
+            "olderThanHours": { "type": "integer", "minimum": 0, "description": "Age cutoff in hours (default 72; 0 = all)." }
+          }
+        }
+      },
+      {
+        "name": "demoLauncher_cleanupDelete",
+        "displayName": "Delete demo repos",
+        "toolReferenceName": "demoLauncherCleanupDelete",
+        "canBeReferencedInPrompt": true,
+        "userDescription": "Delete repos from the current cleanup preview.",
+        "modelDescription": "Delete repos from the current cleanup preview (run demoLauncher_cleanupPreview first). Pass the exact owner/name repos to delete; repos not in the current preview are skipped. Only call after the user confirmed the list. VS Code also asks the user to confirm.",
+        "inputSchema": {
+          "type": "object",
+          "required": ["repos"],
+          "properties": {
+            "repos": { "type": "array", "items": { "type": "string" }, "minItems": 1, "description": "owner/name repos from the preview to delete." },
+            "removeClones": { "type": "boolean", "description": "Also delete matching local clones in ~/repos." }
+          }
+        }
+      }
+    ]
+  }
+}

@@ -4,7 +4,7 @@ Create demo repositories (private unless a template says otherwise) from the tem
 
 There are three ways to create a demo, and all of them run the same scripts and config:
 
-- **[Demo Launcher canvas](#demo-launcher-canvas)**: a side panel in the GitHub Copilot app. Pick a demo, click **Create**, then jump into the repo, PR, or session. This is the easiest option at the booth.
+- **[Demo Launcher canvas](#demo-launcher-canvas)**: a side panel in the GitHub Copilot app (and a matching [VS Code panel](#use-it-in-vs-code)). Pick a demo, click **Create**, then jump into the repo, PR, or session. This is the easiest option at the booth.
 - **[`create-repo.sh` / `create-repo.ps1`](#bash)**: the scripts the launcher runs, used interactively or [non-interactively](#non-interactive-mode).
 - **[ChatOps](#chatops)**: `/new-demo <key>` comments or the Actions tab. These create demos in the `octobooth-demos` org without a booth machine.
 
@@ -164,6 +164,31 @@ How the loader works:
 
 **Windows:** `install.sh` is for macOS and Linux. On Windows, add `repo-setup-scripts` as a project in the Copilot app and open the canvas from sessions in that project; don't also install a loader. Runs there use `create-repo.ps1`.
 
+### Use it in VS Code
+
+The same launcher also runs as a VS Code extension in [`vscode/`](.github/extensions/demo-launcher/vscode/). It shows the same panel and runs the same `create-repo`, and Copilot agent mode can drive it with tools. Install it once per machine (macOS or Linux, needs the `code` CLI and `zip`), from the **main checkout**:
+
+```bash
+cd ~/repos/repo-setup-scripts
+bash .github/extensions/demo-launcher/vscode/install.sh
+```
+
+Reload open VS Code windows, then run **Demo Launcher: Open Demo Launcher** from the Command Palette, or ask Copilot in agent mode to "open the demo launcher".
+
+How it differs from the Copilot app canvas:
+
+| Copilot app | VS Code |
+| --- | --- |
+| **Open session in Copilot app**, **Open PR/issue session** | Not shown. Use **Open in new window** and the PR/issue links. |
+| **▶ Run with Fusion** | **▶ Run in Copilot Chat** opens the clone in a new window and runs the seed prompt there in agent mode, with the window's current model. It needs a local clone. |
+| **🔑 Presenter answer key** opens in VS Code | Opens as a Markdown preview in the current window |
+| Canvas actions | Agent-mode tools: `demoLauncher_open`, `_listTemplates`, `_launch`, `_getRun`, `_listRuns`, `_cancel`, `_runSeedPrompt`, `_cleanupPreview`, and `_cleanupDelete` (it takes the exact repos to delete, and VS Code asks you to confirm them) |
+| History in `~/.copilot/extensions/demo-launcher/artifacts/` | Separate history per VS Code workspace (usually your `repo-setup-scripts` window), in the extension's workspace storage. A window with no folder open keeps history only until it closes. |
+
+The installer packages a small `.vsix` that records your checkout's path. The extension loads `core.mjs` and `ui.html` from that checkout, so **`git pull` updates it** (reload the window). Re-run `install.sh` only when `vscode/package.json` or `vscode/extension.js` changes. If a VS Code workspace folder is itself `repo-setup-scripts`, that folder's copy is used instead, so a branch you're working on uses its own version. To point it somewhere else, set `demoLauncher.repoPath`. Use `--uninstall` to remove it, `--vsix-only` to only build the `.vsix`, and `CODE_CLI=code-insiders` for VS Code Insiders.
+
+To try changes without installing, run `code --extensionDevelopmentPath=$PWD/.github/extensions/demo-launcher/vscode`.
+
 ### Troubleshooting
 
 | Symptom | Fix |
@@ -193,12 +218,15 @@ For example: "launch octocart in the demo launcher and tell me when Copilot has 
 
 | File | Purpose |
 | --- | --- |
-| [`extension.mjs`](.github/extensions/demo-launcher/extension.mjs) | Registers the canvas and its actions, runs `create-repo` in the background, parses its output, and serves the panel on a loopback port |
-| [`ui.html`](.github/extensions/demo-launcher/ui.html) | The panel UI |
+| [`core.mjs`](.github/extensions/demo-launcher/core.mjs) | Shared by both hosts: runs `create-repo` in the background, parses its output, keeps run history, and serves the panel's JSON API (and the loopback server) |
+| [`extension.mjs`](.github/extensions/demo-launcher/extension.mjs) | Copilot app host: registers the canvas and its actions |
+| [`ui.html`](.github/extensions/demo-launcher/ui.html) | The panel UI, used by both hosts. It hides buttons the host can't support. |
+| [`errors.mjs`](.github/extensions/demo-launcher/errors.mjs) | `LauncherError`, which each host maps to its own error type |
 | [`cleanup.mjs`](.github/extensions/demo-launcher/cleanup.mjs) | The Clean up section (preview and delete through `create-repo --cleanup`) |
 | [`install.sh`](.github/extensions/demo-launcher/install.sh) | Installs or uninstalls the user-level loader |
+| [`vscode/`](.github/extensions/demo-launcher/vscode/) | VS Code host: `extension.js` (webview panel, agent-mode tools, Copilot Chat handoff), `package.json`, and `install.sh` |
 
-If you change what the scripts print (repo, clone, `PR #N created: <url>`, Copilot review lines, and so on), update `parseLine` in `extension.mjs` to match.
+If you change what the scripts print (repo, clone, `PR #N created: <url>`, Copilot review lines, and so on), update `parseLine` in `core.mjs` to match.
 
 ## Where repos are created
 
@@ -394,9 +422,10 @@ On macOS or Linux, run the same file with `pwsh -File tests/create-repo.Tests.ps
 
 ```bash
 bash -n create-repo.sh
-for f in .github/extensions/demo-launcher/*.mjs; do node --check "$f"; done
+for f in .github/extensions/demo-launcher/*.mjs .github/extensions/demo-launcher/vscode/extension.js; do node --check "$f"; done
 bash -n .github/extensions/demo-launcher/install.sh
-shellcheck --severity=warning -x create-repo.sh .github/extensions/demo-launcher/install.sh
+bash -n .github/extensions/demo-launcher/vscode/install.sh
+shellcheck --severity=warning -x create-repo.sh .github/extensions/demo-launcher/install.sh .github/extensions/demo-launcher/vscode/install.sh
 ```
 
 ```powershell

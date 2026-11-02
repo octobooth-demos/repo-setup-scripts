@@ -114,7 +114,10 @@ const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 let templates = [];
 let runs = [];
-let selected = new URLSearchParams(location.search).get("template");
+let selected = window.DEMO_LAUNCHER?.template ?? new URLSearchParams(location.search).get("template");
+// What the host can do: the Copilot app opens app sessions and runs seed prompts with GitHub Copilot Fusion;
+// VS Code opens folders and runs seed prompts in Copilot Chat. Filled in from /api/state.
+let host = { name: "app", appSessions: true, seedRun: "fusion" };
 const openLogs = new Set();
 
 function toast(msg) {
@@ -163,11 +166,11 @@ function renderRun(r) {
   for (const pr of res.prs || []) {
     links.push(`<div class="link-row">🔀 <a href="${esc(pr.url)}" target="_blank">PR #${pr.number}${pr.title ? ` · ${esc(pr.title)}` : ""}</a>
       ${review[pr.copilotReview] || ""}
-      ${done && !res.deleted ? `<button class="btn" data-act="session" data-kind="pr" data-target="${pr.number}" data-id="${r.id}">Open PR session</button>` : ""}</div>`);
+      ${done && !res.deleted && host.appSessions ? `<button class="btn" data-act="session" data-kind="pr" data-target="${pr.number}" data-id="${r.id}">Open PR session</button>` : ""}</div>`);
   }
   for (const is of res.issues || []) {
     links.push(`<div class="link-row">🐛 <a href="${esc(is.url)}" target="_blank">Issue #${is.number}</a>
-      ${done && !res.deleted ? `<button class="btn" data-act="session" data-kind="issue" data-target="${is.number}" data-id="${r.id}">Open issue session</button>` : ""}</div>`);
+      ${done && !res.deleted && host.appSessions ? `<button class="btn" data-act="session" data-kind="issue" data-target="${is.number}" data-id="${r.id}">Open issue session</button>` : ""}</div>`);
   }
   if (res.pullsUrl) links.push(`<div class="link-row">📋 <a href="${esc(res.pullsUrl)}" target="_blank">All pull requests</a></div>`);
   if (res.alertsUrl) links.push(`<div class="link-row">🚨 <a href="${esc(res.alertsUrl)}" target="_blank">Code scanning alerts</a>${res.copilotAlert ? ` <span class="succeeded" style="font-size:12px">🤖 ✓ alert #${res.copilotAlert} assigned to Copilot</span>` : ""}</div>`);
@@ -179,13 +182,13 @@ function renderRun(r) {
   const actions = r.status === "running"
     ? `<button class="btn" data-act="cancel" data-id="${r.id}">Cancel</button>`
     : canAct ? `
-      <button class="btn primary" data-act="session" data-kind="repo" data-id="${r.id}">Open session in Copilot app</button>
-      ${res.clonePath ? `<button class="btn" data-act="vscode" data-id="${r.id}">Open in VS Code</button>` : ""}` : "";
+      ${host.appSessions ? `<button class="btn primary" data-act="session" data-kind="repo" data-id="${r.id}">Open session in Copilot app</button>` : ""}
+      ${res.clonePath ? `<button class="btn ${host.appSessions ? "" : "primary"}" data-act="vscode" data-id="${r.id}">${host.name === "vscode" ? "Open in new window" : "Open in VS Code"}</button>` : ""}` : "";
   const seedPrompt = canAct ? templates.find((t) => t.key === r.template)?.seedPrompt : null;
   const seed = seedPrompt ? `<div class="seed">
       <div class="seed-head">💬 <strong>Seed prompt</strong>
         <button class="btn" data-act="copy-seed" data-id="${r.id}">📋 Copy</button>
-        <button class="btn primary" data-act="fusion" data-id="${r.id}" title="New autopilot session in this repo with the GitHub Copilot Fusion model, already running the prompt">▶ Run with Fusion</button>
+        ${seedRunButton(r)}
       </div>
       <div class="seed-text">${esc(seedPrompt)}</div>
     </div>` : "";
@@ -207,6 +210,12 @@ function renderRun(r) {
       <pre class="log" id="log-${r.id}">${esc(r.logTail || "")}</pre>
     </details>
   </div>`;
+}
+
+function seedRunButton(r) {
+  if (host.seedRun === "fusion") return `<button class="btn primary" data-act="run-seed" data-id="${r.id}" title="New autopilot session in this repo with the GitHub Copilot Fusion model, already running the prompt">▶ Run with Fusion</button>`;
+  if (host.seedRun === "chat" && r.result?.clonePath) return `<button class="btn primary" data-act="run-seed" data-id="${r.id}" title="Opens the clone in a new VS Code window and runs the prompt in Copilot Chat agent mode">▶ Run in Copilot Chat</button>`;
+  return "";
 }
 
 function renderRuns() {
@@ -246,11 +255,11 @@ $("runs").addEventListener("click", async (e) => {
     if (b.dataset.act === "cancel") { await post("/api/cancel", { id: b.dataset.id }); toast("Cancelling…"); }
     if (b.dataset.act === "answer-key") { await post("/api/open-answer-key", { id: b.dataset.id }); toast("Opening the answer key locally (don't share your screen!)"); }
     if (b.dataset.act === "copy-seed") { await copySeed(b.dataset.id); toast("Seed prompt copied"); }
-    if (b.dataset.act === "fusion") {
-      await post("/api/open-session", { id: b.dataset.id, kind: "fusion" });
-      toast("Asked Copilot to start a GitHub Copilot Fusion autopilot session — check the chat.");
+    if (b.dataset.act === "run-seed") {
+      await post("/api/run-seed", { id: b.dataset.id });
+      toast(host.seedRun === "chat" ? "Opening the repo in a new window; Copilot Chat will run the prompt there." : "Asked Copilot to start a GitHub Copilot Fusion autopilot session — check the chat.");
     }
-    if (b.dataset.act === "vscode") { await post("/api/open-vscode", { id: b.dataset.id }); toast("Opening VS Code…"); }
+    if (b.dataset.act === "vscode") { await post("/api/open-vscode", { id: b.dataset.id }); toast(host.name === "vscode" ? "Opening a new window…" : "Opening VS Code…"); }
     if (b.dataset.act === "session") {
       await post("/api/open-session", { id: b.dataset.id, kind: b.dataset.kind, target: b.dataset.target && Number(b.dataset.target) });
       toast("Asked Copilot to open the session — check the chat.");
@@ -328,6 +337,7 @@ async function load() {
   const res = await fetch("/api/state");
   const data = await res.json();
   templates = data.templates; runs = data.runs; cleanup = data.cleanup;
+  if (data.host) host = data.host;
   $("ownerList").innerHTML = [...new Set(templates.map((t) => t.owner).filter(Boolean))].map((o) => `<option value="${esc(o)}">`).join("");
   renderCleanup();
   if (selected && !templates.some((t) => t.key === selected)) selected = null;

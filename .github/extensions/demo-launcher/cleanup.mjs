@@ -6,7 +6,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { existsSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve, sep } from "node:path";
-import { CanvasError } from "@github/copilot-sdk/extension";
+import { LauncherError } from "./errors.mjs";
 
 const REPOS_DIR = join(homedir(), "repos");
 
@@ -58,9 +58,9 @@ export function createCleanup({ repoRoot, scriptEnv, scriptCommand, broadcast, o
     }
 
     async function preview({ owner, olderThanHours = 72 } = {}) {
-        if (state.status === "previewing" || state.status === "deleting") throw new CanvasError("busy", "Cleanup is already running.");
+        if (state.status === "previewing" || state.status === "deleting") throw new LauncherError("busy", "Cleanup is already running.");
         const hours = Number(olderThanHours);
-        if (!Number.isInteger(hours) || hours < 0) throw new CanvasError("invalid_options", "olderThanHours must be a whole number ≥ 0.");
+        if (!Number.isInteger(hours) || hours < 0) throw new LauncherError("invalid_options", "olderThanHours must be a whole number ≥ 0.");
         owner = owner?.trim() || null;
         state = { ...idle(), status: "previewing", owner, olderThanHours: hours };
         publish();
@@ -96,16 +96,16 @@ export function createCleanup({ repoRoot, scriptEnv, scriptCommand, broadcast, o
     }
 
     async function remove({ repos, removeClones = false } = {}) {
-        if (state.status !== "preview" && state.status !== "done") throw new CanvasError("no_preview", "Find repos to clean up first.");
+        if (state.status !== "preview" && state.status !== "done") throw new LauncherError("no_preview", "Find repos to clean up first.");
         const allowed = new Map(state.candidates.map((c) => [c.repo, c]));
         const selected = (repos ?? [...allowed.keys()]).filter((r) => allowed.has(r));
-        if (!selected.length) throw new CanvasError("nothing_selected", "No repos from the preview were selected.");
+        if (!selected.length) throw new LauncherError("nothing_selected", "No repos from the preview were selected.");
 
         state.canDelete = hasDeleteScope();
         if (state.canDelete === false) {
             state.needsDeleteScope = true;
             publish();
-            throw new CanvasError("missing_scope", "Your gh login can't delete repos yet. Run: gh auth refresh -h github.com -s delete_repo");
+            throw new LauncherError("missing_scope", "Your gh login can't delete repos yet. Run: gh auth refresh -h github.com -s delete_repo");
         }
         state.needsDeleteScope = false;
         state.status = "deleting";

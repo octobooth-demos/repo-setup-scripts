@@ -658,6 +658,32 @@ setup_pages() {
     echo "⚠️  The Pages deploy is still running; the site will appear at $PAGES_URL shortly."
 }
 
+# Optional "seed_prompts": [{ "label", "file" }] (any workflow). The Demo Launcher
+# shows each one with its own Copy and Run with Fusion buttons.
+validate_seed_prompts() {
+    jq -e ".repos[$SELECTED_INDEX] | has(\"seed_prompts\")" "$CONFIG_FILE" > /dev/null || return 0
+    # Labels are compared the way the launcher matches them (cleanLabel + labelKey in
+    # extension.mjs): control characters become spaces, outer spaces are trimmed, the first
+    # 40 code points are kept (then trailing spaces trimmed again), and ASCII letters are lowercased.
+    # shellcheck disable=SC2016
+    if ! jq -e --argjson i "$SELECTED_INDEX" '
+        def label_key: gsub("[\\x00-\\x1f\\x7f]"; " ") | sub("^ +"; "") | sub(" +$"; "") | .[0:40] | sub(" +$"; "") | ascii_downcase;
+        .repos[$i].seed_prompts |
+        type == "array" and length > 0 and
+        all(.[]; type == "object" and (.label | type == "string" and (label_key | length > 0)) and (.file | type == "string" and length > 0)) and
+        (map(.label | label_key) | length == (unique | length))' "$CONFIG_FILE" > /dev/null 2>&1; then
+        echo "❌ seed_prompts must be a non-empty list of { \"label\", \"file\" } entries whose labels stay unique (case-insensitive, first 40 characters)"
+        exit 1
+    fi
+    local file
+    while IFS= read -r file; do
+        if [ ! -f "$SCRIPT_DIR/$file" ]; then
+            echo "❌ seed_prompts file not found: $SCRIPT_DIR/$file"
+            exit 1
+        fi
+    done < <(jq -r ".repos[$SELECTED_INDEX].seed_prompts[].file" "$CONFIG_FILE")
+}
+
 # Validate required fields and referenced files for the selected workflow.
 # Fails before any remote side effect so a config typo cannot strand a
 # half-created repo on GitHub.
@@ -740,6 +766,8 @@ validate_selected_repo() {
             exit 1
             ;;
     esac
+
+    validate_seed_prompts
 
     if [ "${#missing[@]}" -gt 0 ]; then
         echo "❌ Selected repo '$REPO_KEY' is missing required config field(s):"
@@ -1284,6 +1312,10 @@ case $WORKFLOW in
         register_stack
         ;;
 esac
+
+while IFS=$'\t' read -r seed_label seed_file; do
+    [ -n "$seed_file" ] && echo "💬 Seed prompt ($seed_label): $SCRIPT_DIR/$seed_file"
+done < <(repo_cfg '.seed_prompts[]? | [.label, .file] | @tsv')
 
 if [ "$PAGES" = "true" ]; then
     setup_pages

@@ -1,0 +1,1 @@
+In the README's Quick start section, add a one-line note that OctoCart needs Node.js 22 or later (it's the "engines" requirement in package.json).

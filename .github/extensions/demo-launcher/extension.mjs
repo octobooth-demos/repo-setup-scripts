@@ -35,12 +35,49 @@ function loadTemplates() {
         owner: r.owner === "org" ? config.org : r.owner || null,
         requiresClone: r.workflow === "branch_and_codespace",
         answerKey: answerKeyPath(r.key),
-        seedPrompt: readSeedPrompt(r.seed_prompt_file),
+        ...readSeedPrompts(r),
     }));
 }
 
-// Optional "seed_prompt_file" (e.g. resources/fusion-blank/seed-prompt.txt): the prompt the
-// presenter runs in the new repo. The canvas shows it with Copy and "Run with Fusion".
+// Prompts the presenter runs in the new repo; the canvas shows each with Copy and
+// "Run with Fusion". Either one unlabeled "seed_prompt_file" (e.g. fusion-blank) or
+// "seed_prompts": [{ label, file }] (e.g. fusion-routing), whose label goes in the session name.
+// Labels must stay distinct after cleanLabel + labelKey (the same rule create-repo and CI
+// enforce); otherwise the template gets seedPromptError and no prompts, rather than one label
+// silently launching another label's prompt.
+function readSeedPrompts(r) {
+    if (r.seed_prompts === undefined) {
+        const text = readSeedPrompt(r.seed_prompt_file);
+        return { seedPrompts: text ? [{ label: null, text }] : [] };
+    }
+    const fail = (why) => ({ seedPrompts: [], seedPromptError: `seed_prompts in config.json ${why}.` });
+    if (!Array.isArray(r.seed_prompts) || !r.seed_prompts.length) return fail("must be a non-empty list");
+    const seen = new Map();
+    for (const p of r.seed_prompts) {
+        const key = labelKey(p?.label);
+        if (!key) return fail("needs a non-empty label on every entry");
+        if (seen.has(key)) return fail(`has labels that collide (${JSON.stringify(seen.get(key))} and ${JSON.stringify(p.label)})`);
+        seen.set(key, p.label);
+    }
+    const seedPrompts = r.seed_prompts.map((p) => ({ label: cleanLabel(p.label), text: readSeedPrompt(p.file) }));
+    const missing = seedPrompts.find((p) => !p.text);
+    return missing ? fail(`has no readable file for ${JSON.stringify(missing.label)}`) : { seedPrompts };
+}
+
+// Control characters become spaces, outer spaces are trimmed, the label keeps its first 40 code
+// points, and trailing spaces left by that cut are trimmed too (so cleaning is idempotent).
+// create-repo.sh/.ps1 and CI's Validate config apply the same steps.
+function cleanLabel(label) {
+    if (typeof label !== "string") return null;
+    const cleaned = Array.from(label.replace(/[\u0000-\u001f\u007f]/g, " ").replace(/^ +| +$/g, "")).slice(0, 40).join("").replace(/ +$/, "");
+    return cleaned || null;
+}
+
+// Lookups are case-insensitive for ASCII letters only, so every validator agrees.
+function labelKey(label) {
+    return cleanLabel(label)?.replace(/[A-Z]/g, (c) => c.toLowerCase()) ?? null;
+}
+
 function readSeedPrompt(file) {
     if (!file) return null;
     const path = resolve(REPO_ROOT, String(file));
@@ -48,9 +85,17 @@ function readSeedPrompt(file) {
     return readFileSync(path, "utf8").trim() || null;
 }
 
-function seedPromptFor(run) {
-    const prompt = loadTemplates().find((t) => t.key === run.template)?.seedPrompt;
-    if (!prompt) throw new CanvasError("no_seed_prompt", "This demo has no seed prompt.");
+// `which` is the prompt's index or label; defaults to the first prompt.
+function seedPromptFor(run, which) {
+    const tpl = loadTemplates().find((t) => t.key === run.template);
+    if (tpl?.seedPromptError) throw new CanvasError("bad_seed_prompts", tpl.seedPromptError);
+    const prompts = tpl?.seedPrompts || [];
+    if (!prompts.length) throw new CanvasError("no_seed_prompt", "This demo has no seed prompt.");
+    if (which === undefined || which === null || which === "") return prompts[0];
+    const key = labelKey(String(which));
+    const index = Number.isSafeInteger(which) ? which : prompts.findIndex((p) => p.label && labelKey(p.label) === key);
+    const prompt = prompts[index];
+    if (!prompt) throw new CanvasError("bad_seed_prompt", `This demo has no seed prompt ${JSON.stringify(String(which))}.`);
     return prompt;
 }
 
@@ -388,7 +433,21 @@ function safeRunFields(run, kind, target) {
     return { repo, clonePath, number, templateName };
 }
 
-function sessionPrompt(run, kind, target) {
+// Fusion tiers the presenter can pick. The app's model picker sends auto_tier "hydrafusion"
+// for Standard and High, and "hydrafusion-max" for Max. Only these ids ever reach a kickoff.
+const FUSION_TIERS = {
+    high: { autoTier: "hydrafusion", name: "Fusion", picker: "GitHub Copilot Fusion" },
+    max: { autoTier: "hydrafusion-max", name: "Fusion Max", picker: "GitHub Copilot Fusion Max" },
+};
+
+function fusionTier(tier) {
+    if (tier === undefined || tier === null || tier === "") return "high";
+    const key = String(tier).toLowerCase();
+    if (!Object.hasOwn(FUSION_TIERS, key)) throw new CanvasError("bad_tier", `Unknown Fusion tier ${JSON.stringify(String(tier))}; use "high" or "max".`);
+    return key;
+}
+
+function sessionPrompt(run, kind, target, tier) {
     const { repo, clonePath, number, templateName } = safeRunFields(run, kind, target);
     const where = clonePath
         ? `It is cloned locally at ${JSON.stringify(clonePath)} (use that path for create_project).`
@@ -400,8 +459,14 @@ function sessionPrompt(run, kind, target) {
         return `[Demo Launcher] Open a Copilot app session for issue #${number} in ${repo}. ${where} First add it as a project in this app (create_project) if it isn't one already, then use open_issue_session (repo_full_name "${repo}", issue_number ${number}). Don't start any work in it (omit kickoff), then navigate me to it.`;
     }
     if (kind === "fusion") {
-        const kickoff = { prompt: seedPromptFor(run), mode: "autopilot", model: "auto", auto_tier: "hydrafusion" };
-        return `[Demo Launcher] Run the ${JSON.stringify(templateName)} seed prompt with GitHub Copilot Fusion in ${repo}. ${where} Add it as a project in this app (create_project) if it isn't one already, then call create_session with that project_id, detached: true, and exactly this kickoff object (don't change the prompt text): ${JSON.stringify(kickoff)}. Then navigate me to that session. Don't do any of the work yourself.`;
+        const seed = seedPromptFor(run, target);
+        const t = FUSION_TIERS[fusionTier(tier)];
+        const kickoff = { prompt: seed.text, mode: "autopilot", model: "auto", auto_tier: t.autoTier };
+        const which = seed.label ? `${JSON.stringify(seed.label)} seed prompt from ${JSON.stringify(templateName)}` : `${JSON.stringify(templateName)} seed prompt`;
+        // High keeps the original wording; Max always gets a name so it stands out from High runs.
+        const prefix = seed.label ? `[${t.name} - ${seed.label}] ` : t === FUSION_TIERS.max ? `[${t.name}] ` : null;
+        const name = prefix ? ` Set the session name to ${JSON.stringify(prefix)} followed by a 2-4 word summary of the prompt, so the sessions are easy to compare.` : "";
+        return `[Demo Launcher] Run the ${which} with ${t.picker} in ${repo}. ${where} Add it as a project in this app (create_project) if it isn't one already, then call create_session with that project_id, detached: true, and exactly this kickoff object (don't change the prompt text): ${JSON.stringify(kickoff)}.${name} Then navigate me to that session. Don't do any of the work yourself.`;
     }
     return `[Demo Launcher] I just created the demo repo ${repo} (${JSON.stringify(templateName)}). ${where} Add it as a project in this app (create_project) if it isn't one already, create a new idle session in it (create_session with that project_id, no kickoff, detached: true), then navigate me to that session.`;
 }
@@ -464,8 +529,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // Standalone: no agent is available, so open the local clone in the app (adds the project and
 // lands on its new-session composer), then the PR/issue if one was picked. Without a clone,
 // fall back to the GitHub deep link, which asks the user to confirm adding the repo.
-async function openSession(run, kind, target) {
-    const prompt = sessionPrompt(run, kind, target);
+async function openSession(run, kind, target, tier) {
+    const prompt = sessionPrompt(run, kind, target, tier);
     if (!session) throw new CanvasError("no_session", "Extension is not connected to a session.");
     if (!isStandalone()) {
         await session.send({ prompt });
@@ -500,10 +565,12 @@ async function openSession(run, kind, target) {
     let copied = false;
     if (kind === "fusion") {
         try {
-            copied = copyToClipboard(seedPromptFor(run)).copied;
+            copied = copyToClipboard(seedPromptFor(run, target).text).copied;
         } catch {}
     }
-    const fusionSteps = "Pick Auto → GitHub Copilot Fusion and Autopilot, then";
+    const fusionSteps = kind === "fusion" && fusionTier(tier) === "max"
+        ? "Pick Auto → GitHub Copilot Fusion → Max and Autopilot, then"
+        : "Pick Auto → GitHub Copilot Fusion and Autopilot, then";
     const fusionTail = (didCopy) => didCopy
         ? `${fusionSteps} paste the copied seed prompt and send.`
         : `${fusionSteps} copy the seed prompt from this card (📋 Copy, or select it) and send it.`;
@@ -632,9 +699,9 @@ async function handle(req, res) {
             if (url.pathname === "/api/launch") return json(res, 200, summary(startRun(body)));
             if (url.pathname === "/api/cancel") return json(res, 200, cancelRun(body.id));
             if (url.pathname === "/api/open-session") {
-                return json(res, 200, await openSession(findRun(body.id), body.kind || "repo", body.target));
+                return json(res, 200, await openSession(findRun(body.id), body.kind || "repo", body.target, body.tier));
             }
-            if (url.pathname === "/api/copy-seed") return json(res, 200, copyToClipboard(seedPromptFor(findRun(body.id))));
+            if (url.pathname === "/api/copy-seed") return json(res, 200, copyToClipboard(seedPromptFor(findRun(body.id), body.target).text));
             if (url.pathname === "/api/open-vscode") return json(res, 200, openInVSCode(findRun(body.id)));
             if (url.pathname === "/api/open-answer-key") return json(res, 200, openAnswerKey(findRun(body.id)));
             if (url.pathname === "/api/cleanup/preview") return json(res, 200, await cleanup.preview(body));
@@ -742,12 +809,21 @@ const session = await joinSession({
                 },
                 {
                     name: "run_with_fusion",
-                    description: "For demos with a seed prompt: open a new autopilot session in the demo repo that runs the seed prompt with the GitHub Copilot Fusion model (latest run by default).",
-                    inputSchema: runIdInput,
+                    description: "For demos with a seed prompt: open a new autopilot session in the demo repo that runs a seed prompt with the GitHub Copilot Fusion model (latest run and first prompt by default). Call once per prompt to compare them.",
+                    inputSchema: {
+                        type: "object",
+                        properties: {
+                            ...runIdInput.properties,
+                            prompt: { type: "string", description: "Seed prompt label (e.g. Single, Cascade, Critique) for demos with several prompts; defaults to the first." },
+                            tier: { type: "string", enum: ["high", "max"], description: "Fusion tier: high (the picker's Standard/High, default) or max." },
+                        },
+                    },
                     handler: async (ctx) => {
                         const run = findRun(ctx.input?.runId);
                         if (run.status !== "succeeded" || run.result.deleted) throw new CanvasError("not_ready", "That demo repo is not ready.");
-                        return { ...(await openSession(run, "fusion")), seedPrompt: seedPromptFor(run) };
+                        const seed = seedPromptFor(run, ctx.input?.prompt);
+                        const tier = fusionTier(ctx.input?.tier);
+                        return { ...(await openSession(run, "fusion", seed.label ?? 0, tier)), seedPrompt: seed.text, tier, ...(seed.label ? { seedLabel: seed.label } : {}) };
                     },
                 },
                 {

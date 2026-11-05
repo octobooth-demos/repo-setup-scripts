@@ -66,6 +66,7 @@ Each entry in [`config.json`](config.json) is one demo. Pass its key to `--templ
 | `octocart` | OctoCart (Copilot Code Review) | Repo with 4 feature PRs. Copilot Code Review is requested on 3 of them; the 4th is left for you to request live | [Details](#octocart-copilot-code-review); [answer key](resources/octocart/ANSWER_KEY.md) (presenters only) |
 | `ai-security` | AI Security (AI Scan + agentic autofix) | Repo in the `octobooth-demos` org with an infra PR that AI Scan reviews, plus CodeQL alerts on `main` with one already assigned to Copilot | [Details](#ai-security-ai-scan--agentic-autofix); [presenter notes](resources/ai-security/ANSWER_KEY.md). **Pre-bake it:** it takes about 20 minutes to be fully ready |
 | `fusion-blank` | GitHub Copilot Fusion: Blank Prompt | Empty repo (README only) in the booth account, plus a seed prompt you run with the GitHub Copilot Fusion model in autopilot | [Details](#github-copilot-fusion-blank-prompt); [presenter notes](resources/fusion-blank/ANSWER_KEY.md) |
+| `fusion-routing` | GitHub Copilot Fusion: Routing (Single, Cascade, Critique) | OctoCart repo in the booth account, plus three seed prompts sized so Fusion picks a different pattern for each | [Details](#github-copilot-fusion-routing); [presenter notes](resources/fusion-routing/ANSWER_KEY.md) |
 
 ## PowerShell
 
@@ -123,7 +124,7 @@ Every repository the scripts create gets the `demo-generated` topic, which is wh
 
   The card also links to the repo's pull request list and has a **🔑 Presenter answer key** button. The button opens `resources/<key>/ANSWER_KEY.md` from this repo on your machine (in VS Code if it's installed). The answer key is never copied into demo repos, so keep it off the shared screen.
 - **One-click follow-ups.** **Open session in Copilot app** has Copilot add the repo as a project and open a fresh session. **Open PR session** and **Open issue session** open those items. **Open in VS Code** runs `code <clone>`. The session buttons and **Run with Fusion** need a chat behind the launcher; see [Opened without a chat](#opened-without-a-chat) for what they do otherwise.
-- **Seed prompts.** For demos with a `seed_prompt_file` (like `fusion-blank`), the card shows the prompt with **📋 Copy** and **▶ Run with Fusion**. Run with Fusion has Copilot add the repo as a project and start a new autopilot session that runs the prompt on the GitHub Copilot Fusion model (`model: "auto"`, `auto_tier: "hydrafusion"`).
+- **Seed prompts.** For demos with a `seed_prompt_file` (like `fusion-blank`) or `seed_prompts` (like `fusion-routing`), the card shows each prompt with **📋 Copy** and **▶ Run with Fusion**. Run with Fusion has Copilot add the repo as a project and start a new autopilot session that runs that prompt on the GitHub Copilot Fusion model (`model: "auto"`, `auto_tier: "hydrafusion"`). With `seed_prompts`, the session name starts with the prompt's label (for example `[Fusion - Cascade] Safe orders errors`), so you can run them all and compare the sessions side by side. A **Fusion tier** choice above the prompts (**High**, the default, or **Max**) applies to every Run with Fusion button on that card. High is the model picker's Standard/High tier (`auto_tier: "hydrafusion"`; the picker uses that one id for both), and Max is `auto_tier: "hydrafusion-max"`. Max sessions are named `[Fusion Max - <label>] …`, or `[Fusion Max] …` for a single unlabeled prompt. The `run_with_fusion` canvas action takes the same optional `tier` (`"high"` or `"max"`).
 - **Clean up.** This works like `--cleanup`. Pick an owner and an age cutoff (default 72 hours, or **Any age**), review the matching `demo-generated` repos, and untick any you want to keep. Then delete the rest, optionally with their clones in `~/repos`. Deleting needs the `delete_repo` scope.
 
 Runs use your stored `gh auth login`, not any `GH_TOKEN` the app injects, so they have the same scopes as a terminal run. When they do, git pushes also go through `gh auth git-credential`, so git and `gh` always act as the same account even if the app is signed in as someone else. Nothing extra to set up: this only changes the environment of the scripts the launcher starts, not your git config or keychain. Run history survives restarts. It's kept in `~/.copilot/extensions/demo-launcher/artifacts/runs.json` and shared by every open launcher (each chat runs its own copy of the extension), so a demo created from one panel shows up in the others. **Clear history** clears finished runs in all of them. A run is only marked *interrupted* when the launcher that started it has exited; cancel a run from the panel or chat that started it. The panel is a plain loopback web page, so its URL also works in a browser, including VS Code's Simple Browser. The port changes each time the extension restarts.
@@ -151,7 +152,7 @@ When you open the launcher from the app's canvas picker instead of from a chat, 
 | --- | --- |
 | **Open session in Copilot app** | Opens the repo's project, ready for a new session. Type your first prompt. |
 | **Open PR session** / **Open issue session** | Adds the project, then opens the PR or issue in the app. Start a session from there. |
-| **▶ Run with Fusion** | Copies the seed prompt and opens the project's new-session composer. Pick **Auto → GitHub Copilot Fusion** and **Autopilot**, paste, and send. |
+| **▶ Run with Fusion** | Copies the seed prompt and opens the project's new-session composer. Pick **Auto → GitHub Copilot Fusion** (and the **Max** tier if you chose Max on the card) and **Autopilot**, paste, and send. |
 
 This needs macOS and a local clone. Without a clone (**Skip local clone**), the buttons fall back to `ghapp://github.com/<owner>/<repo>`, and the app asks you to **Allow** adding the repo. For **Open PR session** / **Open issue session**, click **Allow**, then click the button again to open the PR or issue. If the launcher can't copy the seed prompt or open the PR or issue, its message says so and tells you what to do instead. Extensions have no supported API to create an app session or pick its model, so the composer is as far as the launcher can take you without a chat.
 
@@ -226,7 +227,7 @@ If you change what the scripts print (repo, clone, `PR #N created: <url>`, Copil
 By default, repos are created in **the account that is logged in** (`gh api user`), so each booth machine (`octobooth-1`, `octobooth-2`, …) gets its own copies. The owner is resolved in this order:
 
 1. `--owner <name>` / `-Owner <name>`
-2. The config entry's `owner` field. `"owner": "org"` means the top-level `org`; any other value is used as-is. `security-octo-supply-v4` and `ai-security` are pinned to the org because they need code scanning; everything else (including `fusion-blank`) goes to the logged-in booth account.
+2. The config entry's `owner` field. `"owner": "org"` means the top-level `org`; any other value is used as-is. `security-octo-supply-v4` and `ai-security` are pinned to the org because they need code scanning; everything else (including `fusion-blank` and `fusion-routing`) goes to the logged-in booth account.
 3. The logged-in account.
 4. The top-level `org` (only when there is no user account, such as a GitHub App token in Actions).
 
@@ -297,7 +298,7 @@ bash ./create-repo.sh --cleanup
 
 ## Workflows and config fields
 
-Each `repos[]` entry needs `key`, `display_name`, `template` (except for the `blank` workflow), `repo_base_name`, and `workflow`. Optional `template_org` overrides the top-level `org` for the template source, optional `owner` pins where the repo is created (see [above](#where-repos-are-created)), optional `visibility` (`private` by default, or `public` / `internal`) sets the new repo's visibility, optional `"pages": true` turns on GitHub Pages and deploys it with the template's `pages.yml` workflow (see [Showing the game](#showing-the-game); Booth Bingo sets both), optional `"serve": true` starts the [local preview](#running-it-locally-instead-optional) whenever the repo is cloned, and `summary_lines` are printed at the end.
+Each `repos[]` entry needs `key`, `display_name`, `template` (except for the `blank` workflow), `repo_base_name`, and `workflow`. Optional `template_org` overrides the top-level `org` for the template source, optional `owner` pins where the repo is created (see [above](#where-repos-are-created)), optional `visibility` (`private` by default, or `public` / `internal`) sets the new repo's visibility, optional `"pages": true` turns on GitHub Pages and deploys it with the template's `pages.yml` workflow (see [Showing the game](#showing-the-game); Booth Bingo sets both), optional `"serve": true` starts the [local preview](#running-it-locally-instead-optional) whenever the repo is cloned, optional `seed_prompts` (a list of `{ "label", "file" }` entries, for any workflow; labels must stay unique ignoring ASCII case and after the first 40 characters, because that is how the launcher matches them) gives the Demo Launcher one Copy and Run with Fusion button pair per prompt, and `summary_lines` are printed at the end.
 
 | `workflow` | Extra fields | What it does |
 | --- | --- | --- |
@@ -374,6 +375,18 @@ The script doesn't turn on CodeQL default setup, because default setup can't run
 `fusion-blank` shows GitHub Copilot Fusion (formerly Project HydraFusion), the Copilot model option that orchestrates several models per request (Single, Cascade, or Critique) for frontier-level quality at lower cost. The preview works best on a substantial, well-scoped, first-turn prompt in autopilot, so the demo is just that: an empty repo in the booth account (like Ctrl Slash and Booth Bingo; the seed prompt and presenter notes stay in this repo) and one prompt from [`resources/fusion-blank/seed-prompt.txt`](resources/fusion-blank/seed-prompt.txt), which builds "Mona Merge Rush", a 2048-style Octocat game with `node:test` tests.
 
 After the run finishes, click **▶ Run with Fusion** in the launcher, or copy the prompt and run it yourself with the GitHub Copilot Fusion model in autopilot. Expect about 4-5 minutes and a playable game whose tests pass. Talking points, benchmark numbers, and alternate prompts are in the [presenter notes](resources/fusion-blank/ANSWER_KEY.md). Use a fresh repo for each visitor, and remove old ones with the launcher's **Clean up** or `--cleanup` on that machine (see [Which cleanup covers which repos](#which-cleanup-covers-which-repos)). ChatOps (`/new-demo fusion-blank`) still creates it in the org, where the nightly cleanup deletes it after 72 hours.
+
+### GitHub Copilot Fusion: Routing
+
+`fusion-routing` shows *how* GitHub Copilot Fusion decides. It creates an OctoCart repo (the same Express + React store as the [Copilot Code Review demo](#octocart-copilot-code-review), without the PRs) in the booth account, and the launcher card shows three seed prompts from [`resources/fusion-routing/`](resources/fusion-routing), each with its own **▶ Run with Fusion** button:
+
+| Label | Prompt | Pattern it usually gets |
+| --- | --- | --- |
+| Single | Add a Node.js 22 note to the README | **Single**: one model, done in about a minute |
+| Cascade | Make the orders API fail safely when the data store is down, with vitest + supertest tests | **Cascade**: a fast draft, then a quality gate accepts it or escalates |
+| Critique | Write a design proposal for order tracking that compares three data models and recommends one | **Critique**: a draft, an independent read-only review from another model family, then one revision |
+
+Run all three (each opens its own `[Fusion - <label>] …` session) and compare them. Fusion picks the pattern per request, so the labels are what each prompt is *sized* for, not a guarantee. In our testing, Critique went to reasoning-heavy tasks with little code (design and tradeoff writing), while code-writing tasks of every size above "trivial", including a full order tracking feature, went to Cascade. The [presenter notes](resources/fusion-routing/ANSWER_KEY.md) cover timings, what to show in each session, and talking points. Use a fresh repo for each visitor.
 
 ## ChatOps
 

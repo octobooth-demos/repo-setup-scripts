@@ -108,6 +108,26 @@ function Assert-PullRequestEntries {
     return $missing
 }
 
+# Matches how the Demo Launcher compares seed prompt labels (cleanLabel + labelKey in
+# extension.mjs): control characters become spaces, outer spaces are trimmed, the first 40
+# code points are kept (then trailing spaces trimmed again), and ASCII letters are lowercased.
+function Get-SeedLabelKey {
+    param([string]$Label)
+
+    $cleaned = ([regex]::Replace($Label, '[\x00-\x1f\x7f]', ' ')).Trim(' ')
+    $builder = New-Object System.Text.StringBuilder
+    $codePoints = 0
+    for ($i = 0; $i -lt $cleaned.Length -and $codePoints -lt 40; $i++) {
+        [void]$builder.Append($cleaned[$i])
+        if ([char]::IsHighSurrogate($cleaned[$i]) -and $i + 1 -lt $cleaned.Length -and [char]::IsLowSurrogate($cleaned[$i + 1])) {
+            $i++
+            [void]$builder.Append($cleaned[$i])
+        }
+        $codePoints++
+    }
+    return [regex]::Replace($builder.ToString().TrimEnd(' '), '[A-Z]', { param($m) $m.Value.ToLowerInvariant() })
+}
+
 function Assert-SelectedRepo {
     param($Repo)
 
@@ -185,6 +205,35 @@ function Assert-SelectedRepo {
         }
         default {
             throw "Unknown workflow: $($Repo.workflow)"
+        }
+    }
+
+    # Optional seed_prompts: [{ label, file }] (any workflow). The Demo Launcher shows each
+    # one with its own Copy and Run with Fusion buttons.
+    if ($Repo.PSObject.Properties['seed_prompts']) {
+        $seeds = $Repo.seed_prompts
+        $valid = $seeds -is [array] -and $seeds.Count -gt 0
+        if ($valid) {
+            foreach ($seed in $seeds) {
+                if ($seed -isnot [pscustomobject] -or
+                    $seed.label -isnot [string] -or [string]::IsNullOrWhiteSpace($seed.label) -or
+                    $seed.file -isnot [string] -or [string]::IsNullOrWhiteSpace($seed.file)) {
+                    $valid = $false
+                }
+            }
+        }
+        if ($valid) {
+            $keys = @($seeds | ForEach-Object { Get-SeedLabelKey $_.label })
+            $valid = -not ($keys -contains '') -and @($keys | Sort-Object -Unique -CaseSensitive).Count -eq $keys.Count
+        }
+        if (-not $valid) {
+            throw 'seed_prompts must be a non-empty list of { "label", "file" } entries whose labels stay unique (case-insensitive, first 40 characters).'
+        }
+        foreach ($seed in $seeds) {
+            $seedPath = Join-Path $scriptDirectory $seed.file
+            if (-not (Test-Path -LiteralPath $seedPath -PathType Leaf)) {
+                throw "seed_prompts file not found: $seedPath"
+            }
         }
     }
 
@@ -978,6 +1027,10 @@ try {
             Set-ActionOutput 'top_pr_url' $topPullRequestUrl
             Register-PullRequestStack $stackNumbers
         }
+    }
+
+    foreach ($seed in @($selectedRepo.seed_prompts | Where-Object { $_ })) {
+        Write-Host "Seed prompt ($($seed.label)): $(Join-Path $scriptDirectory $seed.file)"
     }
 
     $pagesUrl = $null

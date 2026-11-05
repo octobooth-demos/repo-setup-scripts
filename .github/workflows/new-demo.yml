@@ -16,6 +16,7 @@ on:
           - octocart
           - ai-security
           - fusion-blank
+          - fusion-routing
   issue_comment:
     types: [created]
 

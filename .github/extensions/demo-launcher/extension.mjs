@@ -64,11 +64,12 @@ function readSeedPrompts(r) {
     return missing ? fail(`has no readable file for ${JSON.stringify(missing.label)}`) : { seedPrompts };
 }
 
-// Control characters become spaces, outer spaces are trimmed, and the label keeps its first
-// 40 code points. create-repo.sh/.ps1 and CI's Validate config apply the same steps.
+// Control characters become spaces, outer spaces are trimmed, the label keeps its first 40 code
+// points, and trailing spaces left by that cut are trimmed too (so cleaning is idempotent).
+// create-repo.sh/.ps1 and CI's Validate config apply the same steps.
 function cleanLabel(label) {
     if (typeof label !== "string") return null;
-    const cleaned = Array.from(label.replace(/[\u0000-\u001f\u007f]/g, " ").replace(/^ +| +$/g, "")).slice(0, 40).join("");
+    const cleaned = Array.from(label.replace(/[\u0000-\u001f\u007f]/g, " ").replace(/^ +| +$/g, "")).slice(0, 40).join("").replace(/ +$/, "");
     return cleaned || null;
 }
 

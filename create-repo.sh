@@ -664,10 +664,10 @@ validate_seed_prompts() {
     jq -e ".repos[$SELECTED_INDEX] | has(\"seed_prompts\")" "$CONFIG_FILE" > /dev/null || return 0
     # Labels are compared the way the launcher matches them (cleanLabel + labelKey in
     # extension.mjs): control characters become spaces, outer spaces are trimmed, the first
-    # 40 code points are kept, and ASCII letters are lowercased.
+    # 40 code points are kept (then trailing spaces trimmed again), and ASCII letters are lowercased.
     # shellcheck disable=SC2016
     if ! jq -e --argjson i "$SELECTED_INDEX" '
-        def label_key: gsub("[\\x00-\\x1f\\x7f]"; " ") | sub("^ +"; "") | sub(" +$"; "") | .[0:40] | ascii_downcase;
+        def label_key: gsub("[\\x00-\\x1f\\x7f]"; " ") | sub("^ +"; "") | sub(" +$"; "") | .[0:40] | sub(" +$"; "") | ascii_downcase;
         .repos[$i].seed_prompts |
         type == "array" and length > 0 and
         all(.[]; type == "object" and (.label | type == "string" and (label_key | length > 0)) and (.file | type == "string" and length > 0)) and

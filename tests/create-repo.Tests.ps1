@@ -263,7 +263,7 @@ try {
         'ai-security-missing-seed', 'ai-security-no-seed', 'ai-security-scan-only', 'ai-security-autofix-only',
         'ai-security-missing-prs',
         'blank', 'blank-interactive', 'blank-missing-seed', 'blank-needs-workflow',
-        'routing', 'routing-missing-seed', 'routing-duplicate-label', 'routing-case-collision', 'routing-prefix-collision', 'routing-empty-seeds', 'routing-seed-without-file'
+        'routing', 'routing-missing-seed', 'routing-duplicate-label', 'routing-case-collision', 'routing-prefix-collision', 'routing-trailing-space-collision', 'routing-empty-seeds', 'routing-seed-without-file'
     )) {
         $config = $originalConfig | ConvertFrom-Json
         $config.repos += $branchRepo
@@ -380,6 +380,14 @@ try {
                 $scriptArgs = @{ Template = 'fusion-routing' }
                 $config.repos[$routingIndex].seed_prompts[1].label = 'Cascade ' + ('x' * 33) + ' one'
                 $config.repos[$routingIndex].seed_prompts[2].label = 'Cascade ' + ('x' * 33) + ' two'
+                $expectedFailure = 'stay unique'
+            }
+            'routing-trailing-space-collision' {
+                # Cutting to 40 characters leaves a trailing space, which is trimmed again.
+                $selection = $null
+                $scriptArgs = @{ Template = 'fusion-routing' }
+                $config.repos[$routingIndex].seed_prompts[1].label = ('A' * 39) + ' X'
+                $config.repos[$routingIndex].seed_prompts[2].label = 'A' * 39
                 $expectedFailure = 'stay unique'
             }
             'routing-empty-seeds' {

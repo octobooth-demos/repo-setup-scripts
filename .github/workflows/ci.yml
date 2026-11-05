@@ -24,7 +24,7 @@ jobs:
         run: |
           # label_key matches how the Demo Launcher compares seed prompt labels (extension.mjs labelKey).
           jq -e '
-            def label_key: gsub("[\\x00-\\x1f\\x7f]"; " ") | sub("^ +"; "") | sub(" +$"; "") | .[0:40] | ascii_downcase;
+            def label_key: gsub("[\\x00-\\x1f\\x7f]"; " ") | sub("^ +"; "") | sub(" +$"; "") | .[0:40] | sub(" +$"; "") | ascii_downcase;
             (.org | type == "string") and
             (.codespace_machine | type == "string") and
             (.repos | type == "array" and length > 0) and

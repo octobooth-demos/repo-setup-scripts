@@ -110,7 +110,7 @@ function Assert-PullRequestEntries {
 
 # Matches how the Demo Launcher compares seed prompt labels (cleanLabel + labelKey in
 # extension.mjs): control characters become spaces, outer spaces are trimmed, the first 40
-# code points are kept, and ASCII letters are lowercased.
+# code points are kept (then trailing spaces trimmed again), and ASCII letters are lowercased.
 function Get-SeedLabelKey {
     param([string]$Label)
 
@@ -125,7 +125,7 @@ function Get-SeedLabelKey {
         }
         $codePoints++
     }
-    return [regex]::Replace($builder.ToString(), '[A-Z]', { param($m) $m.Value.ToLowerInvariant() })
+    return [regex]::Replace($builder.ToString().TrimEnd(' '), '[A-Z]', { param($m) $m.Value.ToLowerInvariant() })
 }
 
 function Assert-SelectedRepo {

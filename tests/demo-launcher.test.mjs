@@ -206,6 +206,7 @@ for (const [name, labels] of [
     ["labels that differ only in case", ["Single", "single", "Critique"]],
     ["labels that share their first 40 characters", ["Single", `Cascade ${"x".repeat(33)} one`, `Cascade ${"x".repeat(33)} two`]],
     ["labels that differ only in control characters or outer spaces", ["Single", "Cascade\t", " Cascade "]],
+    ["labels that match once the 40-character cut leaves a trailing space", ["Single", `${"A".repeat(39)} X`, "A".repeat(39)]],
 ]) {
     test(`seed prompts with ${name} are rejected instead of launching the wrong prompt`, () => {
         const result = runDriver(withRoutingLabels(labels), COLLISION_DRIVER);

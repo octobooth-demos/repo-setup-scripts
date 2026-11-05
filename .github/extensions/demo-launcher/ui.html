@@ -190,11 +190,10 @@ function renderRun(r) {
       <label><input type="radio" name="tier-${r.id}" data-tier="max" data-id="${r.id}" ${tier === "max" ? "checked" : ""}/> Max</label>
       <span>applies to every ▶ Run with Fusion below</span>
     </div>` : "";
-  const runLabel = tier === "max" ? "▶ Run with Fusion Max" : "▶ Run with Fusion";
   const seed = tierPicker + seedPrompts.map((p, i) => `<div class="seed">
       <div class="seed-head">💬 <strong>${p.label ? `Seed prompt: ${esc(p.label)}` : "Seed prompt"}</strong>
         <button class="btn" data-act="copy-seed" data-id="${r.id}" data-target="${i}">📋 Copy</button>
-        <button class="btn primary" data-act="fusion" data-id="${r.id}" data-target="${i}" title="New autopilot session in this repo with the GitHub Copilot Fusion model (${tier === "max" ? "Max" : "High"} tier), already running the prompt">${runLabel}</button>
+        <button class="btn primary" data-act="fusion" data-id="${r.id}" data-target="${i}" title="${fusionTitle(tier)}">${fusionLabel(tier)}</button>
       </div>
       <div class="seed-text">${esc(p.text)}</div>
     </div>`).join("");
@@ -220,8 +219,15 @@ function renderRun(r) {
   </div>`;
 }
 
+const fusionLabel = (tier) => tier === "max" ? "▶ Run with Fusion Max" : "▶ Run with Fusion";
+const fusionTitle = (tier) => `New autopilot session in this repo with the GitHub Copilot Fusion model (${tier === "max" ? "Max" : "High"} tier), already running the prompt`;
+
 function renderRuns() {
+  // Re-rendering replaces the radios, so put keyboard focus back on the tier radio that had it.
+  const active = document.activeElement;
+  const focusedTier = active?.dataset?.tier && active.dataset.id ? `input[data-tier="${CSS.escape(active.dataset.tier)}"][data-id="${CSS.escape(active.dataset.id)}"]` : null;
   $("runs").innerHTML = runs.length ? runs.map(renderRun).join("") : `<div class="muted">No demos created yet.</div>`;
+  if (focusedTier) document.querySelector(focusedTier)?.focus();
   for (const pre of document.querySelectorAll("pre.log")) pre.scrollTop = pre.scrollHeight;
   renderTemplates();
 }
@@ -254,7 +260,11 @@ $("runs").addEventListener("change", (e) => {
   const { tier, id } = e.target.dataset || {};
   if (!tier || !id) return;
   fusionTiers.set(id, tier);
-  renderRuns();
+  // Update this card's buttons in place so the radio keeps focus (arrow keys keep working).
+  for (const b of document.querySelectorAll(`button[data-act="fusion"][data-id="${CSS.escape(id)}"]`)) {
+    b.textContent = fusionLabel(tier);
+    b.title = fusionTitle(tier);
+  }
 });
 
 $("runs").addEventListener("click", async (e) => {

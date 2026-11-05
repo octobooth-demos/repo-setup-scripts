@@ -662,11 +662,17 @@ setup_pages() {
 # shows each one with its own Copy and Run with Fusion buttons.
 validate_seed_prompts() {
     jq -e ".repos[$SELECTED_INDEX] | has(\"seed_prompts\")" "$CONFIG_FILE" > /dev/null || return 0
-    if ! jq -e ".repos[$SELECTED_INDEX].seed_prompts |
-        type == \"array\" and length > 0 and
-        all(.[]; type == \"object\" and (.label | type == \"string\" and length > 0) and (.file | type == \"string\" and length > 0)) and
-        (map(.label) | length == (unique | length))" "$CONFIG_FILE" > /dev/null 2>&1; then
-        echo "❌ seed_prompts must be a non-empty list of { \"label\", \"file\" } entries with unique labels"
+    # Labels are compared the way the launcher matches them (cleanLabel + labelKey in
+    # extension.mjs): control characters become spaces, outer spaces are trimmed, the first
+    # 40 code points are kept, and ASCII letters are lowercased.
+    # shellcheck disable=SC2016
+    if ! jq -e --argjson i "$SELECTED_INDEX" '
+        def label_key: gsub("[\\x00-\\x1f\\x7f]"; " ") | sub("^ +"; "") | sub(" +$"; "") | .[0:40] | ascii_downcase;
+        .repos[$i].seed_prompts |
+        type == "array" and length > 0 and
+        all(.[]; type == "object" and (.label | type == "string" and (label_key | length > 0)) and (.file | type == "string" and length > 0)) and
+        (map(.label | label_key) | length == (unique | length))' "$CONFIG_FILE" > /dev/null 2>&1; then
+        echo "❌ seed_prompts must be a non-empty list of { \"label\", \"file\" } entries whose labels stay unique (case-insensitive, first 40 characters)"
         exit 1
     fi
     local file

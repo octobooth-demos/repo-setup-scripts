@@ -5,13 +5,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, cpSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const EXTENSION = pathToFileURL(join(ROOT, ".github", "extensions", "demo-launcher", "extension.mjs")).href;
 const CONFIG = JSON.parse(readFileSync(join(ROOT, "config.json"), "utf8"));
 
 const STUB = `
@@ -57,15 +56,22 @@ console.log("__RESULT__" + JSON.stringify(out));
 process.exit(0);
 `;
 
-function runDriver() {
+// Copies the launcher, config.json, and resources into a temp repo root so a test can use a
+// modified config; the extension reads config.json relative to its own location.
+function runDriver(editConfig = (c) => c, driver = DRIVER) {
     const dir = mkdtempSync(join(tmpdir(), "demo-launcher-test-"));
     try {
+        const root = join(dir, "repo");
+        cpSync(join(ROOT, ".github", "extensions", "demo-launcher"), join(root, ".github", "extensions", "demo-launcher"), { recursive: true });
+        cpSync(join(ROOT, "resources"), join(root, "resources"), { recursive: true });
+        writeFileSync(join(root, "config.json"), JSON.stringify(editConfig(structuredClone(CONFIG))));
+        const extensionUrl = pathToFileURL(join(root, ".github", "extensions", "demo-launcher", "extension.mjs")).href;
         const stub = join(dir, "stub.mjs");
         const hooks = join(dir, "hooks.mjs");
-        const driver = join(dir, "driver.mjs");
+        const driverFile = join(dir, "driver.mjs");
         writeFileSync(stub, STUB);
         writeFileSync(hooks, HOOKS(pathToFileURL(stub).href));
-        writeFileSync(driver, DRIVER);
+        writeFileSync(driverFile, driver);
         const home = join(dir, "copilot-home");
         const artifacts = join(home, "extensions", "demo-launcher", "artifacts");
         mkdirSync(artifacts, { recursive: true });
@@ -78,8 +84,8 @@ function runDriver() {
             version: 2, clearedAt: 0,
             runs: [run("routing", "fusion-routing", "demo-user/fusion-routing-1234"), run("blank", "fusion-blank", "demo-user/fusion-blank-1234")],
         }));
-        const res = spawnSync(process.execPath, [driver], {
-            env: { ...process.env, COPILOT_HOME: home, HOOKS_URL: pathToFileURL(hooks).href, EXTENSION_URL: EXTENSION },
+        const res = spawnSync(process.execPath, [driverFile], {
+            env: { ...process.env, COPILOT_HOME: home, HOOKS_URL: pathToFileURL(hooks).href, EXTENSION_URL: extensionUrl },
             encoding: "utf8",
             timeout: 60000,
         });
@@ -136,4 +142,46 @@ test("the canvas buttons pick a prompt by index", () => {
     assert.match(out.sent[3], /\[Fusion - Cascade\] /);
     assert.match(out.httpOutOfRange.error, /no seed prompt/);
     assert.equal(out.sent.length, 4);
+});
+
+// A driver that only reports the routing template and what run_with_fusion does with it.
+const COLLISION_DRIVER = `
+import { register } from "node:module";
+register(process.env.HOOKS_URL);
+await import(process.env.EXTENSION_URL);
+const canvas = globalThis.__canvas;
+const base = (await canvas.open({ input: {} })).url;
+const state = await (await fetch(base + "api/state")).json();
+const out = { template: state.templates.find((t) => t.key === "fusion-routing") };
+const run = canvas.actions.find((a) => a.name === "run_with_fusion").handler;
+try { out.run = await run({ input: { runId: "routing", prompt: "Cascade" } }); } catch (e) { out.run = { error: e.code }; }
+out.sent = globalThis.__sent;
+console.log("__RESULT__" + JSON.stringify(out));
+process.exit(0);
+`;
+
+const withRoutingLabels = (labels) => (config) => {
+    const routing = config.repos.find((r) => r.key === "fusion-routing");
+    routing.seed_prompts.forEach((p, i) => { p.label = labels[i]; });
+    return config;
+};
+
+for (const [name, labels] of [
+    ["labels that differ only in case", ["Single", "single", "Critique"]],
+    ["labels that share their first 40 characters", ["Single", `Cascade ${"x".repeat(33)} one`, `Cascade ${"x".repeat(33)} two`]],
+    ["labels that differ only in control characters or outer spaces", ["Single", "Cascade\t", " Cascade "]],
+]) {
+    test(`seed prompts with ${name} are rejected instead of launching the wrong prompt`, () => {
+        const result = runDriver(withRoutingLabels(labels), COLLISION_DRIVER);
+        assert.deepEqual(result.template.seedPrompts, []);
+        assert.match(result.template.seedPromptError, /collide/);
+        assert.equal(result.run.error, "bad_seed_prompts");
+        assert.deepEqual(result.sent, []);
+    });
+}
+
+test("labels stay distinct when only non-ASCII letters differ in case, matching the setup scripts", () => {
+    const result = runDriver(withRoutingLabels(["Single", "Éclair", "éclair"]), COLLISION_DRIVER);
+    assert.equal(result.template.seedPromptError, undefined);
+    assert.deepEqual(result.template.seedPrompts.map((p) => p.label), ["Single", "Éclair", "éclair"]);
 });

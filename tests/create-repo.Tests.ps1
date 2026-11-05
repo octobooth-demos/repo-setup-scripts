@@ -263,7 +263,7 @@ try {
         'ai-security-missing-seed', 'ai-security-no-seed', 'ai-security-scan-only', 'ai-security-autofix-only',
         'ai-security-missing-prs',
         'blank', 'blank-interactive', 'blank-missing-seed', 'blank-needs-workflow',
-        'routing', 'routing-missing-seed', 'routing-duplicate-label', 'routing-empty-seeds', 'routing-seed-without-file'
+        'routing', 'routing-missing-seed', 'routing-duplicate-label', 'routing-case-collision', 'routing-prefix-collision', 'routing-empty-seeds', 'routing-seed-without-file'
     )) {
         $config = $originalConfig | ConvertFrom-Json
         $config.repos += $branchRepo
@@ -365,7 +365,22 @@ try {
                 $selection = $null
                 $scriptArgs = @{ Template = 'fusion-routing' }
                 $config.repos[$routingIndex].seed_prompts[1].label = 'Single'
-                $expectedFailure = 'unique labels'
+                $expectedFailure = 'stay unique'
+            }
+            'routing-case-collision' {
+                # The launcher matches labels case-insensitively, so these would pick the same prompt.
+                $selection = $null
+                $scriptArgs = @{ Template = 'fusion-routing' }
+                $config.repos[$routingIndex].seed_prompts[1].label = 'single'
+                $expectedFailure = 'stay unique'
+            }
+            'routing-prefix-collision' {
+                # The launcher keeps the first 40 characters of a label.
+                $selection = $null
+                $scriptArgs = @{ Template = 'fusion-routing' }
+                $config.repos[$routingIndex].seed_prompts[1].label = 'Cascade ' + ('x' * 33) + ' one'
+                $config.repos[$routingIndex].seed_prompts[2].label = 'Cascade ' + ('x' * 33) + ' two'
+                $expectedFailure = 'stay unique'
             }
             'routing-empty-seeds' {
                 $selection = $null

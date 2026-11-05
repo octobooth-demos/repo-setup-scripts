@@ -35,24 +35,46 @@ function loadTemplates() {
         owner: r.owner === "org" ? config.org : r.owner || null,
         requiresClone: r.workflow === "branch_and_codespace",
         answerKey: answerKeyPath(r.key),
-        seedPrompts: readSeedPrompts(r),
+        ...readSeedPrompts(r),
     }));
 }
 
 // Prompts the presenter runs in the new repo; the canvas shows each with Copy and
 // "Run with Fusion". Either one unlabeled "seed_prompt_file" (e.g. fusion-blank) or
 // "seed_prompts": [{ label, file }] (e.g. fusion-routing), whose label goes in the session name.
+// Labels must stay distinct after cleanLabel + labelKey (the same rule create-repo and CI
+// enforce); otherwise the template gets seedPromptError and no prompts, rather than one label
+// silently launching another label's prompt.
 function readSeedPrompts(r) {
-    const entries = Array.isArray(r.seed_prompts)
-        ? r.seed_prompts.map((p) => ({ label: cleanLabel(p?.label), file: p?.file }))
-        : [{ label: null, file: r.seed_prompt_file }];
-    return entries
-        .map(({ label, file }) => ({ label, text: readSeedPrompt(file) }))
-        .filter((p) => p.text && (p.label || entries.length === 1));
+    if (r.seed_prompts === undefined) {
+        const text = readSeedPrompt(r.seed_prompt_file);
+        return { seedPrompts: text ? [{ label: null, text }] : [] };
+    }
+    const fail = (why) => ({ seedPrompts: [], seedPromptError: `seed_prompts in config.json ${why}.` });
+    if (!Array.isArray(r.seed_prompts) || !r.seed_prompts.length) return fail("must be a non-empty list");
+    const seen = new Map();
+    for (const p of r.seed_prompts) {
+        const key = labelKey(p?.label);
+        if (!key) return fail("needs a non-empty label on every entry");
+        if (seen.has(key)) return fail(`has labels that collide (${JSON.stringify(seen.get(key))} and ${JSON.stringify(p.label)})`);
+        seen.set(key, p.label);
+    }
+    const seedPrompts = r.seed_prompts.map((p) => ({ label: cleanLabel(p.label), text: readSeedPrompt(p.file) }));
+    const missing = seedPrompts.find((p) => !p.text);
+    return missing ? fail(`has no readable file for ${JSON.stringify(missing.label)}`) : { seedPrompts };
 }
 
+// Control characters become spaces, outer spaces are trimmed, and the label keeps its first
+// 40 code points. create-repo.sh/.ps1 and CI's Validate config apply the same steps.
 function cleanLabel(label) {
-    return typeof label === "string" ? label.replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, 40) || null : null;
+    if (typeof label !== "string") return null;
+    const cleaned = Array.from(label.replace(/[\u0000-\u001f\u007f]/g, " ").replace(/^ +| +$/g, "")).slice(0, 40).join("");
+    return cleaned || null;
+}
+
+// Lookups are case-insensitive for ASCII letters only, so every validator agrees.
+function labelKey(label) {
+    return cleanLabel(label)?.replace(/[A-Z]/g, (c) => c.toLowerCase()) ?? null;
 }
 
 function readSeedPrompt(file) {
@@ -64,10 +86,13 @@ function readSeedPrompt(file) {
 
 // `which` is the prompt's index or label; defaults to the first prompt.
 function seedPromptFor(run, which) {
-    const prompts = loadTemplates().find((t) => t.key === run.template)?.seedPrompts || [];
+    const tpl = loadTemplates().find((t) => t.key === run.template);
+    if (tpl?.seedPromptError) throw new CanvasError("bad_seed_prompts", tpl.seedPromptError);
+    const prompts = tpl?.seedPrompts || [];
     if (!prompts.length) throw new CanvasError("no_seed_prompt", "This demo has no seed prompt.");
     if (which === undefined || which === null || which === "") return prompts[0];
-    const index = Number.isSafeInteger(which) ? which : prompts.findIndex((p) => p.label && p.label.toLowerCase() === String(which).toLowerCase());
+    const key = labelKey(String(which));
+    const index = Number.isSafeInteger(which) ? which : prompts.findIndex((p) => p.label && labelKey(p.label) === key);
     const prompt = prompts[index];
     if (!prompt) throw new CanvasError("bad_seed_prompt", `This demo has no seed prompt ${JSON.stringify(String(which))}.`);
     return prompt;

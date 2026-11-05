@@ -137,6 +137,7 @@ function renderTemplates() {
       <span>${esc(t.description)}</span>
       <span class="hint">→ ${esc(t.hint)}</span>
       <code class="muted">${t.template ? esc(t.template) : "empty repo"}${t.seedPrompts?.length ? ` · ${t.seedPrompts.length > 1 ? `${t.seedPrompts.length} seed prompts` : "seed prompt"}` : ""}${t.owner ? ` · owner: ${esc(t.owner)}` : ""}</code>
+      ${t.seedPromptError ? `<span class="warn" style="margin:0">⚠️ ${esc(t.seedPromptError)}</span>` : ""}
     </button>`).join("");
   const tpl = templates.find((t) => t.key === selected);
   $("noClone").disabled = !!tpl?.requiresClone;
@@ -189,6 +190,8 @@ function renderRun(r) {
       </div>
       <div class="seed-text">${esc(p.text)}</div>
     </div>`).join("");
+  const seedError = canAct ? templates.find((t) => t.key === r.template)?.seedPromptError : null;
+  const seedWarn = seedError ? `<div class="warn">⚠️ Seed prompts unavailable: ${esc(seedError)}</div>` : "";
   const answerKey = res.answerKey && !res.deleted
     ? `<button class="btn" data-act="answer-key" data-id="${r.id}" title="${esc(res.answerKey)}">🔑 Presenter answer key</button>` : "";
 
@@ -201,7 +204,7 @@ function renderRun(r) {
     ${r.status !== "succeeded" && done && res.repo ? `<div class="muted" style="font-size:12px;margin-top:6px">⚠️ The repo was created but a later step failed; see the log.</div>` : ""}
     ${links.length ? `<div class="links">${links.join("")}</div>` : ""}
     ${actions || answerKey ? `<div class="actions">${actions}${answerKey}</div>` : ""}
-    ${seed}
+    ${seed}${seedWarn}
     <details data-log="${r.id}" ${openLogs.has(r.id) || r.status === "running" || r.status === "failed" ? "open" : ""}>
       <summary>Log</summary>
       <pre class="log" id="log-${r.id}">${esc(r.logTail || "")}</pre>

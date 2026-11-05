@@ -108,6 +108,26 @@ function Assert-PullRequestEntries {
     return $missing
 }
 
+# Matches how the Demo Launcher compares seed prompt labels (cleanLabel + labelKey in
+# extension.mjs): control characters become spaces, outer spaces are trimmed, the first 40
+# code points are kept, and ASCII letters are lowercased.
+function Get-SeedLabelKey {
+    param([string]$Label)
+
+    $cleaned = ([regex]::Replace($Label, '[\x00-\x1f\x7f]', ' ')).Trim(' ')
+    $builder = New-Object System.Text.StringBuilder
+    $codePoints = 0
+    for ($i = 0; $i -lt $cleaned.Length -and $codePoints -lt 40; $i++) {
+        [void]$builder.Append($cleaned[$i])
+        if ([char]::IsHighSurrogate($cleaned[$i]) -and $i + 1 -lt $cleaned.Length -and [char]::IsLowSurrogate($cleaned[$i + 1])) {
+            $i++
+            [void]$builder.Append($cleaned[$i])
+        }
+        $codePoints++
+    }
+    return [regex]::Replace($builder.ToString(), '[A-Z]', { param($m) $m.Value.ToLowerInvariant() })
+}
+
 function Assert-SelectedRepo {
     param($Repo)
 
@@ -203,11 +223,11 @@ function Assert-SelectedRepo {
             }
         }
         if ($valid) {
-            $labels = @($seeds | ForEach-Object { $_.label })
-            $valid = @($labels | Sort-Object -Unique -CaseSensitive).Count -eq $labels.Count
+            $keys = @($seeds | ForEach-Object { Get-SeedLabelKey $_.label })
+            $valid = -not ($keys -contains '') -and @($keys | Sort-Object -Unique -CaseSensitive).Count -eq $keys.Count
         }
         if (-not $valid) {
-            throw 'seed_prompts must be a non-empty list of { "label", "file" } entries with unique labels.'
+            throw 'seed_prompts must be a non-empty list of { "label", "file" } entries whose labels stay unique (case-insensitive, first 40 characters).'
         }
         foreach ($seed in $seeds) {
             $seedPath = Join-Path $scriptDirectory $seed.file

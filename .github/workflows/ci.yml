@@ -22,7 +22,9 @@ jobs:
       - uses: actions/checkout@v7
       - name: Validate config.json structure
         run: |
+          # label_key matches how the Demo Launcher compares seed prompt labels (extension.mjs labelKey).
           jq -e '
+            def label_key: gsub("[\\x00-\\x1f\\x7f]"; " ") | sub("^ +"; "") | sub(" +$"; "") | .[0:40] | ascii_downcase;
             (.org | type == "string") and
             (.codespace_machine | type == "string") and
             (.repos | type == "array" and length > 0) and
@@ -40,8 +42,8 @@ jobs:
               (((.workflow | IN("security_prs", "code_review_prs")) | not) or (.prs | type == "array" and length > 0)) and
               ((has("seed_prompts") | not) or
                 ((.seed_prompts | type == "array" and length > 0) and
-                 all(.seed_prompts[]; (.label | type == "string" and length > 0) and (.file | type == "string")) and
-                 ([.seed_prompts[].label] | length == (unique | length)))) and
+                 all(.seed_prompts[]; (.label | type == "string" and (label_key | length > 0)) and (.file | type == "string")) and
+                 ([.seed_prompts[].label | label_key] | length == (unique | length)))) and
               (.workflow != "issue_and_codespace" or
                 ((.issue.title | type == "string") and (.issue.body_file | type == "string") and
                  (.issue.assignee | type == "string")))

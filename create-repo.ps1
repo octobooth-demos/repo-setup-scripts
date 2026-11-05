@@ -188,6 +188,35 @@ function Assert-SelectedRepo {
         }
     }
 
+    # Optional seed_prompts: [{ label, file }] (any workflow). The Demo Launcher shows each
+    # one with its own Copy and Run with Fusion buttons.
+    if ($Repo.PSObject.Properties['seed_prompts']) {
+        $seeds = $Repo.seed_prompts
+        $valid = $seeds -is [array] -and $seeds.Count -gt 0
+        if ($valid) {
+            foreach ($seed in $seeds) {
+                if ($seed -isnot [pscustomobject] -or
+                    $seed.label -isnot [string] -or [string]::IsNullOrWhiteSpace($seed.label) -or
+                    $seed.file -isnot [string] -or [string]::IsNullOrWhiteSpace($seed.file)) {
+                    $valid = $false
+                }
+            }
+        }
+        if ($valid) {
+            $labels = @($seeds | ForEach-Object { $_.label })
+            $valid = @($labels | Sort-Object -Unique -CaseSensitive).Count -eq $labels.Count
+        }
+        if (-not $valid) {
+            throw 'seed_prompts must be a non-empty list of { "label", "file" } entries with unique labels.'
+        }
+        foreach ($seed in $seeds) {
+            $seedPath = Join-Path $scriptDirectory $seed.file
+            if (-not (Test-Path -LiteralPath $seedPath -PathType Leaf)) {
+                throw "seed_prompts file not found: $seedPath"
+            }
+        }
+    }
+
     if ($missing.Count -gt 0) {
         throw "Selected repo '$($Repo.key)' is missing required config field(s): $($missing -join ', ')"
     }
@@ -978,6 +1007,10 @@ try {
             Set-ActionOutput 'top_pr_url' $topPullRequestUrl
             Register-PullRequestStack $stackNumbers
         }
+    }
+
+    foreach ($seed in @($selectedRepo.seed_prompts | Where-Object { $_ })) {
+        Write-Host "Seed prompt ($($seed.label)): $(Join-Path $scriptDirectory $seed.file)"
     }
 
     $pagesUrl = $null

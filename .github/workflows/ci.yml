@@ -38,6 +38,10 @@ jobs:
               (.workflow != "branch_and_codespace" or (.branch_name | type == "string")) and
               (.workflow != "stacked_prs" or (.stack | type == "array" and length >= 2)) and
               (((.workflow | IN("security_prs", "code_review_prs")) | not) or (.prs | type == "array" and length > 0)) and
+              ((has("seed_prompts") | not) or
+                ((.seed_prompts | type == "array" and length > 0) and
+                 all(.seed_prompts[]; (.label | type == "string" and length > 0) and (.file | type == "string")) and
+                 ([.seed_prompts[].label] | length == (unique | length)))) and
               (.workflow != "issue_and_codespace" or
                 ((.issue.title | type == "string") and (.issue.body_file | type == "string") and
                  (.issue.assignee | type == "string")))
@@ -57,7 +61,8 @@ jobs:
             ((.prs // [])[], (.stack // [])[] | ["dir", .resource_dir], ["file", .body_file]),
             (.issue.body_file // empty | ["file", .]),
             (.seed.resource_dir // empty | ["dir", .]),
-            (.seed_prompt_file // empty | ["file", .])
+            (.seed_prompt_file // empty | ["file", .]),
+            ((.seed_prompts // [])[] | ["file", .file])
             | @tsv
           ' config.json)
           missing=0
@@ -121,6 +126,9 @@ jobs:
       - name: Run run-store tests
         # Several worker processes share a temp runs.json; nothing touches GitHub or ~/.copilot.
         run: node --test tests/run-store.test.mjs
+      - name: Run seed prompt tests
+        # Loads the extension with a stub Copilot SDK and a temp COPILOT_HOME; nothing touches GitHub.
+        run: node --test tests/demo-launcher.test.mjs
 
   lint-powershell:
     name: Lint PowerShell

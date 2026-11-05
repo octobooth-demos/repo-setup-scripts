@@ -217,6 +217,26 @@
         "Next: run the seed prompt with the GitHub Copilot Fusion model in autopilot (~4-5 min)",
         "Presenter notes: resources/fusion-blank/ANSWER_KEY.md in repo-setup-scripts"
       ]
+    },
+    {
+      "key": "fusion-routing",
+      "display_name": "GitHub Copilot Fusion: Routing (Single, Cascade, Critique)",
+      "description_short": "OctoCart store + three seed prompts sized so GitHub Copilot Fusion picks a different pattern for each",
+      "workflow_hint": "Creates an OctoCart repo. Then click Run with Fusion on each prompt and compare the three sessions",
+      "template": "octocart",
+      "repo_base_name": "fusion-routing",
+      "repo_description": "GitHub Copilot Fusion routing demo (Single, Cascade, Critique)",
+      "workflow": "repo_only",
+      "seed_prompts": [
+        { "label": "Single", "file": "resources/fusion-routing/single.txt" },
+        { "label": "Cascade", "file": "resources/fusion-routing/cascade.txt" },
+        { "label": "Critique", "file": "resources/fusion-routing/critique.txt" }
+      ],
+      "summary_lines": [
+        "Status: OctoCart repository ready for the three seed prompts",
+        "Next: run each seed prompt with the GitHub Copilot Fusion model in autopilot and compare the patterns",
+        "Presenter notes: resources/fusion-routing/ANSWER_KEY.md in repo-setup-scripts"
+      ]
     }
   ]
 }

@@ -238,6 +238,7 @@ try {
         $paths += @($repo.stack | Where-Object { $_ } | ForEach-Object { $_.resource_dir; $_.body_file })
         if ($repo.issue) { $paths += $repo.issue.body_file }
         if ($repo.seed_prompt_file) { $paths += $repo.seed_prompt_file }
+        $paths += @($repo.seed_prompts | Where-Object { $_ } | ForEach-Object { $_.file })
         foreach ($path in ($paths | Where-Object { $_ })) {
             Assert (Test-Path -LiteralPath (Join-Path $sourceRoot $path)) "$($repo.key): '$path' does not exist."
         }
@@ -261,7 +262,8 @@ try {
         'ai-security-assign-failure', 'ai-security-assign-fallback', 'ai-security-codeql-failure',
         'ai-security-missing-seed', 'ai-security-no-seed', 'ai-security-scan-only', 'ai-security-autofix-only',
         'ai-security-missing-prs',
-        'blank', 'blank-interactive', 'blank-missing-seed', 'blank-needs-workflow'
+        'blank', 'blank-interactive', 'blank-missing-seed', 'blank-needs-workflow',
+        'routing', 'routing-missing-seed', 'routing-duplicate-label', 'routing-empty-seeds', 'routing-seed-without-file'
     )) {
         $config = $originalConfig | ConvertFrom-Json
         $config.repos += $branchRepo
@@ -269,6 +271,7 @@ try {
         $aiIndex = [array]::IndexOf(@($config.repos | ForEach-Object { $_.key }), 'ai-security')
         $aiSelection = [string]($aiIndex + 1)
         $blankIndex = [array]::IndexOf(@($config.repos | ForEach-Object { $_.key }), 'fusion-blank')
+        $routingIndex = [array]::IndexOf(@($config.repos | ForEach-Object { $_.key }), 'fusion-routing')
         $selection = '1'
         $scriptArgs = @{}
         $testState.NeedsLogin = $false
@@ -350,6 +353,31 @@ try {
                 $scriptArgs = @{ Template = 'fusion-blank' }
                 $config.repos[$blankIndex].workflow = 'repo_only'
                 $expectedFailure = 'missing required config'
+            }
+            'routing' { $selection = $null; $scriptArgs = @{ Template = 'fusion-routing'; NoClone = $true } }
+            'routing-missing-seed' {
+                $selection = $null
+                $scriptArgs = @{ Template = 'fusion-routing' }
+                $config.repos[$routingIndex].seed_prompts[2].file = 'resources/fusion-routing/absent.txt'
+                $expectedFailure = 'seed_prompts file not found'
+            }
+            'routing-duplicate-label' {
+                $selection = $null
+                $scriptArgs = @{ Template = 'fusion-routing' }
+                $config.repos[$routingIndex].seed_prompts[1].label = 'Single'
+                $expectedFailure = 'unique labels'
+            }
+            'routing-empty-seeds' {
+                $selection = $null
+                $scriptArgs = @{ Template = 'fusion-routing' }
+                $config.repos[$routingIndex].seed_prompts = @()
+                $expectedFailure = 'non-empty list'
+            }
+            'routing-seed-without-file' {
+                $selection = $null
+                $scriptArgs = @{ Template = 'fusion-routing' }
+                $config.repos[$routingIndex].seed_prompts[0].PSObject.Properties.Remove('file')
+                $expectedFailure = 'non-empty list'
             }
             'login' { $testState.NeedsLogin = $true }
             'no-machine' { $selection = '3'; $config.codespace_machine = $null }
@@ -558,6 +586,12 @@ try {
                 Assert ((Find-Calls 'git' 'push').Count -eq 0) 'Blank demo pushed commits.'
                 $clones = @(Find-Calls 'gh' 'repo clone')
                 Assert ($clones.Count -eq ([int]($scenario -eq 'blank-interactive'))) 'Blank demo clone count was wrong.'
+            }
+            elseif ($scenario -eq 'routing') {
+                Assert ($create.Arguments[2] -like 'demo-user/fusion-routing-*') "Routing demo created '$($create.Arguments[2])'."
+                Assert ($create.Arguments -contains '--template=octobooth-demos/octocart') 'Routing demo was not created from the OctoCart template.'
+                Assert ((Find-Calls 'gh' 'pr create').Count -eq 0 -and (Find-Calls 'gh' 'issue create').Count -eq 0) 'Routing demo opened a PR or issue.'
+                Assert ((Find-Calls 'gh' 'repo clone').Count -eq 0) 'Routing demo cloned despite -NoClone.'
             }
             elseif ($selection -eq '1') {
                 Assert ($create.Arguments -contains '--template=github-samples/securing-your-code') 'Template org override was ignored.'

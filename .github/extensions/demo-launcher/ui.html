@@ -136,7 +136,7 @@ function renderTemplates() {
       <span class="name">${esc(t.displayName)}</span>
       <span>${esc(t.description)}</span>
       <span class="hint">→ ${esc(t.hint)}</span>
-      <code class="muted">${t.template ? esc(t.template) : "empty repo"}${t.seedPrompt ? " · seed prompt" : ""}${t.owner ? ` · owner: ${esc(t.owner)}` : ""}</code>
+      <code class="muted">${t.template ? esc(t.template) : "empty repo"}${t.seedPrompts?.length ? ` · ${t.seedPrompts.length > 1 ? `${t.seedPrompts.length} seed prompts` : "seed prompt"}` : ""}${t.owner ? ` · owner: ${esc(t.owner)}` : ""}</code>
     </button>`).join("");
   const tpl = templates.find((t) => t.key === selected);
   $("noClone").disabled = !!tpl?.requiresClone;
@@ -181,14 +181,14 @@ function renderRun(r) {
     : canAct ? `
       <button class="btn primary" data-act="session" data-kind="repo" data-id="${r.id}">Open session in Copilot app</button>
       ${res.clonePath ? `<button class="btn" data-act="vscode" data-id="${r.id}">Open in VS Code</button>` : ""}` : "";
-  const seedPrompt = canAct ? templates.find((t) => t.key === r.template)?.seedPrompt : null;
-  const seed = seedPrompt ? `<div class="seed">
-      <div class="seed-head">💬 <strong>Seed prompt</strong>
-        <button class="btn" data-act="copy-seed" data-id="${r.id}">📋 Copy</button>
-        <button class="btn primary" data-act="fusion" data-id="${r.id}" title="New autopilot session in this repo with the GitHub Copilot Fusion model, already running the prompt">▶ Run with Fusion</button>
+  const seedPrompts = canAct ? templates.find((t) => t.key === r.template)?.seedPrompts || [] : [];
+  const seed = seedPrompts.map((p, i) => `<div class="seed">
+      <div class="seed-head">💬 <strong>${p.label ? `Seed prompt: ${esc(p.label)}` : "Seed prompt"}</strong>
+        <button class="btn" data-act="copy-seed" data-id="${r.id}" data-target="${i}">📋 Copy</button>
+        <button class="btn primary" data-act="fusion" data-id="${r.id}" data-target="${i}" title="New autopilot session in this repo with the GitHub Copilot Fusion model, already running the prompt">▶ Run with Fusion</button>
       </div>
-      <div class="seed-text">${esc(seedPrompt)}</div>
-    </div>` : "";
+      <div class="seed-text">${esc(p.text)}</div>
+    </div>`).join("");
   const answerKey = res.answerKey && !res.deleted
     ? `<button class="btn" data-act="answer-key" data-id="${r.id}" title="${esc(res.answerKey)}">🔑 Presenter answer key</button>` : "";
 
@@ -245,15 +245,15 @@ $("runs").addEventListener("click", async (e) => {
   try {
     if (b.dataset.act === "cancel") { await post("/api/cancel", { id: b.dataset.id }); toast("Cancelling…"); }
     if (b.dataset.act === "answer-key") { await post("/api/open-answer-key", { id: b.dataset.id }); toast("Opening the answer key locally (don't share your screen!)"); }
-    if (b.dataset.act === "copy-seed") { await copySeed(b.dataset.id); toast("Seed prompt copied"); }
+    if (b.dataset.act === "copy-seed") { await copySeed(b.dataset.id, Number(b.dataset.target)); toast("Seed prompt copied"); }
     if (b.dataset.act === "fusion") {
-      const r = await post("/api/open-session", { id: b.dataset.id, kind: "fusion" });
+      const r = await post("/api/open-session", { id: b.dataset.id, kind: "fusion", target: Number(b.dataset.target) });
       if (!r.standalone) toast("Asked Copilot to start a GitHub Copilot Fusion autopilot session — check the chat.");
       else if (r.copied || !r.messageIfCopied) toast(r.message, 9000);
       else {
         // The server couldn't copy; try the browser clipboard before telling the user to paste.
         let copied = false;
-        try { await copySeed(b.dataset.id); copied = true; } catch {}
+        try { await copySeed(b.dataset.id, Number(b.dataset.target)); copied = true; } catch {}
         toast(copied ? r.messageIfCopied : r.message, 9000);
       }
     }
@@ -266,11 +266,11 @@ $("runs").addEventListener("click", async (e) => {
   finally { b.disabled = false; }
 });
 
-async function copySeed(id) {
+async function copySeed(id, index = 0) {
   const run = runs.find((r) => r.id === id);
-  const text = templates.find((t) => t.key === run?.template)?.seedPrompt || "";
-  try { await navigator.clipboard.writeText(text); return; } catch {}
-  await post("/api/copy-seed", { id });
+  const text = templates.find((t) => t.key === run?.template)?.seedPrompts?.[index]?.text || "";
+  try { if (text) { await navigator.clipboard.writeText(text); return; } } catch {}
+  await post("/api/copy-seed", { id, target: index });
 }
 
 let cleanup = null;

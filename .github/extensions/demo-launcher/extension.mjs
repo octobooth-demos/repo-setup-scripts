@@ -35,12 +35,26 @@ function loadTemplates() {
         owner: r.owner === "org" ? config.org : r.owner || null,
         requiresClone: r.workflow === "branch_and_codespace",
         answerKey: answerKeyPath(r.key),
-        seedPrompt: readSeedPrompt(r.seed_prompt_file),
+        seedPrompts: readSeedPrompts(r),
     }));
 }
 
-// Optional "seed_prompt_file" (e.g. resources/fusion-blank/seed-prompt.txt): the prompt the
-// presenter runs in the new repo. The canvas shows it with Copy and "Run with Fusion".
+// Prompts the presenter runs in the new repo; the canvas shows each with Copy and
+// "Run with Fusion". Either one unlabeled "seed_prompt_file" (e.g. fusion-blank) or
+// "seed_prompts": [{ label, file }] (e.g. fusion-routing), whose label goes in the session name.
+function readSeedPrompts(r) {
+    const entries = Array.isArray(r.seed_prompts)
+        ? r.seed_prompts.map((p) => ({ label: cleanLabel(p?.label), file: p?.file }))
+        : [{ label: null, file: r.seed_prompt_file }];
+    return entries
+        .map(({ label, file }) => ({ label, text: readSeedPrompt(file) }))
+        .filter((p) => p.text && (p.label || entries.length === 1));
+}
+
+function cleanLabel(label) {
+    return typeof label === "string" ? label.replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, 40) || null : null;
+}
+
 function readSeedPrompt(file) {
     if (!file) return null;
     const path = resolve(REPO_ROOT, String(file));
@@ -48,9 +62,14 @@ function readSeedPrompt(file) {
     return readFileSync(path, "utf8").trim() || null;
 }
 
-function seedPromptFor(run) {
-    const prompt = loadTemplates().find((t) => t.key === run.template)?.seedPrompt;
-    if (!prompt) throw new CanvasError("no_seed_prompt", "This demo has no seed prompt.");
+// `which` is the prompt's index or label; defaults to the first prompt.
+function seedPromptFor(run, which) {
+    const prompts = loadTemplates().find((t) => t.key === run.template)?.seedPrompts || [];
+    if (!prompts.length) throw new CanvasError("no_seed_prompt", "This demo has no seed prompt.");
+    if (which === undefined || which === null || which === "") return prompts[0];
+    const index = Number.isSafeInteger(which) ? which : prompts.findIndex((p) => p.label && p.label.toLowerCase() === String(which).toLowerCase());
+    const prompt = prompts[index];
+    if (!prompt) throw new CanvasError("bad_seed_prompt", `This demo has no seed prompt ${JSON.stringify(String(which))}.`);
     return prompt;
 }
 
@@ -400,8 +419,11 @@ function sessionPrompt(run, kind, target) {
         return `[Demo Launcher] Open a Copilot app session for issue #${number} in ${repo}. ${where} First add it as a project in this app (create_project) if it isn't one already, then use open_issue_session (repo_full_name "${repo}", issue_number ${number}). Don't start any work in it (omit kickoff), then navigate me to it.`;
     }
     if (kind === "fusion") {
-        const kickoff = { prompt: seedPromptFor(run), mode: "autopilot", model: "auto", auto_tier: "hydrafusion" };
-        return `[Demo Launcher] Run the ${JSON.stringify(templateName)} seed prompt with GitHub Copilot Fusion in ${repo}. ${where} Add it as a project in this app (create_project) if it isn't one already, then call create_session with that project_id, detached: true, and exactly this kickoff object (don't change the prompt text): ${JSON.stringify(kickoff)}. Then navigate me to that session. Don't do any of the work yourself.`;
+        const seed = seedPromptFor(run, target);
+        const kickoff = { prompt: seed.text, mode: "autopilot", model: "auto", auto_tier: "hydrafusion" };
+        const which = seed.label ? `${JSON.stringify(seed.label)} seed prompt from ${JSON.stringify(templateName)}` : `${JSON.stringify(templateName)} seed prompt`;
+        const name = seed.label ? ` Set the session name to ${JSON.stringify(`[Fusion - ${seed.label}] `)} followed by a 2-4 word summary of the prompt, so the sessions are easy to compare.` : "";
+        return `[Demo Launcher] Run the ${which} with GitHub Copilot Fusion in ${repo}. ${where} Add it as a project in this app (create_project) if it isn't one already, then call create_session with that project_id, detached: true, and exactly this kickoff object (don't change the prompt text): ${JSON.stringify(kickoff)}.${name} Then navigate me to that session. Don't do any of the work yourself.`;
     }
     return `[Demo Launcher] I just created the demo repo ${repo} (${JSON.stringify(templateName)}). ${where} Add it as a project in this app (create_project) if it isn't one already, create a new idle session in it (create_session with that project_id, no kickoff, detached: true), then navigate me to that session.`;
 }
@@ -500,7 +522,7 @@ async function openSession(run, kind, target) {
     let copied = false;
     if (kind === "fusion") {
         try {
-            copied = copyToClipboard(seedPromptFor(run)).copied;
+            copied = copyToClipboard(seedPromptFor(run, target).text).copied;
         } catch {}
     }
     const fusionSteps = "Pick Auto → GitHub Copilot Fusion and Autopilot, then";
@@ -634,7 +656,7 @@ async function handle(req, res) {
             if (url.pathname === "/api/open-session") {
                 return json(res, 200, await openSession(findRun(body.id), body.kind || "repo", body.target));
             }
-            if (url.pathname === "/api/copy-seed") return json(res, 200, copyToClipboard(seedPromptFor(findRun(body.id))));
+            if (url.pathname === "/api/copy-seed") return json(res, 200, copyToClipboard(seedPromptFor(findRun(body.id), body.target).text));
             if (url.pathname === "/api/open-vscode") return json(res, 200, openInVSCode(findRun(body.id)));
             if (url.pathname === "/api/open-answer-key") return json(res, 200, openAnswerKey(findRun(body.id)));
             if (url.pathname === "/api/cleanup/preview") return json(res, 200, await cleanup.preview(body));
@@ -742,12 +764,19 @@ const session = await joinSession({
                 },
                 {
                     name: "run_with_fusion",
-                    description: "For demos with a seed prompt: open a new autopilot session in the demo repo that runs the seed prompt with the GitHub Copilot Fusion model (latest run by default).",
-                    inputSchema: runIdInput,
+                    description: "For demos with a seed prompt: open a new autopilot session in the demo repo that runs a seed prompt with the GitHub Copilot Fusion model (latest run and first prompt by default). Call once per prompt to compare them.",
+                    inputSchema: {
+                        type: "object",
+                        properties: {
+                            ...runIdInput.properties,
+                            prompt: { type: "string", description: "Seed prompt label (e.g. Single, Cascade, Critique) for demos with several prompts; defaults to the first." },
+                        },
+                    },
                     handler: async (ctx) => {
                         const run = findRun(ctx.input?.runId);
                         if (run.status !== "succeeded" || run.result.deleted) throw new CanvasError("not_ready", "That demo repo is not ready.");
-                        return { ...(await openSession(run, "fusion")), seedPrompt: seedPromptFor(run) };
+                        const seed = seedPromptFor(run, ctx.input?.prompt);
+                        return { ...(await openSession(run, "fusion", seed.label ?? 0)), seedPrompt: seed.text, ...(seed.label ? { seedLabel: seed.label } : {}) };
                     },
                 },
                 {

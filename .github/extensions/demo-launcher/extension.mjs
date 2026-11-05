@@ -432,7 +432,21 @@ function safeRunFields(run, kind, target) {
     return { repo, clonePath, number, templateName };
 }
 
-function sessionPrompt(run, kind, target) {
+// Fusion tiers the presenter can pick. The app's model picker sends auto_tier "hydrafusion"
+// for Standard and High, and "hydrafusion-max" for Max. Only these ids ever reach a kickoff.
+const FUSION_TIERS = {
+    high: { autoTier: "hydrafusion", name: "Fusion", picker: "GitHub Copilot Fusion" },
+    max: { autoTier: "hydrafusion-max", name: "Fusion Max", picker: "GitHub Copilot Fusion Max" },
+};
+
+function fusionTier(tier) {
+    if (tier === undefined || tier === null || tier === "") return "high";
+    const key = String(tier).toLowerCase();
+    if (!Object.hasOwn(FUSION_TIERS, key)) throw new CanvasError("bad_tier", `Unknown Fusion tier ${JSON.stringify(String(tier))}; use "high" or "max".`);
+    return key;
+}
+
+function sessionPrompt(run, kind, target, tier) {
     const { repo, clonePath, number, templateName } = safeRunFields(run, kind, target);
     const where = clonePath
         ? `It is cloned locally at ${JSON.stringify(clonePath)} (use that path for create_project).`
@@ -445,10 +459,13 @@ function sessionPrompt(run, kind, target) {
     }
     if (kind === "fusion") {
         const seed = seedPromptFor(run, target);
-        const kickoff = { prompt: seed.text, mode: "autopilot", model: "auto", auto_tier: "hydrafusion" };
+        const t = FUSION_TIERS[fusionTier(tier)];
+        const kickoff = { prompt: seed.text, mode: "autopilot", model: "auto", auto_tier: t.autoTier };
         const which = seed.label ? `${JSON.stringify(seed.label)} seed prompt from ${JSON.stringify(templateName)}` : `${JSON.stringify(templateName)} seed prompt`;
-        const name = seed.label ? ` Set the session name to ${JSON.stringify(`[Fusion - ${seed.label}] `)} followed by a 2-4 word summary of the prompt, so the sessions are easy to compare.` : "";
-        return `[Demo Launcher] Run the ${which} with GitHub Copilot Fusion in ${repo}. ${where} Add it as a project in this app (create_project) if it isn't one already, then call create_session with that project_id, detached: true, and exactly this kickoff object (don't change the prompt text): ${JSON.stringify(kickoff)}.${name} Then navigate me to that session. Don't do any of the work yourself.`;
+        // High keeps the original wording; Max always gets a name so it stands out from High runs.
+        const prefix = seed.label ? `[${t.name} - ${seed.label}] ` : t === FUSION_TIERS.max ? `[${t.name}] ` : null;
+        const name = prefix ? ` Set the session name to ${JSON.stringify(prefix)} followed by a 2-4 word summary of the prompt, so the sessions are easy to compare.` : "";
+        return `[Demo Launcher] Run the ${which} with ${t.picker} in ${repo}. ${where} Add it as a project in this app (create_project) if it isn't one already, then call create_session with that project_id, detached: true, and exactly this kickoff object (don't change the prompt text): ${JSON.stringify(kickoff)}.${name} Then navigate me to that session. Don't do any of the work yourself.`;
     }
     return `[Demo Launcher] I just created the demo repo ${repo} (${JSON.stringify(templateName)}). ${where} Add it as a project in this app (create_project) if it isn't one already, create a new idle session in it (create_session with that project_id, no kickoff, detached: true), then navigate me to that session.`;
 }
@@ -511,8 +528,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // Standalone: no agent is available, so open the local clone in the app (adds the project and
 // lands on its new-session composer), then the PR/issue if one was picked. Without a clone,
 // fall back to the GitHub deep link, which asks the user to confirm adding the repo.
-async function openSession(run, kind, target) {
-    const prompt = sessionPrompt(run, kind, target);
+async function openSession(run, kind, target, tier) {
+    const prompt = sessionPrompt(run, kind, target, tier);
     if (!session) throw new CanvasError("no_session", "Extension is not connected to a session.");
     if (!isStandalone()) {
         await session.send({ prompt });
@@ -550,7 +567,9 @@ async function openSession(run, kind, target) {
             copied = copyToClipboard(seedPromptFor(run, target).text).copied;
         } catch {}
     }
-    const fusionSteps = "Pick Auto → GitHub Copilot Fusion and Autopilot, then";
+    const fusionSteps = kind === "fusion" && fusionTier(tier) === "max"
+        ? "Pick Auto → GitHub Copilot Fusion → Max and Autopilot, then"
+        : "Pick Auto → GitHub Copilot Fusion and Autopilot, then";
     const fusionTail = (didCopy) => didCopy
         ? `${fusionSteps} paste the copied seed prompt and send.`
         : `${fusionSteps} copy the seed prompt from this card (📋 Copy, or select it) and send it.`;
@@ -679,7 +698,7 @@ async function handle(req, res) {
             if (url.pathname === "/api/launch") return json(res, 200, summary(startRun(body)));
             if (url.pathname === "/api/cancel") return json(res, 200, cancelRun(body.id));
             if (url.pathname === "/api/open-session") {
-                return json(res, 200, await openSession(findRun(body.id), body.kind || "repo", body.target));
+                return json(res, 200, await openSession(findRun(body.id), body.kind || "repo", body.target, body.tier));
             }
             if (url.pathname === "/api/copy-seed") return json(res, 200, copyToClipboard(seedPromptFor(findRun(body.id), body.target).text));
             if (url.pathname === "/api/open-vscode") return json(res, 200, openInVSCode(findRun(body.id)));
@@ -795,13 +814,15 @@ const session = await joinSession({
                         properties: {
                             ...runIdInput.properties,
                             prompt: { type: "string", description: "Seed prompt label (e.g. Single, Cascade, Critique) for demos with several prompts; defaults to the first." },
+                            tier: { type: "string", enum: ["high", "max"], description: "Fusion tier: high (the picker's Standard/High, default) or max." },
                         },
                     },
                     handler: async (ctx) => {
                         const run = findRun(ctx.input?.runId);
                         if (run.status !== "succeeded" || run.result.deleted) throw new CanvasError("not_ready", "That demo repo is not ready.");
                         const seed = seedPromptFor(run, ctx.input?.prompt);
-                        return { ...(await openSession(run, "fusion", seed.label ?? 0)), seedPrompt: seed.text, ...(seed.label ? { seedLabel: seed.label } : {}) };
+                        const tier = fusionTier(ctx.input?.tier);
+                        return { ...(await openSession(run, "fusion", seed.label ?? 0, tier)), seedPrompt: seed.text, tier, ...(seed.label ? { seedLabel: seed.label } : {}) };
                     },
                 },
                 {

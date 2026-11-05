@@ -21,11 +21,18 @@ session in the demo repo with the seed prompt, the GitHub Copilot Fusion model, 
 If you opened the launcher from the canvas picker (no chat), it copies the prompt and opens the repo's
 new-session composer in the app instead. Pick the model and mode as below, then paste and send.
 
+**Choosing the tier.** Above the prompt, the card has a **Fusion tier** choice: **High** (default) or
+**Max**. High is what the model picker calls Standard or High; both send the same tier id
+(`hydrafusion`). Max (`hydrafusion-max`) runs under a separate `max` routing policy that can
+pick stronger, costlier workflows. The choice applies to every ▶ Run with Fusion button on that card, and Max
+sessions get `Fusion Max` in their name. By hand, pick **Auto**, then the GitHub Copilot Fusion tier you
+want in the model picker; in Copilot CLI use `/model` (or `--model hydrafusion` / `--model hydrafusion-max`).
+
 **By hand (Copilot app):**
 
 1. In the launcher, click **Open session in Copilot app** (or open the repo as a project).
-2. In the model picker, choose **Auto** and then the **GitHub Copilot Fusion** tier (it may still be labeled
-   **HydraFusion** in some builds).
+2. In the model picker, choose **Auto** and then the **GitHub Copilot Fusion** tier you want: Standard or High
+   (same thing), or Max. It may still be labeled **HydraFusion** in some builds.
 3. Switch the mode to **Autopilot**.
 4. Paste the seed prompt and send.
 

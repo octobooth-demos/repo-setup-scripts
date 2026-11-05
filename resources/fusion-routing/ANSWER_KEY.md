@@ -57,6 +57,17 @@ session list. All three run in parallel in their own worktrees. Start Critique f
 If you opened the launcher from the canvas picker (no chat), each button copies its prompt and opens
 the repo's new-session composer instead; pick **Auto → GitHub Copilot Fusion** and **Autopilot**, then paste.
 
+**Choosing the tier.** Above the three prompts, the card has a **Fusion tier** choice: **High** (default) or
+**Max**. High is what the model picker calls Standard or High; both send the same tier id
+(`hydrafusion`). Max (`hydrafusion-max`) runs under a separate `max` routing policy that can
+pick stronger, costlier workflows. The choice applies to every ▶ Run with Fusion button on that card, and Max
+sessions are named `[Fusion Max - Single] …` and so on. By hand, pick **Auto**, then the GitHub Copilot Fusion tier you
+want in the model picker; in Copilot CLI use `/model` (or `--model hydrafusion` / `--model hydrafusion-max`).
+
+Our dry-run results below are for **High**. Max uses a different routing policy, so the patterns
+(and cost) can differ; try it before showing it at the booth, or run High and Max side by side as
+a second comparison.
+
 **By hand (Copilot CLI):** in the clone, `copilot`, pick the GitHub Copilot Fusion (HydraFusion in
 some builds) model with `/model`, switch to autopilot (<kbd>Shift</kbd>+<kbd>Tab</kbd>), and paste one
 prompt. Use a separate clone or worktree per prompt so the runs don't step on each other.

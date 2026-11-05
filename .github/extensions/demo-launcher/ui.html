@@ -116,6 +116,7 @@ let templates = [];
 let runs = [];
 let selected = new URLSearchParams(location.search).get("template");
 const openLogs = new Set();
+const fusionTiers = new Map(); // run id -> "high" | "max" (chosen on the card, kept across re-renders)
 
 function toast(msg, ms = 3000) {
   const t = $("toast"); t.textContent = msg; t.classList.add("show");
@@ -183,10 +184,17 @@ function renderRun(r) {
       <button class="btn primary" data-act="session" data-kind="repo" data-id="${r.id}">Open session in Copilot app</button>
       ${res.clonePath ? `<button class="btn" data-act="vscode" data-id="${r.id}">Open in VS Code</button>` : ""}` : "";
   const seedPrompts = canAct ? templates.find((t) => t.key === r.template)?.seedPrompts || [] : [];
-  const seed = seedPrompts.map((p, i) => `<div class="seed">
+  const tier = fusionTiers.get(r.id) || "high";
+  const tierPicker = seedPrompts.length ? `<div class="seed-head" style="margin-top:10px">⚡ <strong>Fusion tier</strong>
+      <label><input type="radio" name="tier-${r.id}" data-tier="high" data-id="${r.id}" ${tier === "high" ? "checked" : ""}/> High</label>
+      <label><input type="radio" name="tier-${r.id}" data-tier="max" data-id="${r.id}" ${tier === "max" ? "checked" : ""}/> Max</label>
+      <span>applies to every ▶ Run with Fusion below</span>
+    </div>` : "";
+  const runLabel = tier === "max" ? "▶ Run with Fusion Max" : "▶ Run with Fusion";
+  const seed = tierPicker + seedPrompts.map((p, i) => `<div class="seed">
       <div class="seed-head">💬 <strong>${p.label ? `Seed prompt: ${esc(p.label)}` : "Seed prompt"}</strong>
         <button class="btn" data-act="copy-seed" data-id="${r.id}" data-target="${i}">📋 Copy</button>
-        <button class="btn primary" data-act="fusion" data-id="${r.id}" data-target="${i}" title="New autopilot session in this repo with the GitHub Copilot Fusion model, already running the prompt">▶ Run with Fusion</button>
+        <button class="btn primary" data-act="fusion" data-id="${r.id}" data-target="${i}" title="New autopilot session in this repo with the GitHub Copilot Fusion model (${tier === "max" ? "Max" : "High"} tier), already running the prompt">${runLabel}</button>
       </div>
       <div class="seed-text">${esc(p.text)}</div>
     </div>`).join("");
@@ -242,6 +250,13 @@ $("runs").addEventListener("toggle", (e) => {
   e.target.open ? openLogs.add(id) : openLogs.delete(id);
 }, true);
 
+$("runs").addEventListener("change", (e) => {
+  const { tier, id } = e.target.dataset || {};
+  if (!tier || !id) return;
+  fusionTiers.set(id, tier);
+  renderRuns();
+});
+
 $("runs").addEventListener("click", async (e) => {
   const b = e.target.closest("button[data-act]"); if (!b) return;
   b.disabled = true;
@@ -250,8 +265,9 @@ $("runs").addEventListener("click", async (e) => {
     if (b.dataset.act === "answer-key") { await post("/api/open-answer-key", { id: b.dataset.id }); toast("Opening the answer key locally (don't share your screen!)"); }
     if (b.dataset.act === "copy-seed") { await copySeed(b.dataset.id, Number(b.dataset.target)); toast("Seed prompt copied"); }
     if (b.dataset.act === "fusion") {
-      const r = await post("/api/open-session", { id: b.dataset.id, kind: "fusion", target: Number(b.dataset.target) });
-      if (!r.standalone) toast("Asked Copilot to start a GitHub Copilot Fusion autopilot session — check the chat.");
+      const tier = fusionTiers.get(b.dataset.id) || "high";
+      const r = await post("/api/open-session", { id: b.dataset.id, kind: "fusion", target: Number(b.dataset.target), tier });
+      if (!r.standalone) toast(`Asked Copilot to start a GitHub Copilot Fusion${tier === "max" ? " Max" : ""} autopilot session — check the chat.`);
       else if (r.copied || !r.messageIfCopied) toast(r.message, 9000);
       else {
         // The server couldn't copy; try the browser clipboard before telling the user to paste.

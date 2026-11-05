@@ -51,6 +51,12 @@ await call("blank", () => action("run_with_fusion")({ input: { runId: "blank" } 
 const post = (body) => fetch(base + "api/open-session", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then((r) => r.json());
 out.httpCascade = await post({ id: "routing", kind: "fusion", target: 1 });
 out.httpOutOfRange = await post({ id: "routing", kind: "fusion", target: 7 });
+await call("routingMax", () => action("run_with_fusion")({ input: { runId: "routing", prompt: "Cascade", tier: "max" } }));
+await call("blankMax", () => action("run_with_fusion")({ input: { runId: "blank", tier: "MAX" } }));
+out.httpMaxCritique = await post({ id: "routing", kind: "fusion", target: 2, tier: "max" });
+await call("badTier", () => action("run_with_fusion")({ input: { runId: "routing", tier: "ultra" } }));
+out.httpRawTier = await post({ id: "routing", kind: "fusion", target: 0, tier: "hydrafusion-max" });
+await call("blankHigh", () => action("run_with_fusion")({ input: { runId: "blank", tier: "high" } }));
 out.sent = globalThis.__sent;
 console.log("__RESULT__" + JSON.stringify(out));
 process.exit(0);
@@ -141,7 +147,37 @@ test("the canvas buttons pick a prompt by index", () => {
     assert.equal(kickoffOf(out.sent[3]).prompt, promptText("resources/fusion-routing/cascade.txt"));
     assert.match(out.sent[3], /\[Fusion - Cascade\] /);
     assert.match(out.httpOutOfRange.error, /no seed prompt/);
-    assert.equal(out.sent.length, 4);
+});
+
+test("tier max uses the hydrafusion-max auto tier and puts Fusion Max in the session name", () => {
+    assert.equal(out.routingMax.tier, "max");
+    const cascade = out.sent[4];
+    assert.deepEqual(kickoffOf(cascade), {
+        prompt: promptText("resources/fusion-routing/cascade.txt"), mode: "autopilot", model: "auto", auto_tier: "hydrafusion-max",
+    });
+    assert.match(cascade, /Set the session name to "\[Fusion Max - Cascade\] "/);
+    assert.match(cascade, /with GitHub Copilot Fusion Max in /);
+
+    const blank = out.sent[5];
+    assert.equal(kickoffOf(blank).auto_tier, "hydrafusion-max");
+    assert.equal(kickoffOf(blank).prompt, promptText("resources/fusion-blank/seed-prompt.txt"));
+    assert.match(blank, /Set the session name to "\[Fusion Max\] "/);
+
+    assert.equal(out.httpMaxCritique.sent, true);
+    assert.equal(kickoffOf(out.sent[6]).auto_tier, "hydrafusion-max");
+    assert.match(out.sent[6], /\[Fusion Max - Critique\] /);
+});
+
+test("only the high and max tiers are accepted; raw auto_tier ids are rejected", () => {
+    assert.equal(out.badTier.error, "bad_tier");
+    assert.match(out.httpRawTier.error, /Unknown Fusion tier/);
+});
+
+test("tier high (or no tier) sends exactly the original request", () => {
+    assert.equal(out.blankHigh.tier, "high");
+    assert.equal(out.sent[7], out.sent[2]);
+    for (const i of [0, 1, 2, 3]) assert.equal(kickoffOf(out.sent[i]).auto_tier, "hydrafusion");
+    assert.equal(out.sent.length, 8);
 });
 
 // A driver that only reports the routing template and what run_with_fusion does with it.

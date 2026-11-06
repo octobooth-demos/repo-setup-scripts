@@ -479,10 +479,17 @@ wait_for_security_config() {
         --jq '[.[] | select(.default_for_new_repos != "none")] | length' 2>/dev/null) || defaults=""
     [ "$defaults" = "0" ] && return 0
     echo "⏳ Waiting for the org's code security configuration to attach..."
-    for attempt in $(seq 1 20); do
+    # Give up after 1 minute if nothing starts attaching; allow 3 minutes once one is.
+    for attempt in $(seq 1 60); do
         status=$(gh api "repos/$FULL_REPO_NAME/code-security-configuration" --jq '.status // empty' 2>/dev/null) || status=""
         case "$status" in
-            ""|attaching|updating) ;;
+            "")
+                if [ "$attempt" -ge 20 ]; then
+                    echo "ℹ️  No org code security configuration attached after 60 seconds; continuing."
+                    return 0
+                fi
+                ;;
+            attaching|updating) ;;
             *)
                 echo "✅ Org code security configuration: $status"
                 return 0
@@ -490,7 +497,9 @@ wait_for_security_config() {
         esac
         sleep 3
     done
-    echo "ℹ️  No org code security configuration attached after 60 seconds; continuing."
+    echo "❌ The org's code security configuration was still '$status' on $FULL_REPO_NAME after 3 minutes."
+    echo "   It could override the CodeQL default setup this script needs. Run the script again."
+    exit 1
 }
 
 # Set CodeQL default setup and wait (bounded) until GitHub reports it, resending the
@@ -565,15 +574,26 @@ code_scanning_languages() {
         return 0
     fi
     # Language detection can lag repo creation by a few seconds.
+    local looked_up=false
     for attempt in 1 2 3 4 5 6; do
-        langs=$(gh api "repos/$FULL_REPO_NAME/languages" --jq '
+        if langs=$(gh api "repos/$FULL_REPO_NAME/languages" --jq '
             {"C":"c-cpp","C++":"c-cpp","C#":"csharp","Go":"go","Java":"java-kotlin","Kotlin":"java-kotlin",
              "JavaScript":"javascript-typescript","TypeScript":"javascript-typescript","Python":"python",
              "Ruby":"ruby","Rust":"rust","Swift":"swift"} as $m
-            | [keys[] | $m[.] // empty] | unique | .[]' 2>/dev/null) || langs=""
+            | [keys[] | $m[.] // empty] | unique | .[]' 2>/dev/null); then
+            looked_up=true
+        else
+            langs=""
+        fi
         [ -n "$langs" ] && break
         sleep 5
     done
+    if [ "$looked_up" = false ]; then
+        echo "❌ Could not read the languages of $FULL_REPO_NAME to configure CodeQL default setup." >&2
+        echo "   Set \"code_scanning_languages\" for this entry in config.json, or run the script again." >&2
+        return 1
+    fi
+    [ -z "$langs" ] && echo "⚠️  No CodeQL-supported languages detected; scanning GitHub Actions workflows only." >&2
     printf '%s\n' "$langs" actions | sed '/^$/d'
 }
 
@@ -1309,10 +1329,11 @@ case $WORKFLOW in
                 -f 'security_and_analysis[advanced_security][status]=enabled' --silent
             # Set the languages explicitly: an org configuration applied at creation
             # can run before language detection and cover only GitHub Actions.
+            LANGUAGE_LIST=$(code_scanning_languages) || exit 1
             CODE_SCANNING_LANGUAGES=()
             while IFS= read -r lang; do
                 [ -n "$lang" ] && CODE_SCANNING_LANGUAGES+=("$lang")
-            done < <(code_scanning_languages)
+            done <<< "$LANGUAGE_LIST"
             set_default_setup configured "${CODE_SCANNING_LANGUAGES[@]}"
             echo "✅ Dependabot alerts, security updates, and Code Scanning enabled"
             # Default setup rejects advanced-setup SARIF uploads, which would fail a check on every PR.

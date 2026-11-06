@@ -573,16 +573,24 @@ function Wait-SecurityConfiguration {
     $defaults = @(Invoke-GhQuiet api "orgs/$repoOwner/code-security/configurations/defaults" --jq '.[].default_for_new_repos')
     if ($LASTEXITCODE -eq 0 -and @($defaults | Where-Object { "$_".Trim() -ne 'none' }).Count -eq 0) { return }
     Write-Host "Waiting for the org's code security configuration to attach..."
-    for ($attempt = 1; $attempt -le 20; $attempt++) {
+    # Give up after 1 minute if nothing starts attaching; allow 3 minutes once one is.
+    $status = ''
+    for ($attempt = 1; $attempt -le 60; $attempt++) {
         $status = "$(@(Invoke-GhQuiet api "repos/$fullRepoName/code-security-configuration" --jq '.status // empty')[-1])".Trim()
         if ($LASTEXITCODE -ne 0) { $status = '' }
-        if ($status -and $status -notin @('attaching', 'updating')) {
+        if (-not $status) {
+            if ($attempt -ge 20) {
+                Write-Host 'No org code security configuration attached after 60 seconds; continuing.'
+                return
+            }
+        }
+        elseif ($status -notin @('attaching', 'updating')) {
             Write-Host "Org code security configuration: $status"
             return
         }
         Start-Sleep -Seconds 3
     }
-    Write-Host 'No org code security configuration attached after 60 seconds; continuing.'
+    throw "The org's code security configuration was still '$status' on $fullRepoName after 3 minutes. It could override the CodeQL default setup this script needs. Run the script again."
 }
 
 # Set CodeQL default setup and wait (bounded) until GitHub reports it, resending the
@@ -699,15 +707,21 @@ function Get-CodeScanningLanguages {
         'Ruby' = 'ruby'; 'Rust' = 'rust'; 'Swift' = 'swift'
     }
     $detected = @()
+    $lookedUp = $false
     # Language detection can lag repo creation by a few seconds.
     for ($attempt = 1; $attempt -le 6; $attempt++) {
         $names = @(Invoke-GhQuiet api "repos/$fullRepoName/languages" --jq 'keys[]')
         if ($LASTEXITCODE -eq 0) {
+            $lookedUp = $true
             $detected = @($names | ForEach-Object { $map["$_".Trim()] } | Where-Object { $_ })
         }
         if ($detected.Count -gt 0) { break }
         Start-Sleep -Seconds 5
     }
+    if (-not $lookedUp) {
+        throw "Could not read the languages of $fullRepoName to configure CodeQL default setup. Set `"code_scanning_languages`" for this entry in config.json, or run the script again."
+    }
+    if ($detected.Count -eq 0) { Write-Warning 'No CodeQL-supported languages detected; scanning GitHub Actions workflows only.' }
     @(@($detected) + 'actions' | Select-Object -Unique)
 }
 

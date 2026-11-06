@@ -15,7 +15,7 @@ $testState = [pscustomobject]@{
     StalePushRun = $false; GitCredentialUser = $null
     SetupState = 'configured'; SetupLanguages = @('actions'); SetupPending = $null; SetupLag = 0
     SetupRevertOnce = $false; SetupPatchFailure = $false; ConfigStatusPolls = 0
-    PrBranches = @{}; PrScans = 'start'; ForcePushed = $null
+    PrBranches = @{}; PrScans = 'start'; ForcePushed = $null; LanguagesFailure = $false
 }
 Remove-Item Env:DEMO_NO_BROWSER -ErrorAction SilentlyContinue
 # Behave the same locally and in CI: the script skips browsers under Actions and
@@ -118,6 +118,7 @@ function gh {
         return 'attached'
     }
     if ($arguments[0] -eq 'api' -and $arguments[1] -like '*/languages') {
+        if ($testState.LanguagesFailure) { $global:LASTEXITCODE = 1; return }
         return @('PHP', 'TypeScript', 'Makefile')
     }
     if ($arguments[0] -eq 'api' -and $arguments[1] -like '*/code-scanning/default-setup') {
@@ -306,7 +307,7 @@ try {
     foreach ($scenario in @(
         'repo-only', 'security-prs', 'security-prs-v4', 'security-prs-detect-languages', 'security-prs-languages-lag',
         'security-prs-setup-timeout', 'security-prs-setup-patch-failure', 'security-prs-bad-languages',
-        'security-prs-missed-scan', 'security-prs-scan-never', 'issue-codespace', 'branch-codespace',
+        'security-prs-missed-scan', 'security-prs-scan-never', 'security-prs-config-stuck', 'security-prs-languages-failure', 'issue-codespace', 'branch-codespace',
         'login', 'invalid-selection', 'no-machine', 'nested-body',
         'missing-template', 'missing-body', 'empty-prs', 'unknown-workflow',
         'outside-body', 'invalid-json', 'missing-org', 'empty-repos',
@@ -358,6 +359,7 @@ try {
         $testState.ConfigStatusPolls = 2
         $testState.PrBranches = @{}
         $testState.PrScans = 'start'
+        $testState.LanguagesFailure = $false
         $testState.ForcePushed = New-Object 'System.Collections.Generic.List[string]'
         $testState.Opened = New-Object 'System.Collections.Generic.List[string]'
         $testState.NpmCalls = New-Object 'System.Collections.Generic.List[object]'
@@ -380,6 +382,13 @@ try {
             'security-prs-languages-lag' { $selection = '2'; $testState.SetupLag = 20 }
             'security-prs-missed-scan' { $selection = '2'; $testState.PrScans = 'retrigger' }
             'security-prs-scan-never' { $selection = '2'; $testState.PrScans = 'never' }
+            'security-prs-config-stuck' { $selection = '2'; $testState.ConfigStatusPolls = 100000; $expectedFailure = "still 'attaching'" }
+            'security-prs-languages-failure' {
+                $selection = '2'
+                $testState.LanguagesFailure = $true
+                $config.repos[1].PSObject.Properties.Remove('code_scanning_languages')
+                $expectedFailure = 'Could not read the languages'
+            }
             'security-prs-setup-timeout' { $selection = '2'; $testState.SetupLag = 100000; $expectedFailure = 'did not cover javascript-typescript after 10 minutes (has: actions)' }
             'security-prs-setup-patch-failure' { $selection = '2'; $testState.SetupPatchFailure = $true; $expectedFailure = 'Could not change CodeQL default setup' }
             'security-prs-bad-languages' { $selection = '2'; $config.repos[1].code_scanning_languages = @(); $expectedFailure = 'code_scanning_languages must be' }
@@ -594,7 +603,7 @@ try {
         Assert ((Get-Location).Path -eq $originalLocation.Path) "$scenario did not restore location."
         if ($expectedFailure) {
             Assert ($null -ne $caught -and $caught.Contains($expectedFailure)) "$scenario expected '$expectedFailure', got '$caught'."
-            if ($scenario -notin @('create-failure', 'topic-failure', 'push-failure', 'login-failure', 'git-account-mismatch', 'stack-api-failure', 'stack-verify-mismatch', 'non-interactive-login', 'ai-security-codeql-failure', 'security-prs-setup-timeout', 'security-prs-setup-patch-failure', 'ai-security-setup-stuck')) {
+            if ($scenario -notin @('create-failure', 'topic-failure', 'push-failure', 'login-failure', 'git-account-mismatch', 'stack-api-failure', 'stack-verify-mismatch', 'non-interactive-login', 'ai-security-codeql-failure', 'security-prs-setup-timeout', 'security-prs-setup-patch-failure', 'ai-security-setup-stuck', 'security-prs-config-stuck', 'security-prs-languages-failure')) {
                 Assert ($testState.Calls.Count -eq 0) "$scenario invoked a remote command before validation."
             }
             if ($scenario -eq 'non-interactive-login') {
@@ -624,7 +633,7 @@ try {
             if ($scenario -eq 'create-failure') {
                 Assert ((Find-Calls 'gh' 'repo clone').Count -eq 0) 'Cloned after repository creation failed.'
             }
-            if ($scenario -in @('security-prs-setup-timeout', 'security-prs-setup-patch-failure', 'ai-security-setup-stuck')) {
+            if ($scenario -in @('security-prs-setup-timeout', 'security-prs-setup-patch-failure', 'ai-security-setup-stuck', 'security-prs-config-stuck', 'security-prs-languages-failure')) {
                 Assert ((Find-Calls 'gh' 'pr create').Count -eq 0) "$scenario opened a PR without the right CodeQL default setup."
                 Assert ((Find-Calls 'git' 'push').Count -eq 0) "$scenario pushed without the right CodeQL default setup."
             }

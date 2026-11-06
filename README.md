@@ -8,6 +8,8 @@ There are three ways to create a demo, and all of them run the same scripts and 
 - **[`create-repo.sh` / `create-repo.ps1`](#bash)**: the scripts the launcher runs, used interactively or [non-interactively](#non-interactive-mode).
 - **[ChatOps](#chatops)**: `/new-demo <key>` comments or the Actions tab. These create demos in the `octobooth-demos` org without a booth machine.
 
+Not at an `octobooth-demos` booth? See [Run the Demo Launcher in your own org](docs/run-in-your-own-org.md) to install the launcher and point it at your own org or account.
+
 ## Quick start (booth machine)
 
 Do this once per machine (macOS):
@@ -111,6 +113,8 @@ Every repository the scripts create gets the `demo-generated` topic, which is wh
 [`.github/extensions/demo-launcher/`](.github/extensions/demo-launcher/) is a Copilot extension that adds a **Demo Launcher** canvas, a side panel, to the GitHub Copilot app and Copilot CLI. To open it, ask Copilot in a chat to **"open the demo launcher"**, or "open the demo launcher for octocart" to preselect a demo. A blank new chat works, because the loader makes it available in every session.
 
 **Recommended: open it from a chat.** Then the follow-up buttons are one click, and Copilot adds the project and opens the session, PR, or Fusion run for you. Opening the launcher from the app's canvas picker (no chat) is a fallback with more manual steps; see [Opened without a chat](#opened-without-a-chat). This stays the guidance until standalone canvases ship to non-staff builds with the app access they need to create sessions themselves.
+
+To install it outside `octobooth-demos`, see [Run the Demo Launcher in your own org](docs/run-in-your-own-org.md), including [install options and limitations](docs/run-in-your-own-org.md#installing-the-demo-launcher-canvas-options-and-limitations).
 
 ### What it does
 
@@ -231,7 +235,7 @@ By default, repos are created in **the account that is logged in** (`gh api user
 3. The logged-in account.
 4. The top-level `org` (only when there is no user account, such as a GitHub App token in Actions).
 
-The script prints `Target owner:` before creating anything. Templates in `octobooth-demos` are internal, so the booth account must be an org member to use them.
+The script prints `Target owner:` before creating anything. The templates in `octobooth-demos` are public, so any account can create repos from them.
 
 > [!NOTE]
 > `tailspin-toys` assigns an issue to `@copilot` and starts a Codespace. In a personal account those need Copilot coding agent and Codespaces access on that account. If they are not available, run it with `--owner octobooth-demos`.
@@ -306,7 +310,7 @@ Each `repos[]` entry needs `key`, `display_name`, `template` (except for the `bl
 | `blank` | Optional `seed_prompt_file` | Creates an empty repo with only a README (`gh repo create --add-readme`, no template). `seed_prompt_file` is a prompt in this repo that the Demo Launcher shows with Copy and Run with Fusion buttons. |
 | `issue_and_codespace` | `issue` | Creates an issue and a Codespace. |
 | `security_prs` | `prs[]`; optional `code_scanning_languages` | Enables security features (Dependabot alerts, automated security fixes, CodeQL default setup), disables the template's `codeql-advanced.yml` workflow if it has one, and opens one PR per entry against the default branch. Default setup is configured for `code_scanning_languages` (CodeQL names such as `javascript-typescript` and `actions`), or for the repo's detected languages plus `actions`, and the script waits (up to 10 minutes; override with `DEFAULT_SETUP_WAIT_SECONDS`) until it covers them before opening PRs. Default setup can miss PRs opened right after it's configured, so the script then checks that CodeQL started on each PR and, if it didn't, recommits that PR's commit and force-pushes it to trigger a scan (up to 3 times, about 90 seconds apart; override with `PR_SCAN_WAIT_SECONDS`). |
-| `branch_and_codespace` | `branch` | Creates a branch and a Codespace on it. |
+| `branch_and_codespace` | `branch_name` | Creates a branch and a Codespace on it. |
 | `code_review_prs` | `prs[]` | Opens one PR per entry against the default branch and requests a Copilot Code Review on each, except entries with `"request_review": false`, which are left for the presenter to request live. No security features are enabled. |
 | `stacked_prs` | `stack[]` | Opens a chain of dependent PRs and registers them as a native [stacked PR](https://docs.github.com/en/pull-requests/reference/stacked-pull-requests-apis-and-webhooks). |
 | `ai_security` | `prs[]` and/or `autofix`; optional `ai_scan`, `seed`, `codeql_workflow` | Enables Advanced Security, and AI Scan when `"ai_scan": true`. With `autofix`, it commits `seed.resource_dir` to the default branch (or dispatches `codeql_workflow`, default `codeql-advanced.yml`), waits for CodeQL alerts, and assigns the `autofix.preassign_rule` alert to Copilot. Then it opens one PR per `prs[]` entry; when `ai_scan` is on, it first makes sure code scanning has an analysis. It turns CodeQL default setup off (and waits until it's off) before pushing anything, because default setup rejects the advanced workflow's uploads. |

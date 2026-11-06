@@ -138,7 +138,7 @@ Runs use your stored `gh auth login`, not any `GH_TOKEN` the app injects, so the
 | Session | Canvas available? |
 | --- | --- |
 | Any session in the `repo-setup-scripts` project, including worktrees and PR sessions | Yes. Copilot loads project extensions from `.github/extensions/`, and each session uses its own checkout's copy. |
-| Any other session (a demo repo, another project, or a chat) | Only after you [install the loader](#make-it-available-in-every-session), and only if your app build loads user-level extensions. |
+| Any other session (a demo repo, another project, or a chat) | Yes, after you [install the loader](#make-it-available-in-every-session) (macOS and Linux). Regular and staff app builds both load it. |
 
 On booth machines (macOS or Linux), set up both: add the repo as a project **and** run `install.sh`. The project is the guaranteed way in; the loader adds every other session. On Windows, use the project only.
 
@@ -177,7 +177,7 @@ Then restart the Copilot app, or ask Copilot to reload extensions in sessions th
 
 How the loader works:
 
-- The installer writes a small user-level extension (a loader) to `~/.copilot/extensions/demo-launcher/extension.mjs`, or to `$COPILOT_HOME/extensions/demo-launcher/` if `COPILOT_HOME` is set. App builds that support user-level extensions load them in every session.
+- The installer writes a small user-level extension (a loader) to `~/.copilot/extensions/demo-launcher/extension.mjs`, or to `$COPILOT_HOME/extensions/demo-launcher/` if `COPILOT_HOME` is set. The app loads user-level extensions in every session, on regular and staff builds.
 - The loader imports `extension.mjs` straight from your checkout. **`git pull` updates the launcher**; you don't need to reinstall. Demos still run `create-repo` and `config.json` from that checkout.
 - If you run the installer from a worktree, it points the loader at the **main checkout** anyway, because worktrees get deleted. If the main checkout doesn't have the extension yet, it falls back to the worktree with a warning. In that case, re-run it from the main checkout after merging.
 - In sessions inside this repo, the loader does nothing and lets that checkout's copy provide the canvas. That avoids two Demo Launchers in the session, and a branch you're working on uses its own version. Staff app builds may still list [two canvases](#two-demo-launcher-canvases) outside a session.

@@ -9,5 +9,6 @@ export default defineConfig({
       // cobertura is uploaded to GitHub Code Quality (coverage/cobertura-coverage.xml)
       reporter: ['text', 'json', 'json-summary', 'html', 'cobertura'],
     },
+    exclude: ['dist/**', 'node_modules/**', 'database/**']
   },
 });

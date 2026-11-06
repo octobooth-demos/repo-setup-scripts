@@ -37,9 +37,9 @@ You can try the launcher with no config changes. The templates are public, so mo
      bash ~/repos/repo-setup-scripts/.github/extensions/demo-launcher/install.sh
      ```
 
-     For quick access at a booth, also add the existing `~/repos/repo-setup-scripts` folder as a project in the GitHub Copilot app (don't clone it again). Then you can pin a session in it, or pin the canvas.
+     For quick access at a booth, also add the existing `~/repos/repo-setup-scripts` folder as a project in the GitHub Copilot app (don't clone it again). Then you can pin a session in it, or pin the canvas. Start that session with **Current checkout**, not **New worktree**: a worktree session runs its own frozen copy of the launcher that `git pull` never updates.
 
-   - **Windows:** add the folder as a project in the Copilot app. Don't run `install.sh`; runs use `create-repo.ps1`.
+   - **Windows:** add the folder as a project in the Copilot app, and start sessions in it with **Current checkout**. Don't run `install.sh`; runs use `create-repo.ps1`.
 
    See [options and limitations](#installing-the-demo-launcher-canvas-options-and-limitations) for what each one gives you.
 
@@ -67,7 +67,7 @@ The Demo Launcher is a Copilot extension in [`.github/extensions/demo-launcher/`
 - If you move, rename, or delete the checkout, the loader breaks. Re-run `install.sh` from the new location.
 - In a session whose repo ships its own `.github/extensions/demo-launcher/extension.mjs` (this repo or your fork), the loader does nothing and lets that copy provide the canvas. That avoids two launchers in one session.
 
-**Using both.** On booth Macs, we recommend both: the loader so any chat can open the launcher, and the project so you can pin a session or the canvas. Add the **same local folder** as the project that `install.sh` points at, so one `git pull` updates both. On app builds that can open canvases without a session (currently staff builds), the canvas picker then lists two "Demo Launcher" entries. They run the same code, so either works. See [Two Demo Launcher canvases](../README.md#two-demo-launcher-canvases).
+**Using both.** On booth Macs, we recommend both: the loader so any chat can open the launcher, and the project so you can pin a session or the canvas. Add the **same local folder** as the project that `install.sh` points at, so one `git pull` updates both. Start the session you pin with **Current checkout**, not **New worktree**. A worktree session gets its own copy under `copilot-worktrees` on its own branch, so it keeps loading the launcher as it was when the session was created. To fix one, archive it and start a **Current checkout** session; the session's `EXTENSION_PATH` in the app logs should be under `repos/repo-setup-scripts`. On app builds that can open canvases without a session (currently staff builds), the canvas picker then lists two "Demo Launcher" entries. They run the same code, so either works. See [Two Demo Launcher canvases](../README.md#two-demo-launcher-canvases).
 
 **Limitations:**
 

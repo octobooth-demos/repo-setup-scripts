@@ -52,6 +52,8 @@ Do this once per machine (macOS):
    Then restart the Copilot app (or reload extensions in open sessions).
 4. In the GitHub Copilot app, also add that **existing local folder** (`~/repos/repo-setup-scripts`) as a project. Don't clone it again. This is for quick access at the booth: pin a session in the project, or pin the canvas. The project and the loader use the same checkout.
 
+   When you start the session to pin, choose **Current checkout**, not **New worktree**. A worktree session gets its own copy under `copilot-worktrees` on its own branch, so `git pull` never updates it and it keeps loading the old launcher. If you already pinned a worktree session, archive it and start a new **Current checkout** session. To check, the session's `EXTENSION_PATH` in the app logs should be under `repos/repo-setup-scripts`, not `copilot-worktrees`.
+
 Before each booth day, run `git -C ~/repos/repo-setup-scripts pull` and restart the app; that updates both. Then start a chat (a blank new chat works) and ask Copilot to **"open the demo launcher"**. Opening it from a chat is the recommended booth path: the session, PR, and Fusion buttons are one click because Copilot sets up the project and session for you. Opening it from the app's canvas picker also works, but only as a fallback (see [Opened without a chat](#opened-without-a-chat)). At the end of the day, use the launcher's **Clean up** section or `bash ./create-repo.sh --cleanup` (see [Cleaning up](#cleaning-up)).
 
 ## Demos
@@ -194,7 +196,7 @@ How the loader works:
 | --- | --- |
 | The app shows two "Demo Launcher" canvases | Expected on staff builds with both the project and loader set up. Either one works. See [Two Demo Launcher canvases](#two-demo-launcher-canvases). |
 | Copilot can't find the Demo Launcher outside this project | Run `install.sh`, then restart the app or reload extensions. Check that `~/.copilot/extensions/demo-launcher/extension.mjs` exists and that the path it imports exists. If it still doesn't appear, open it from a session in the `repo-setup-scripts` project while you check the loader. |
-| The panel shows old behavior | Run `git pull` in the main checkout and reload extensions. Sessions inside this project use their own checkout, so update that branch. |
+| The panel shows old behavior | Run `git pull` in the main checkout and reload extensions. Sessions inside this project use their own checkout, so update that branch. A pinned **New worktree** session never picks up `git pull`; archive it and start a **Current checkout** session instead. |
 | A run fails with an auth or scope error, or cleanup asks for `delete_repo` | Run `gh auth status` in a terminal, then `gh auth refresh -h github.com -s codespace,delete_repo`. |
 | A run fails at **Creating PR** or a push, or stops with "git would push as 'X', but gh is logged in as 'Y'" | git and `gh` are signed in as different accounts (often the Copilot app's account vs. the booth login). The Demo Launcher handles this itself; update to the latest version. For terminal runs started from the app, check `gh auth status` and the account selected in the app. |
 | The demo was created in the wrong account | Repos go to the [logged-in account](#where-repos-are-created) unless you set **Owner**. Check `gh auth status`. |

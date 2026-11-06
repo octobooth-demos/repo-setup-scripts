@@ -16,6 +16,8 @@ AI_SCAN_API_VERSION="2026-03-10"
 # copilot-swe-agent[bot], so it's kept as a fallback.
 COPILOT_AUTOFIX_ASSIGNEES=("github-agentic-autofix[bot]" "copilot-swe-agent[bot]")
 CODEQL_WAIT_SECONDS="${CODEQL_WAIT_SECONDS:-900}"
+DEFAULT_SETUP_WAIT_SECONDS="${DEFAULT_SETUP_WAIT_SECONDS:-600}"
+PR_SCAN_WAIT_SECONDS="${PR_SCAN_WAIT_SECONDS:-90}"
 
 # --- Arguments ---
 
@@ -466,6 +468,177 @@ enable_ai_scan() {
     echo "   An org owner must allow it under Settings → Code security → Global settings → AI Scan."
 }
 
+# An org's default code security configuration attaches to a new repo a few seconds
+# after creation and can turn CodeQL default setup on. Wait (bounded) for it to
+# settle so it can't override the explicit default-setup change made next.
+wait_for_security_config() {
+    [ "$OWNER" = "$CURRENT_USER" ] && return 0
+    local defaults status="" attempt
+    # 0 means the org has no default configuration for new repos, so nothing will attach.
+    defaults=$(gh api "orgs/$OWNER/code-security/configurations/defaults" \
+        --jq '[.[] | select(.default_for_new_repos != "none")] | length' 2>/dev/null) || defaults=""
+    [ "$defaults" = "0" ] && return 0
+    echo "⏳ Waiting for the org's code security configuration to attach..."
+    # Give up after 1 minute if nothing starts attaching; allow 3 minutes once one is.
+    for attempt in $(seq 1 60); do
+        status=$(gh api "repos/$FULL_REPO_NAME/code-security-configuration" --jq '.status // empty' 2>/dev/null) || status=""
+        case "$status" in
+            "")
+                if [ "$attempt" -ge 20 ]; then
+                    echo "ℹ️  No org code security configuration attached after 60 seconds; continuing."
+                    return 0
+                fi
+                ;;
+            attaching|updating) ;;
+            *)
+                echo "✅ Org code security configuration: $status"
+                return 0
+                ;;
+        esac
+        sleep 3
+    done
+    echo "❌ The org's code security configuration was still '$status' on $FULL_REPO_NAME after 3 minutes."
+    echo "   It could override the CodeQL default setup this script needs. Run the script again."
+    exit 1
+}
+
+# Set CodeQL default setup and wait (bounded) until GitHub reports it, resending the
+# change if something (such as an org configuration applied late) flips it back.
+# Configured languages only show up once default setup's first run finishes.
+# Usage: set_default_setup not-configured
+#        set_default_setup configured <language>...
+set_default_setup() {
+    local want="$1"
+    shift
+    local args=(-f "state=$want")
+    local lang
+    if [ "$want" = "configured" ]; then
+        args+=(-f query_suite=default)
+        for lang in "$@"; do
+            args+=(-f "languages[]=$lang")
+        done
+        echo "🛡️  Configuring CodeQL default setup for: $* (usually 3-5 minutes)..."
+    else
+        echo "🛡️  Turning CodeQL default setup off so the template's advanced workflow can upload..."
+    fi
+    local waited=0 since_patch=0 patched=false current="" state="" langs="" uncovered=""
+    while [ "$waited" -lt "$DEFAULT_SETUP_WAIT_SECONDS" ]; do
+        if [ "$patched" = false ] || { [ "$state" != "$want" ] && [ "$since_patch" -ge 30 ]; }; then
+            if gh api "repos/$FULL_REPO_NAME/code-scanning/default-setup" -X PATCH "${args[@]}" --silent 2>/dev/null; then
+                patched=true
+                since_patch=0
+            fi
+        fi
+        if [ "$patched" = true ]; then
+            current=$(gh api "repos/$FULL_REPO_NAME/code-scanning/default-setup" \
+                --jq '"\(.state) \((.languages // []) | join(","))"' 2>/dev/null) || current=""
+            state="${current%% *}"
+            langs="${current#* }"
+            if [ "$state" = "$want" ]; then
+                uncovered=""
+                if [ "$want" = "configured" ]; then
+                    for lang in "$@"; do
+                        [[ ",$langs," == *",$lang,"* ]] || uncovered="$uncovered $lang"
+                    done
+                fi
+                if [ -z "$uncovered" ]; then
+                    [ "$want" = "configured" ] || langs=""
+                    echo "✅ CodeQL default setup: $want${langs:+ ($langs)}"
+                    return 0
+                fi
+            fi
+        fi
+        sleep 5
+        waited=$((waited + 5))
+        since_patch=$((since_patch + 5))
+    done
+    if [ "$patched" = false ]; then
+        echo "❌ Could not change CodeQL default setup for $FULL_REPO_NAME (state=$want)."
+        echo "   The token needs admin access to the repo, and an enforced org security configuration blocks this."
+    elif [ "$state" != "$want" ]; then
+        echo "❌ CodeQL default setup was still '${state:-unknown}' (want '$want') after $((DEFAULT_SETUP_WAIT_SECONDS / 60)) minutes."
+    else
+        echo "❌ CodeQL default setup did not cover${uncovered} after $((DEFAULT_SETUP_WAIT_SECONDS / 60)) minutes (has: ${langs:-none})."
+    fi
+    echo "   Check https://github.com/$FULL_REPO_NAME/settings/security_analysis"
+    exit 1
+}
+
+# CodeQL default setup languages: the entry's "code_scanning_languages", else the
+# repo's detected languages mapped to CodeQL names, plus GitHub Actions workflows.
+code_scanning_languages() {
+    local langs attempt
+    langs=$(repo_cfg '.code_scanning_languages[]?')
+    if [ -n "$langs" ]; then
+        echo "$langs"
+        return 0
+    fi
+    # Language detection can lag repo creation by a few seconds.
+    local looked_up=false
+    for attempt in 1 2 3 4 5 6; do
+        if langs=$(gh api "repos/$FULL_REPO_NAME/languages" --jq '
+            {"C":"c-cpp","C++":"c-cpp","C#":"csharp","Go":"go","Java":"java-kotlin","Kotlin":"java-kotlin",
+             "JavaScript":"javascript-typescript","TypeScript":"javascript-typescript","Python":"python",
+             "Ruby":"ruby","Rust":"rust","Swift":"swift"} as $m
+            | [keys[] | $m[.] // empty] | unique | .[]' 2>/dev/null); then
+            looked_up=true
+        else
+            langs=""
+        fi
+        [ -n "$langs" ] && break
+        sleep 5
+    done
+    if [ "$looked_up" = false ]; then
+        echo "❌ Could not read the languages of $FULL_REPO_NAME to configure CodeQL default setup." >&2
+        echo "   Set \"code_scanning_languages\" for this entry in config.json, or run the script again." >&2
+        return 1
+    fi
+    [ -z "$langs" ] && echo "⚠️  No CodeQL-supported languages detected; scanning GitHub Actions workflows only." >&2
+    printf '%s\n' "$langs" actions | sed '/^$/d'
+}
+
+# Default setup can miss the "opened" event of PRs opened within minutes of being
+# configured, leaving a demo PR without CodeQL results. Wait (bounded) for each PR's
+# scan to start; for any that hasn't, recommit the PR's commit (same tree and
+# message) and force-push it, which triggers a scan. Only warns.
+# Run from the temp clone. Usage: ensure_pr_code_scanning "<number> <branch>"...
+ensure_pr_code_scanning() {
+    local pending=("$@") still=() entry number branch attempt waited runs
+    local max_attempts=4
+    echo "⏳ Waiting for CodeQL to start scanning the demo PRs..."
+    for attempt in $(seq 1 "$max_attempts"); do
+        waited=0
+        while [ "${#pending[@]}" -gt 0 ] && [ "$waited" -lt "$PR_SCAN_WAIT_SECONDS" ]; do
+            runs=$(gh run list --repo "$FULL_REPO_NAME" --event dynamic --limit 100 --json name,headBranch \
+                --jq '.[] | select(.name | startswith("Code Quality") | not) | .headBranch' 2>/dev/null) || runs=""
+            still=()
+            for entry in "${pending[@]}"; do
+                grep -qx "refs/pull/${entry%% *}/head" <<< "$runs" || still+=("$entry")
+            done
+            pending=("${still[@]}")
+            [ "${#pending[@]}" -eq 0 ] && break
+            sleep 10
+            waited=$((waited + 10))
+        done
+        if [ "${#pending[@]}" -eq 0 ]; then
+            echo "✅ CodeQL is scanning the demo PRs"
+            return 0
+        fi
+        [ "$attempt" -eq "$max_attempts" ] && break
+        for entry in "${pending[@]}"; do
+            number="${entry%% *}"
+            branch="${entry#* }"
+            echo "🔁 CodeQL hasn't started on PR #$number; pushing its commit again to trigger a scan..."
+            git checkout --quiet "$branch"
+            git commit --amend --no-edit --quiet
+            git_push --force origin "$branch" --quiet
+        done
+    done
+    for entry in "${pending[@]}"; do
+        echo "⚠️  CodeQL never started on PR #${entry%% *}. Push a commit to ${entry#* } to trigger a scan."
+    done
+}
+
 # AI Scan only reviews PRs opened while code scanning is on, which for advanced
 # setup means after the first analysis upload (the template's CodeQL run on its
 # initial commit). Wait (bounded) for it; only warns on timeout.
@@ -737,8 +910,17 @@ validate_selected_repo() {
                 exit 1
             fi
             ;;
-        security_prs|code_review_prs)
+        code_review_prs)
             validate_pr_entries prs 1
+            ;;
+        security_prs)
+            validate_pr_entries prs 1
+            if ! jq -e ".repos[$SELECTED_INDEX].code_scanning_languages // [\"x\"]
+                | type == \"array\" and length > 0 and all(.[]; type == \"string\" and length > 0)" \
+                "$CONFIG_FILE" > /dev/null; then
+                echo "❌ code_scanning_languages must be a non-empty list of CodeQL language names"
+                exit 1
+            fi
             ;;
         ai_security)
             # AI Scan entries need a PR; agentic autofix entries need "autofix".
@@ -1139,13 +1321,20 @@ case $WORKFLOW in
         ENABLE_SECURITY=$(repo_cfg '.enable_security_features')
         if [ "$ENABLE_SECURITY" = "true" ]; then
             echo "🛡️  Enabling security features..."
+            wait_for_security_config
             gh api "repos/$FULL_REPO_NAME/vulnerability-alerts" -X PUT --silent 2>/dev/null
             gh api "repos/$FULL_REPO_NAME/automated-security-fixes" -X PUT --silent 2>/dev/null
             # Private repos need Advanced Security before Code Scanning default setup.
             gh api "repos/$FULL_REPO_NAME" -X PATCH \
                 -f 'security_and_analysis[advanced_security][status]=enabled' --silent
-            gh api "repos/$FULL_REPO_NAME/code-scanning/default-setup" -X PATCH \
-                -f state=configured -f query_suite=default --silent
+            # Set the languages explicitly: an org configuration applied at creation
+            # can run before language detection and cover only GitHub Actions.
+            LANGUAGE_LIST=$(code_scanning_languages) || exit 1
+            CODE_SCANNING_LANGUAGES=()
+            while IFS= read -r lang; do
+                [ -n "$lang" ] && CODE_SCANNING_LANGUAGES+=("$lang")
+            done <<< "$LANGUAGE_LIST"
+            set_default_setup configured "${CODE_SCANNING_LANGUAGES[@]}"
             echo "✅ Dependabot alerts, security updates, and Code Scanning enabled"
             # Default setup rejects advanced-setup SARIF uploads, which would fail a check on every PR.
             if gh workflow disable codeql-advanced.yml -R "$FULL_REPO_NAME" >/dev/null 2>&1; then
@@ -1158,6 +1347,7 @@ case $WORKFLOW in
         clone_to_temp
 
         PR_COUNT=$(jq ".repos[$SELECTED_INDEX].prs | length" "$CONFIG_FILE")
+        SCANNED_PRS=()
         i=0
         while [ "$i" -lt "$PR_COUNT" ]; do
             pr_branch=$(jq -r ".repos[$SELECTED_INDEX].prs[$i].branch" "$CONFIG_FILE")
@@ -1172,20 +1362,27 @@ case $WORKFLOW in
                 "$pr_body_file" \
                 "$pr_commit_msg" \
                 "$pr_title"
+            SCANNED_PRS+=("$CREATED_PR_NUMBER $pr_branch")
             i=$((i + 1))
         done
+        if [ "$ENABLE_SECURITY" = "true" ]; then
+            ensure_pr_code_scanning "${SCANNED_PRS[@]}"
+        fi
         ;;
 
     "ai_security")
         echo ""
         echo "🤖 Setting up AI code security demo..."
 
-        # The template runs CodeQL through its own advanced workflow. Default setup
-        # is deliberately not enabled: it would reject that workflow's uploads.
+        # The template runs CodeQL through its own advanced workflow, which default
+        # setup would reject. The org may turn default setup on at creation, so turn
+        # it off explicitly before anything is pushed.
         # Private repos need Advanced Security before code scanning results are accepted.
+        wait_for_security_config
         gh api "repos/$FULL_REPO_NAME" -X PATCH \
             -f 'security_and_analysis[advanced_security][status]=enabled' --silent
         echo "✅ Advanced Security enabled"
+        set_default_setup not-configured
         if [ "$(repo_cfg '.ai_scan')" = "true" ]; then
             enable_ai_scan
         fi

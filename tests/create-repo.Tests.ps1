@@ -13,6 +13,9 @@ $testState = [pscustomobject]@{
     CleanupRepos = @(); NpmCalls = $null; PagesDisabled = $false; Opened = $null
     CodeqlConclusion = 'success'; AssignFailure = $false; AutofixBotMissing = $false; AnalysesCount = '2'; LateRulePolls = 0
     StalePushRun = $false; GitCredentialUser = $null
+    SetupState = 'configured'; SetupLanguages = @('actions'); SetupPending = $null; SetupLag = 0
+    SetupRevertOnce = $false; SetupPatchFailure = $false; ConfigStatusPolls = 0
+    PrBranches = @{}; PrScans = 'start'; ForcePushed = $null; LanguagesFailure = $false
 }
 Remove-Item Env:DEMO_NO_BROWSER -ErrorAction SilentlyContinue
 # Behave the same locally and in CI: the script skips browsers under Actions and
@@ -62,6 +65,12 @@ function gh {
         $global:LASTEXITCODE = 1
         return
     }
+    $jqIndex = [array]::IndexOf($arguments, '--jq')
+    if ($jqIndex -ge 0 -and "$($arguments[$jqIndex + 1])".Contains('"')) {
+        # Windows PowerShell 5.1 strips double quotes from native arguments, breaking the filter.
+        $global:LASTEXITCODE = 1
+        return
+    }
     if ($arguments[0] -eq 'auth' -and $arguments[1] -eq 'status' -and $testState.NeedsLogin) {
         $global:LASTEXITCODE = 1
         return
@@ -75,6 +84,20 @@ function gh {
         if ($arguments -contains '.html_url') { return 'https://demo-user.github.io/booth-bingo-test/' }
         return
     }
+    if ($arguments[0] -eq 'run' -and $arguments[1] -eq 'list' -and $arguments -contains 'dynamic') {
+        # PrScans: 'start' (scan starts when the PR opens), 'retrigger' (only after a
+        # force-push), or 'never'. Code Quality runs always start and must be ignored.
+        $runs = foreach ($number in $testState.PrBranches.Keys) {
+            [pscustomobject]@{ name = "Code Quality: PR #$number"; headBranch = "refs/pull/$number/head" }
+            $scanned = switch ($testState.PrScans) {
+                'start' { $true }
+                'retrigger' { $testState.ForcePushed -contains $testState.PrBranches[$number] }
+                default { $false }
+            }
+            if ($scanned) { [pscustomobject]@{ name = "PR #$number"; headBranch = "refs/pull/$number/head" } }
+        }
+        return (ConvertTo-Json -InputObject @($runs) -Compress)
+    }
     if ($arguments[0] -eq 'run' -and $arguments[1] -eq 'list') {
         if ($arguments -contains 'databaseId') {
             # An older failed push run on the same commit, visible before the dispatched run.
@@ -86,6 +109,36 @@ function gh {
     if ($arguments[0] -eq 'run' -and $arguments[1] -eq 'view') {
         if ($arguments[2] -eq '999') { return @('completed', 'failure') }
         return @('completed', $testState.CodeqlConclusion)
+    }
+    if ($arguments[0] -eq 'api' -and $arguments[1] -like 'orgs/*/code-security/configurations/defaults') {
+        return 'all'
+    }
+    if ($arguments[0] -eq 'api' -and $arguments[1] -like '*/code-security-configuration') {
+        if ($testState.ConfigStatusPolls -gt 0) { $testState.ConfigStatusPolls--; return 'attaching' }
+        return 'attached'
+    }
+    if ($arguments[0] -eq 'api' -and $arguments[1] -like '*/languages') {
+        if ($testState.LanguagesFailure) { $global:LASTEXITCODE = 1; return }
+        return @('PHP', 'TypeScript', 'Makefile')
+    }
+    if ($arguments[0] -eq 'api' -and $arguments[1] -like '*/code-scanning/default-setup') {
+        if ($arguments -contains 'PATCH') {
+            if ($testState.SetupPatchFailure) { $global:LASTEXITCODE = 1; return }
+            $testState.SetupState = (@($arguments | Where-Object { $_ -like 'state=*' })[0] -split '=', 2)[1]
+            $requested = @($arguments | Where-Object { $_ -like 'languages`[`]=*' } | ForEach-Object { ($_ -split '=', 2)[1] })
+            if ($requested.Count -gt 0) { $testState.SetupPending = $requested }
+            return
+        }
+        if ($testState.SetupRevertOnce -and $testState.SetupState -eq 'not-configured') {
+            # An org configuration applied late turns default setup back on.
+            $testState.SetupRevertOnce = $false
+            $testState.SetupState = 'configured'
+        }
+        if ($testState.SetupPending) {
+            if ($testState.SetupLag -gt 0) { $testState.SetupLag-- }
+            else { $testState.SetupLanguages = $testState.SetupPending; $testState.SetupPending = $null }
+        }
+        return @(@($testState.SetupState) + $testState.SetupLanguages)
     }
     if ($arguments[0] -eq 'api' -and $arguments[1] -like '*/code-scanning/analyses?*') {
         return $testState.AnalysesCount
@@ -117,6 +170,7 @@ function gh {
         $repo = $arguments[[array]::IndexOf($arguments, '--repo') + 1]
         $number = $testState.NextPr
         $testState.NextPr++
+        $testState.PrBranches[$number] = $arguments[[array]::IndexOf($arguments, '--head') + 1]
         return "https://github.com/$repo/pull/$number"
     }
     if ($arguments[0] -eq 'api' -and $arguments[1] -eq '--method' -and $arguments[3] -like '*/requested_reviewers') {
@@ -150,6 +204,11 @@ function git {
         $global:LASTEXITCODE = 42
         return
     }
+    if ($arguments[0] -eq 'push' -and $arguments -contains '--force') {
+        $testState.ForcePushed.Add($arguments[3])
+        return
+    }
+    if ($arguments[0] -eq 'commit' -and $arguments -contains '--amend') { return }
     if (($arguments -join ' ') -like '*credential fill') {
         if (-not $testState.GitCredentialUser) { $global:LASTEXITCODE = 1; return }
         return @('protocol=https', 'host=github.com', 'username=x-access-token', 'password=git-helper-token')
@@ -246,7 +305,9 @@ try {
     Write-Host 'PASS: config-resources'
 
     foreach ($scenario in @(
-        'repo-only', 'security-prs', 'security-prs-v4', 'issue-codespace', 'branch-codespace',
+        'repo-only', 'security-prs', 'security-prs-v4', 'security-prs-detect-languages', 'security-prs-languages-lag',
+        'security-prs-setup-timeout', 'security-prs-setup-patch-failure', 'security-prs-bad-languages',
+        'security-prs-missed-scan', 'security-prs-scan-never', 'security-prs-config-stuck', 'security-prs-languages-failure', 'issue-codespace', 'branch-codespace',
         'login', 'invalid-selection', 'no-machine', 'nested-body',
         'missing-template', 'missing-body', 'empty-prs', 'unknown-workflow',
         'outside-body', 'invalid-json', 'missing-org', 'empty-repos',
@@ -261,7 +322,7 @@ try {
         'ai-security', 'ai-security-no-clone', 'ai-security-not-enabled', 'ai-security-late-rule',
         'ai-security-assign-failure', 'ai-security-assign-fallback', 'ai-security-codeql-failure',
         'ai-security-missing-seed', 'ai-security-no-seed', 'ai-security-scan-only', 'ai-security-autofix-only',
-        'ai-security-missing-prs',
+        'ai-security-missing-prs', 'ai-security-setup-reverts', 'ai-security-setup-stuck',
         'blank', 'blank-interactive', 'blank-missing-seed', 'blank-needs-workflow',
         'routing', 'routing-missing-seed', 'routing-duplicate-label', 'routing-case-collision', 'routing-prefix-collision', 'routing-trailing-space-collision', 'routing-empty-seeds', 'routing-seed-without-file'
     )) {
@@ -289,6 +350,17 @@ try {
         $testState.LateRulePolls = 0
         $testState.StalePushRun = $false
         $testState.GitCredentialUser = $null
+        $testState.SetupState = 'configured'
+        $testState.SetupLanguages = @('actions')
+        $testState.SetupPending = $null
+        $testState.SetupLag = 0
+        $testState.SetupRevertOnce = $false
+        $testState.SetupPatchFailure = $false
+        $testState.ConfigStatusPolls = 2
+        $testState.PrBranches = @{}
+        $testState.PrScans = 'start'
+        $testState.LanguagesFailure = $false
+        $testState.ForcePushed = New-Object 'System.Collections.Generic.List[string]'
         $testState.Opened = New-Object 'System.Collections.Generic.List[string]'
         $testState.NpmCalls = New-Object 'System.Collections.Generic.List[object]'
         $old = '2020-01-01T00:00:00Z'
@@ -303,6 +375,23 @@ try {
         switch ($scenario) {
             'security-prs' { $selection = '2' }
             'security-prs-v4' { $selection = $null; $scriptArgs = @{ Template = 'security-octo-supply-v4'; NoClone = $true } }
+            'security-prs-detect-languages' {
+                $selection = '2'
+                $config.repos[1].PSObject.Properties.Remove('code_scanning_languages')
+            }
+            'security-prs-languages-lag' { $selection = '2'; $testState.SetupLag = 20 }
+            'security-prs-missed-scan' { $selection = '2'; $testState.PrScans = 'retrigger' }
+            'security-prs-scan-never' { $selection = '2'; $testState.PrScans = 'never' }
+            'security-prs-config-stuck' { $selection = '2'; $testState.ConfigStatusPolls = 100000; $expectedFailure = "still 'attaching'" }
+            'security-prs-languages-failure' {
+                $selection = '2'
+                $testState.LanguagesFailure = $true
+                $config.repos[1].PSObject.Properties.Remove('code_scanning_languages')
+                $expectedFailure = 'Could not read the languages'
+            }
+            'security-prs-setup-timeout' { $selection = '2'; $testState.SetupLag = 100000; $expectedFailure = 'did not cover javascript-typescript after 10 minutes (has: actions)' }
+            'security-prs-setup-patch-failure' { $selection = '2'; $testState.SetupPatchFailure = $true; $expectedFailure = 'Could not change CodeQL default setup' }
+            'security-prs-bad-languages' { $selection = '2'; $config.repos[1].code_scanning_languages = @(); $expectedFailure = 'code_scanning_languages must be' }
             'issue-codespace' { $selection = '3' }
             'branch-codespace' { $selection = $branchSelection }
             'code-review-prs' { $selection = '6' }
@@ -333,6 +422,8 @@ try {
                 $config.repos[$aiIndex].PSObject.Properties.Remove('prs')
                 $config.repos[$aiIndex].PSObject.Properties.Remove('ai_scan')
             }
+            'ai-security-setup-reverts' { $selection = $aiSelection; $testState.SetupRevertOnce = $true }
+            'ai-security-setup-stuck' { $selection = $aiSelection; $testState.SetupPatchFailure = $true; $expectedFailure = 'Could not change CodeQL default setup' }
             'ai-security-missing-prs' {
                 $selection = $aiSelection
                 $config.repos[$aiIndex].PSObject.Properties.Remove('prs')
@@ -512,7 +603,7 @@ try {
         Assert ((Get-Location).Path -eq $originalLocation.Path) "$scenario did not restore location."
         if ($expectedFailure) {
             Assert ($null -ne $caught -and $caught.Contains($expectedFailure)) "$scenario expected '$expectedFailure', got '$caught'."
-            if ($scenario -notin @('create-failure', 'topic-failure', 'push-failure', 'login-failure', 'git-account-mismatch', 'stack-api-failure', 'stack-verify-mismatch', 'non-interactive-login', 'ai-security-codeql-failure')) {
+            if ($scenario -notin @('create-failure', 'topic-failure', 'push-failure', 'login-failure', 'git-account-mismatch', 'stack-api-failure', 'stack-verify-mismatch', 'non-interactive-login', 'ai-security-codeql-failure', 'security-prs-setup-timeout', 'security-prs-setup-patch-failure', 'ai-security-setup-stuck', 'security-prs-config-stuck', 'security-prs-languages-failure')) {
                 Assert ($testState.Calls.Count -eq 0) "$scenario invoked a remote command before validation."
             }
             if ($scenario -eq 'non-interactive-login') {
@@ -541,6 +632,10 @@ try {
             }
             if ($scenario -eq 'create-failure') {
                 Assert ((Find-Calls 'gh' 'repo clone').Count -eq 0) 'Cloned after repository creation failed.'
+            }
+            if ($scenario -in @('security-prs-setup-timeout', 'security-prs-setup-patch-failure', 'ai-security-setup-stuck', 'security-prs-config-stuck', 'security-prs-languages-failure')) {
+                Assert ((Find-Calls 'gh' 'pr create').Count -eq 0) "$scenario opened a PR without the right CodeQL default setup."
+                Assert ((Find-Calls 'git' 'push').Count -eq 0) "$scenario pushed without the right CodeQL default setup."
             }
         }
         elseif ($scenario -like 'cleanup*') {
@@ -572,8 +667,7 @@ try {
             }
             $create = @(Find-Calls 'gh' 'repo create')[0]
             $expectedOwner = switch ($scenario) {
-                'security-prs' { 'octobooth-demos' }
-                'security-prs-v4' { 'octobooth-demos' }
+                { $_ -like 'security-prs*' } { 'octobooth-demos' }
                 'nested-body' { 'octobooth-demos' }
                 { $_ -like 'ai-security*' } { 'octobooth-demos' }
                 'owner-override' { 'other-org' }
@@ -624,7 +718,34 @@ try {
             }
             if ($selection -eq '2' -or $scenario -eq 'security-prs-v4') {
                 Assert ((Find-Calls 'gh' 'pr create').Count -eq 2) 'Expected two PRs.'
-                Assert ((Find-Calls 'gh' 'api repos/').Count -eq 6) 'Expected readiness checks and four security API calls.'
+                foreach ($endpoint in @('vulnerability-alerts -X PUT', 'automated-security-fixes -X PUT')) {
+                    Assert ((Find-Calls 'gh' "api repos/$($create.Arguments[2])/$endpoint").Count -eq 1) "Missing security call '$endpoint'."
+                }
+                $setupPatches = @((Find-Calls 'gh' 'api repos/').Where({ $_.Arguments[1] -like '*/code-scanning/default-setup' -and $_.Arguments -contains 'PATCH' }))
+                Assert ($setupPatches.Count -eq 1) "Expected one default setup change, got $($setupPatches.Count)."
+                $setupArgs = $setupPatches[0].Arguments -join ' '
+                $wantLanguages = '-f languages[]=javascript-typescript -f languages[]=actions'
+                Assert ($setupArgs.Contains('-f state=configured -f query_suite=default') -and $setupArgs.Contains($wantLanguages)) "Wrong default setup call '$setupArgs'."
+                $configPoll = @((Find-Calls 'gh' 'api repos/').Where({ $_.Arguments[1] -like '*/code-security-configuration' }))
+                Assert ($configPoll.Count -eq 3) "Polled the org configuration $($configPoll.Count) times (want 3)."
+                Assert ($testState.Calls.IndexOf($configPoll[-1]) -lt $testState.Calls.IndexOf($setupPatches[0])) 'Changed default setup before the org configuration attached.'
+                $setupPolls = @((Find-Calls 'gh' 'api repos/').Where({ $_.Arguments[1] -like '*/code-scanning/default-setup' -and $_.Arguments -notcontains 'PATCH' }))
+                $wantPolls = if ($scenario -eq 'security-prs-languages-lag') { 21 } else { 1 }
+                Assert ($setupPolls.Count -eq $wantPolls) "Polled default setup $($setupPolls.Count) times (want $wantPolls)."
+                $languageLookups = @((Find-Calls 'gh' 'api repos/').Where({ $_.Arguments[1] -like '*/languages' }))
+                Assert ($languageLookups.Count -eq ([int]($scenario -eq 'security-prs-detect-languages'))) 'Language detection use was wrong.'
+                Assert ($testState.Calls.IndexOf($setupPolls[-1]) -lt $testState.Calls.IndexOf((Find-Calls 'gh' 'pr create')[0])) 'Opened PRs before default setup covered the languages.'
+                $scanPolls = @((Find-Calls 'gh' 'run list').Where({ $_.Arguments -contains 'dynamic' }))
+                Assert ($scanPolls.Count -ge 1 -and $testState.Calls.IndexOf($scanPolls[0]) -gt $testState.Calls.IndexOf((Find-Calls 'gh' 'pr create')[-1])) 'Did not check for CodeQL scans after opening the PRs.'
+                $branches = 'feature-add-tos-download,feature/supplier-notes'
+                $wantPushes = switch ($scenario) {
+                    'security-prs-missed-scan' { $branches }
+                    'security-prs-scan-never' { (@($branches) * 3) -join ',' }
+                    default { '' }
+                }
+                Assert (($testState.ForcePushed -join ',') -eq $wantPushes) "Force-pushed '$($testState.ForcePushed -join ',')' (want '$wantPushes')."
+                $amends = @(Find-Calls 'git' 'commit --amend --no-edit')
+                Assert ($amends.Count -eq $testState.ForcePushed.Count) 'Every retrigger push should recommit the PR commit first.'
                 $disable = @(Find-Calls 'gh' 'workflow disable codeql-advanced.yml')
                 Assert ($disable.Count -eq 1 -and $disable[0].Arguments -contains $create.Arguments[2]) 'codeql-advanced.yml was not disabled.'
                 $firstPr = $testState.Calls.IndexOf((Find-Calls 'gh' 'pr create')[0])
@@ -729,7 +850,17 @@ try {
                 $hasScan = $scenario -ne 'ai-security-autofix-only'
                 $hasAutofix = $scenario -notin @('ai-security-scan-only', 'ai-security-not-enabled')
                 Assert ($fullName -like 'octobooth-demos/ai-security-*') "$scenario created '$fullName'."
-                Assert ((Find-Calls 'gh' 'api').Where({ ($_.Arguments -join ' ').Contains('default-setup') }).Count -eq 0) 'Enabled CodeQL default setup alongside the advanced workflow.'
+                $setupPatches = @((Find-Calls 'gh' 'api').Where({ $_.Arguments[1] -like '*/code-scanning/default-setup' -and $_.Arguments -contains 'PATCH' }))
+                $wantPatches = if ($scenario -eq 'ai-security-setup-reverts') { 2 } else { 1 }
+                Assert ($setupPatches.Count -eq $wantPatches) "Turned default setup off $($setupPatches.Count) times (want $wantPatches)."
+                foreach ($patch in $setupPatches) {
+                    Assert (($patch.Arguments -join ' ').Contains('-f state=not-configured') -and -not ($patch.Arguments -like 'languages*')) "Wrong default setup call '$($patch.Arguments -join ' ')'."
+                }
+                Assert ($testState.SetupState -eq 'not-configured') 'Default setup was left on alongside the advanced workflow.'
+                $firstClone = $testState.Calls.IndexOf(@((Find-Calls 'gh' 'repo clone').Where({ -not $_.Arguments[3].StartsWith($homeRepos) }))[0])
+                Assert ($testState.Calls.IndexOf($setupPatches[-1]) -lt $firstClone) 'Pushed before default setup was off.'
+                $lastPoll = @((Find-Calls 'gh' 'api').Where({ $_.Arguments[1] -like '*/code-scanning/default-setup' -and $_.Arguments -notcontains 'PATCH' }))[-1]
+                Assert ($testState.Calls.IndexOf($lastPoll) -lt $firstClone) 'Did not confirm default setup was off before pushing.'
                 Assert ((Find-Calls 'gh' 'api').Where({ $_.Arguments -contains 'PUT' }).Count -eq 0) "$scenario enabled unrelated security features."
                 $ghas = @(Find-Calls 'gh' "api repos/$fullName -X PATCH")
                 Assert ($ghas.Count -eq 1 -and ($ghas[0].Arguments -join ' ').Contains('advanced_security][status]=enabled')) 'Advanced Security was not enabled.'

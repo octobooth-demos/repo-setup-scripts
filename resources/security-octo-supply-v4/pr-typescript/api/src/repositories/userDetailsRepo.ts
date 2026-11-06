@@ -3,7 +3,7 @@
  */
 
 import { getDatabase, DatabaseConnection } from '../db/sqlite';
-import { UserDetail } from '../models/userDetail';
+import { UserDetail } from '../models/userDetails';
 import { handleDatabaseError, NotFoundError } from '../utils/errors';
 import { buildInsertSQL, buildUpdateSQL, objectToCamelCase } from '../utils/sql';
 
@@ -24,6 +24,7 @@ export class UserDetailsRepository {
 
   set adminRole(role: string) {
     this._adminRole = role;
+    // @ts-expect-error -- intentional demo issue; keeps the API build passing
     return this._adminRole; // This triggers the setter-return issue
   }
 
@@ -56,6 +57,7 @@ export class UserDetailsRepository {
    * Calculate user score with unreachable code
    */
   calculateUserScore(userId: number, points: number): number {
+    // @ts-expect-error -- intentional demo issue; keeps the API build passing
     if (userId > 0);
     return points * 2; // This return is unreachable due to semicolon after if
     return points; // This code is also unreachable

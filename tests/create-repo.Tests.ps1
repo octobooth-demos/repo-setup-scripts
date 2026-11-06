@@ -64,6 +64,12 @@ function gh {
         $global:LASTEXITCODE = 1
         return
     }
+    $jqIndex = [array]::IndexOf($arguments, '--jq')
+    if ($jqIndex -ge 0 -and "$($arguments[$jqIndex + 1])".Contains('"')) {
+        # Windows PowerShell 5.1 strips double quotes from native arguments, breaking the filter.
+        $global:LASTEXITCODE = 1
+        return
+    }
     if ($arguments[0] -eq 'auth' -and $arguments[1] -eq 'status' -and $testState.NeedsLogin) {
         $global:LASTEXITCODE = 1
         return
@@ -90,7 +96,7 @@ function gh {
         return @('completed', $testState.CodeqlConclusion)
     }
     if ($arguments[0] -eq 'api' -and $arguments[1] -like 'orgs/*/code-security/configurations/defaults') {
-        return '1'
+        return 'all'
     }
     if ($arguments[0] -eq 'api' -and $arguments[1] -like '*/code-security-configuration') {
         if ($testState.ConfigStatusPolls -gt 0) { $testState.ConfigStatusPolls--; return 'attaching' }
@@ -116,7 +122,7 @@ function gh {
             if ($testState.SetupLag -gt 0) { $testState.SetupLag-- }
             else { $testState.SetupLanguages = $testState.SetupPending; $testState.SetupPending = $null }
         }
-        return @($testState.SetupState, ($testState.SetupLanguages -join ','))
+        return @(@($testState.SetupState) + $testState.SetupLanguages)
     }
     if ($arguments[0] -eq 'api' -and $arguments[1] -like '*/code-scanning/analyses?*') {
         return $testState.AnalysesCount

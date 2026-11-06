@@ -567,10 +567,10 @@ function Enable-AiScan {
 # settle so it can't override the explicit default-setup change made next.
 function Wait-SecurityConfiguration {
     if ($repoOwner -eq $currentUser) { return }
-    # 0 means the org has no default configuration for new repos, so nothing will attach.
-    $defaults = "$(@(Invoke-GhQuiet api "orgs/$repoOwner/code-security/configurations/defaults" `
-        --jq '[.[] | select(.default_for_new_repos != "none")] | length')[-1])".Trim()
-    if ($LASTEXITCODE -eq 0 -and $defaults -eq '0') { return }
+    # No default configuration for new repos means nothing will attach. (The jq filter
+    # avoids double quotes, which Windows PowerShell 5.1 strips from native arguments.)
+    $defaults = @(Invoke-GhQuiet api "orgs/$repoOwner/code-security/configurations/defaults" --jq '.[].default_for_new_repos')
+    if ($LASTEXITCODE -eq 0 -and @($defaults | Where-Object { "$_".Trim() -ne 'none' }).Count -eq 0) { return }
     Write-Host "Waiting for the org's code security configuration to attach..."
     for ($attempt = 1; $attempt -le 20; $attempt++) {
         $status = "$(@(Invoke-GhQuiet api "repos/$fullRepoName/code-security-configuration" --jq '.status // empty')[-1])".Trim()
@@ -613,17 +613,17 @@ function Set-DefaultSetup {
             }
         }
         if ($patched) {
-            # One field per line; avoids embedded quotes that PowerShell 5.1 mangles.
-            $fields = @(Invoke-GhQuiet api "repos/$fullRepoName/code-scanning/default-setup" --jq '.state, ((.languages // []) | join(","))')
+            # State, then one language per line; avoids embedded quotes that PowerShell 5.1 mangles.
+            $fields = @(Invoke-GhQuiet api "repos/$fullRepoName/code-scanning/default-setup" --jq '.state, (.languages // [])[]')
             if ($LASTEXITCODE -eq 0 -and $fields.Count -ge 1) {
                 $current = "$($fields[0])".Trim()
-                $have = if ($fields.Count -ge 2) { @("$($fields[1])".Trim() -split ',' | Where-Object { $_ }) } else { @() }
+                $have = @($fields | Select-Object -Skip 1 | ForEach-Object { "$_".Trim() } | Where-Object { $_ })
             }
             else { $current = '' }
             if ($current -eq $State) {
                 $missing = if ($State -eq 'configured') { @($Languages | Where-Object { $have -notcontains $_ }) } else { @() }
                 if ($missing.Count -eq 0) {
-                    $suffix = if ($have.Count -gt 0) { " ($($have -join ','))" } else { '' }
+                    $suffix = if ($State -eq 'configured' -and $have.Count -gt 0) { " ($($have -join ','))" } else { '' }
                     Write-Host "CodeQL default setup: $State$suffix"
                     return
                 }

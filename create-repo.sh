@@ -532,6 +532,7 @@ set_default_setup() {
                     done
                 fi
                 if [ -z "$uncovered" ]; then
+                    [ "$want" = "configured" ] || langs=""
                     echo "✅ CodeQL default setup: $want${langs:+ ($langs)}"
                     return 0
                 fi

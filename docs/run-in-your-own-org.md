@@ -14,13 +14,7 @@ This repo is built for the `octobooth-demos` org and its booth accounts (`octobo
 
 You can try the launcher with no config changes. The templates are public, so most demos work from any GitHub account.
 
-1. **Fork this repo** (recommended, so you can edit `config.json` and still pull updates), or clone it directly. Then clone your copy:
-
-   ```bash
-   gh repo clone <you>/repo-setup-scripts ~/repos/repo-setup-scripts
-   ```
-
-2. **Install the tools and log in.** The launcher runs `create-repo` with your `gh` login, so it needs the [GitHub CLI](https://cli.github.com/) and Git on your `PATH`, plus [`jq`](https://jqlang.org/) on macOS and Linux:
+1. **Install the tools and log in.** The launcher runs `create-repo` with your `gh` login, so it needs the [GitHub CLI](https://cli.github.com/) and Git on your `PATH`, plus [`jq`](https://jqlang.org/) on macOS and Linux:
 
    ```bash
    brew install gh jq   # macOS; use your package manager on Linux
@@ -29,6 +23,12 @@ You can try the launcher with no config changes. The templates are public, so mo
    ```
 
    `codespace` is only for Tailspin Toys, and `delete_repo` is only for **Clean up**.
+
+2. **Fork this repo** (recommended, so you can edit `config.json` and still pull updates), or clone it directly. Then clone your copy:
+
+   ```bash
+   gh repo clone <you>/repo-setup-scripts ~/repos/repo-setup-scripts
+   ```
 
 3. **Install the launcher:**
    - **macOS or Linux:** add the existing `~/repos/repo-setup-scripts` folder as a project in the GitHub Copilot app (don't clone it again), then run the loader installer so other sessions can open it too:

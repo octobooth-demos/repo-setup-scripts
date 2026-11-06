@@ -31,18 +31,20 @@ You can try the launcher with no config changes. The templates are public, so mo
    ```
 
 3. **Install the launcher:**
-   - **macOS or Linux:** add the existing `~/repos/repo-setup-scripts` folder as a project in the GitHub Copilot app (don't clone it again), then run the loader installer so other sessions can open it too:
+   - **macOS or Linux:** run the loader installer, so any chat (including a blank new one) can open the launcher:
 
      ```bash
      bash ~/repos/repo-setup-scripts/.github/extensions/demo-launcher/install.sh
      ```
+
+     For quick access at a booth, also add the existing `~/repos/repo-setup-scripts` folder as a project in the GitHub Copilot app (don't clone it again). Then you can pin a session in it, or pin the canvas.
 
    - **Windows:** add the folder as a project in the Copilot app. Don't run `install.sh`; runs use `create-repo.ps1`.
 
    See [options and limitations](#installing-the-demo-launcher-canvas-options-and-limitations) for what each one gives you.
 
 4. **Restart the Copilot app.** Extensions only load at startup (or when you ask Copilot to reload extensions).
-5. **Open it.** In a chat (in the `repo-setup-scripts` project if you skipped `install.sh`), ask Copilot to **"open the demo launcher."**
+5. **Open it.** In any chat (on Windows, a session in the `repo-setup-scripts` project), ask Copilot to **"open the demo launcher."**
 6. **Create a demo.** Pick **Booth Bingo** or **Ctrl Slash** and click **Create**. The repo is created in your logged-in account from the public template in `octobooth-demos`.
 
 With an unchanged `config.json`, these demos work in your own account: `securing-your-code`, `ctrl-slash`, `booth-bingo`, `octocart`, `tailspin-toys`, `fusion-blank`, and `fusion-routing` (subject to the [features each one needs](#reference-what-each-demo-needs)). `security-octo-supply-v4` and `ai-security` fail, because they're pinned to the `octobooth-demos` org. To fix that, [point the config at your org](#point-it-at-your-org).
@@ -54,7 +56,7 @@ The Demo Launcher is a Copilot extension in [`.github/extensions/demo-launcher/`
 | | Option A: user-level loader (`install.sh`) | Option B: project |
 | --- | --- | --- |
 | How | Run `bash .github/extensions/demo-launcher/install.sh` from your checkout | Add your checkout as a project (repository) in the Copilot app |
-| Where it's available | Every session on staff app builds (unverified on regular builds) | Sessions in that project, including its worktrees |
+| Where it's available | Every session, including a blank new chat (confirmed on regular and staff app builds) | Sessions in that project, including its worktrees. You can pin a session or the canvas for quick access |
 | Platforms | macOS and Linux | macOS, Linux, and Windows (the only option on Windows) |
 | Updating | `git pull` in the checkout, then restart the app or reload extensions | Same. Each session uses its own checkout's copy |
 | Removing | `install.sh --uninstall` (keeps run history) | Remove the project from the app |
@@ -65,12 +67,12 @@ The Demo Launcher is a Copilot extension in [`.github/extensions/demo-launcher/`
 - If you move, rename, or delete the checkout, the loader breaks. Re-run `install.sh` from the new location.
 - In a session whose repo ships its own `.github/extensions/demo-launcher/extension.mjs` (this repo or your fork), the loader does nothing and lets that copy provide the canvas. That avoids two launchers in one session.
 
-**Using both.** Add the **same local folder** as the project that `install.sh` points at, so one `git pull` updates both. On app builds that can open canvases without a session (currently staff builds), the canvas picker then lists two "Demo Launcher" entries. They run the same code, so either works. See [Two Demo Launcher canvases](../README.md#two-demo-launcher-canvases).
+**Using both.** On booth Macs, we recommend both: the loader so any chat can open the launcher, and the project so you can pin a session or the canvas. Add the **same local folder** as the project that `install.sh` points at, so one `git pull` updates both. On app builds that can open canvases without a session (currently staff builds), the canvas picker then lists two "Demo Launcher" entries. They run the same code, so either works. See [Two Demo Launcher canvases](../README.md#two-demo-launcher-canvases).
 
 **Limitations:**
 
 - **Open it from a chat.** Opening canvases from the app-wide canvas picker, without a session, is currently a staff-build feature. On other builds, ask Copilot in a session or chat to "open the demo launcher." Opened from the picker, the session and Fusion buttons only open the project's composer; see [Opened without a chat](../README.md#opened-without-a-chat).
-- **User-level extensions are only confirmed on staff builds.** The loader works on staff app builds; we haven't confirmed that regular (non-staff) builds load extensions from `~/.copilot/extensions`. If the launcher doesn't show up outside the project after `install.sh` and a restart, use Option B: open it from a session in the `repo-setup-scripts` project.
+- **The loader is bash-only.** `install.sh` runs on macOS and Linux. On Windows, add the project and open the launcher from a session in it.
 - **It runs locally, as you.** The launcher runs `create-repo.sh` (or `create-repo.ps1` on Windows) from its checkout, using that checkout's `config.json` and `resources/`. It uses your stored `gh auth login` and ignores a `GH_TOKEN` or `GITHUB_TOKEN` the app injects whenever a stored login exists, so `gh`, `git`, and (for bash) `jq` must be installed and logged in.
 - **The panel is a loopback web page.** It's served on `127.0.0.1` on a port that changes every time the extension restarts. The URL also works in a browser.
 - **Run history is shared.** It's kept in `~/.copilot/extensions/demo-launcher/artifacts/runs.json` and shared by every open launcher.
@@ -203,7 +205,7 @@ Every repo the scripts create gets the `demo-generated` topic. Cleanup only dele
 
 ### Presenter machines and machine-setup
 
-On each presenter machine, clone **your fork**, add it as a project, and run `install.sh`, as in the [Quick start](#quick-start). Run `git pull` and restart the app before each event.
+On each presenter machine, clone **your fork**, run `install.sh`, and add it as a project for quick access (on Windows, only the project), as in the [Quick start](#quick-start). Run `git pull` and restart the app before each event.
 
 If you use [`octobooth-demos/machine-setup`](https://github.com/octobooth-demos/machine-setup) to set up machines, fork it too and change:
 

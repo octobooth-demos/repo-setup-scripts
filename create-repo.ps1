@@ -33,6 +33,7 @@ $aiScanApiVersion = '2026-03-10'
 $copilotAutofixAssignees = @('github-agentic-autofix[bot]', 'copilot-swe-agent[bot]')
 $codeqlWaitSeconds = if ($env:CODEQL_WAIT_SECONDS) { [int]$env:CODEQL_WAIT_SECONDS } else { 900 }
 $defaultSetupWaitSeconds = if ($env:DEFAULT_SETUP_WAIT_SECONDS) { [int]$env:DEFAULT_SETUP_WAIT_SECONDS } else { 600 }
+$prScanWaitSeconds = if ($env:PR_SCAN_WAIT_SECONDS) { [int]$env:PR_SCAN_WAIT_SECONDS } else { 90 }
 $nonInteractive = -not [string]::IsNullOrWhiteSpace($Template)
 
 if ($Cleanup -and ($nonInteractive -or $Serve -or $NoClone)) {
@@ -645,6 +646,49 @@ function Set-DefaultSetup {
     throw "CodeQL default setup did not cover $($missing -join ' ') after $minutes minutes (has: $shownHave). Check $settingsUrl"
 }
 
+# Default setup can miss the "opened" event of PRs opened within minutes of being
+# configured, leaving a demo PR without CodeQL results. Wait (bounded) for each PR's
+# scan to start; for any that hasn't, recommit the PR's commit (same tree and
+# message) and force-push it, which triggers a scan. Only warns.
+# Run from the temp clone. $PullRequests holds objects with Number and Branch.
+function Wait-PullRequestCodeScanning {
+    param([object[]]$PullRequests)
+
+    $pending = @($PullRequests)
+    $maxAttempts = 4
+    Write-Host 'Waiting for CodeQL to start scanning the demo PRs...'
+    for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+        for ($waited = 0; $pending.Count -gt 0 -and $waited -lt $prScanWaitSeconds; $waited += 10) {
+            $json = Invoke-GhQuiet run list --repo $fullRepoName --event dynamic --limit 100 --json 'name,headBranch'
+            $scanned = @()
+            if ($LASTEXITCODE -eq 0 -and $json) {
+                try {
+                    $scanned = @(($json -join "`n") | ConvertFrom-Json | ForEach-Object { $_ } |
+                        Where-Object { $_.name -notlike 'Code Quality*' } | ForEach-Object { $_.headBranch })
+                }
+                catch { $scanned = @() }
+            }
+            $pending = @($pending | Where-Object { $scanned -notcontains "refs/pull/$($_.Number)/head" })
+            if ($pending.Count -eq 0) { break }
+            Start-Sleep -Seconds 10
+        }
+        if ($pending.Count -eq 0) {
+            Write-Host 'CodeQL is scanning the demo PRs.'
+            return
+        }
+        if ($attempt -eq $maxAttempts) { break }
+        foreach ($pr in $pending) {
+            Write-Host "CodeQL hasn't started on PR #$($pr.Number); pushing its commit again to trigger a scan..."
+            Invoke-Native 'git' @('checkout', '--quiet', $pr.Branch) | Out-Host
+            Invoke-Native 'git' @('commit', '--amend', '--no-edit', '--quiet') | Out-Host
+            Invoke-GitPush @('--force', 'origin', $pr.Branch, '--quiet')
+        }
+    }
+    foreach ($pr in $pending) {
+        Write-Warning "CodeQL never started on PR #$($pr.Number). Push a commit to $($pr.Branch) to trigger a scan."
+    }
+}
+
 # CodeQL default setup languages: the entry's "code_scanning_languages", else the
 # repo's detected languages mapped to CodeQL names, plus GitHub Actions workflows.
 function Get-CodeScanningLanguages {
@@ -1034,8 +1078,13 @@ try {
             Invoke-Native 'gh' @('repo', 'clone', $fullRepoName, $tempClonePath, '--', '--quiet')
             Set-Location -LiteralPath $tempClonePath
             Set-GitIdentity
+            $scannedPrs = @()
             foreach ($pr in $selectedRepo.prs) {
-                New-ResourcePullRequest $pr | Out-Null
+                $created = New-ResourcePullRequest $pr
+                $scannedPrs += [pscustomobject]@{ Number = $created.Number; Branch = $pr.branch }
+            }
+            if ($selectedRepo.enable_security_features -eq $true) {
+                Wait-PullRequestCodeScanning $scannedPrs
             }
         }
         'code_review_prs' {

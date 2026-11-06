@@ -15,6 +15,7 @@ $testState = [pscustomobject]@{
     StalePushRun = $false; GitCredentialUser = $null
     SetupState = 'configured'; SetupLanguages = @('actions'); SetupPending = $null; SetupLag = 0
     SetupRevertOnce = $false; SetupPatchFailure = $false; ConfigStatusPolls = 0
+    PrBranches = @{}; PrScans = 'start'; ForcePushed = $null
 }
 Remove-Item Env:DEMO_NO_BROWSER -ErrorAction SilentlyContinue
 # Behave the same locally and in CI: the script skips browsers under Actions and
@@ -82,6 +83,20 @@ function gh {
         if ($testState.PagesDisabled) { $global:LASTEXITCODE = 1; return }
         if ($arguments -contains '.html_url') { return 'https://demo-user.github.io/booth-bingo-test/' }
         return
+    }
+    if ($arguments[0] -eq 'run' -and $arguments[1] -eq 'list' -and $arguments -contains 'dynamic') {
+        # PrScans: 'start' (scan starts when the PR opens), 'retrigger' (only after a
+        # force-push), or 'never'. Code Quality runs always start and must be ignored.
+        $runs = foreach ($number in $testState.PrBranches.Keys) {
+            [pscustomobject]@{ name = "Code Quality: PR #$number"; headBranch = "refs/pull/$number/head" }
+            $scanned = switch ($testState.PrScans) {
+                'start' { $true }
+                'retrigger' { $testState.ForcePushed -contains $testState.PrBranches[$number] }
+                default { $false }
+            }
+            if ($scanned) { [pscustomobject]@{ name = "PR #$number"; headBranch = "refs/pull/$number/head" } }
+        }
+        return (ConvertTo-Json -InputObject @($runs) -Compress)
     }
     if ($arguments[0] -eq 'run' -and $arguments[1] -eq 'list') {
         if ($arguments -contains 'databaseId') {
@@ -154,6 +169,7 @@ function gh {
         $repo = $arguments[[array]::IndexOf($arguments, '--repo') + 1]
         $number = $testState.NextPr
         $testState.NextPr++
+        $testState.PrBranches[$number] = $arguments[[array]::IndexOf($arguments, '--head') + 1]
         return "https://github.com/$repo/pull/$number"
     }
     if ($arguments[0] -eq 'api' -and $arguments[1] -eq '--method' -and $arguments[3] -like '*/requested_reviewers') {
@@ -187,6 +203,11 @@ function git {
         $global:LASTEXITCODE = 42
         return
     }
+    if ($arguments[0] -eq 'push' -and $arguments -contains '--force') {
+        $testState.ForcePushed.Add($arguments[3])
+        return
+    }
+    if ($arguments[0] -eq 'commit' -and $arguments -contains '--amend') { return }
     if (($arguments -join ' ') -like '*credential fill') {
         if (-not $testState.GitCredentialUser) { $global:LASTEXITCODE = 1; return }
         return @('protocol=https', 'host=github.com', 'username=x-access-token', 'password=git-helper-token')
@@ -284,7 +305,8 @@ try {
 
     foreach ($scenario in @(
         'repo-only', 'security-prs', 'security-prs-v4', 'security-prs-detect-languages', 'security-prs-languages-lag',
-        'security-prs-setup-timeout', 'security-prs-setup-patch-failure', 'security-prs-bad-languages', 'issue-codespace', 'branch-codespace',
+        'security-prs-setup-timeout', 'security-prs-setup-patch-failure', 'security-prs-bad-languages',
+        'security-prs-missed-scan', 'security-prs-scan-never', 'issue-codespace', 'branch-codespace',
         'login', 'invalid-selection', 'no-machine', 'nested-body',
         'missing-template', 'missing-body', 'empty-prs', 'unknown-workflow',
         'outside-body', 'invalid-json', 'missing-org', 'empty-repos',
@@ -334,6 +356,9 @@ try {
         $testState.SetupRevertOnce = $false
         $testState.SetupPatchFailure = $false
         $testState.ConfigStatusPolls = 2
+        $testState.PrBranches = @{}
+        $testState.PrScans = 'start'
+        $testState.ForcePushed = New-Object 'System.Collections.Generic.List[string]'
         $testState.Opened = New-Object 'System.Collections.Generic.List[string]'
         $testState.NpmCalls = New-Object 'System.Collections.Generic.List[object]'
         $old = '2020-01-01T00:00:00Z'
@@ -353,6 +378,8 @@ try {
                 $config.repos[1].PSObject.Properties.Remove('code_scanning_languages')
             }
             'security-prs-languages-lag' { $selection = '2'; $testState.SetupLag = 20 }
+            'security-prs-missed-scan' { $selection = '2'; $testState.PrScans = 'retrigger' }
+            'security-prs-scan-never' { $selection = '2'; $testState.PrScans = 'never' }
             'security-prs-setup-timeout' { $selection = '2'; $testState.SetupLag = 100000; $expectedFailure = 'did not cover javascript-typescript after 10 minutes (has: actions)' }
             'security-prs-setup-patch-failure' { $selection = '2'; $testState.SetupPatchFailure = $true; $expectedFailure = 'Could not change CodeQL default setup' }
             'security-prs-bad-languages' { $selection = '2'; $config.repos[1].code_scanning_languages = @(); $expectedFailure = 'code_scanning_languages must be' }
@@ -699,6 +726,17 @@ try {
                 $languageLookups = @((Find-Calls 'gh' 'api repos/').Where({ $_.Arguments[1] -like '*/languages' }))
                 Assert ($languageLookups.Count -eq ([int]($scenario -eq 'security-prs-detect-languages'))) 'Language detection use was wrong.'
                 Assert ($testState.Calls.IndexOf($setupPolls[-1]) -lt $testState.Calls.IndexOf((Find-Calls 'gh' 'pr create')[0])) 'Opened PRs before default setup covered the languages.'
+                $scanPolls = @((Find-Calls 'gh' 'run list').Where({ $_.Arguments -contains 'dynamic' }))
+                Assert ($scanPolls.Count -ge 1 -and $testState.Calls.IndexOf($scanPolls[0]) -gt $testState.Calls.IndexOf((Find-Calls 'gh' 'pr create')[-1])) 'Did not check for CodeQL scans after opening the PRs.'
+                $branches = 'feature-add-tos-download,feature/supplier-notes'
+                $wantPushes = switch ($scenario) {
+                    'security-prs-missed-scan' { $branches }
+                    'security-prs-scan-never' { (@($branches) * 3) -join ',' }
+                    default { '' }
+                }
+                Assert (($testState.ForcePushed -join ',') -eq $wantPushes) "Force-pushed '$($testState.ForcePushed -join ',')' (want '$wantPushes')."
+                $amends = @(Find-Calls 'git' 'commit --amend --no-edit')
+                Assert ($amends.Count -eq $testState.ForcePushed.Count) 'Every retrigger push should recommit the PR commit first.'
                 $disable = @(Find-Calls 'gh' 'workflow disable codeql-advanced.yml')
                 Assert ($disable.Count -eq 1 -and $disable[0].Arguments -contains $create.Arguments[2]) 'codeql-advanced.yml was not disabled.'
                 $firstPr = $testState.Calls.IndexOf((Find-Calls 'gh' 'pr create')[0])

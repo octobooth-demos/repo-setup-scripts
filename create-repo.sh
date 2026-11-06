@@ -17,6 +17,7 @@ AI_SCAN_API_VERSION="2026-03-10"
 COPILOT_AUTOFIX_ASSIGNEES=("github-agentic-autofix[bot]" "copilot-swe-agent[bot]")
 CODEQL_WAIT_SECONDS="${CODEQL_WAIT_SECONDS:-900}"
 DEFAULT_SETUP_WAIT_SECONDS="${DEFAULT_SETUP_WAIT_SECONDS:-600}"
+PR_SCAN_WAIT_SECONDS="${PR_SCAN_WAIT_SECONDS:-90}"
 
 # --- Arguments ---
 
@@ -574,6 +575,48 @@ code_scanning_languages() {
         sleep 5
     done
     printf '%s\n' "$langs" actions | sed '/^$/d'
+}
+
+# Default setup can miss the "opened" event of PRs opened within minutes of being
+# configured, leaving a demo PR without CodeQL results. Wait (bounded) for each PR's
+# scan to start; for any that hasn't, recommit the PR's commit (same tree and
+# message) and force-push it, which triggers a scan. Only warns.
+# Run from the temp clone. Usage: ensure_pr_code_scanning "<number> <branch>"...
+ensure_pr_code_scanning() {
+    local pending=("$@") still=() entry number branch attempt waited runs
+    local max_attempts=4
+    echo "⏳ Waiting for CodeQL to start scanning the demo PRs..."
+    for attempt in $(seq 1 "$max_attempts"); do
+        waited=0
+        while [ "${#pending[@]}" -gt 0 ] && [ "$waited" -lt "$PR_SCAN_WAIT_SECONDS" ]; do
+            runs=$(gh run list --repo "$FULL_REPO_NAME" --event dynamic --limit 100 --json name,headBranch \
+                --jq '.[] | select(.name | startswith("Code Quality") | not) | .headBranch' 2>/dev/null) || runs=""
+            still=()
+            for entry in "${pending[@]}"; do
+                grep -qx "refs/pull/${entry%% *}/head" <<< "$runs" || still+=("$entry")
+            done
+            pending=("${still[@]}")
+            [ "${#pending[@]}" -eq 0 ] && break
+            sleep 10
+            waited=$((waited + 10))
+        done
+        if [ "${#pending[@]}" -eq 0 ]; then
+            echo "✅ CodeQL is scanning the demo PRs"
+            return 0
+        fi
+        [ "$attempt" -eq "$max_attempts" ] && break
+        for entry in "${pending[@]}"; do
+            number="${entry%% *}"
+            branch="${entry#* }"
+            echo "🔁 CodeQL hasn't started on PR #$number; pushing its commit again to trigger a scan..."
+            git checkout --quiet "$branch"
+            git commit --amend --no-edit --quiet
+            git_push --force origin "$branch" --quiet
+        done
+    done
+    for entry in "${pending[@]}"; do
+        echo "⚠️  CodeQL never started on PR #${entry%% *}. Push a commit to ${entry#* } to trigger a scan."
+    done
 }
 
 # AI Scan only reviews PRs opened while code scanning is on, which for advanced
@@ -1283,6 +1326,7 @@ case $WORKFLOW in
         clone_to_temp
 
         PR_COUNT=$(jq ".repos[$SELECTED_INDEX].prs | length" "$CONFIG_FILE")
+        SCANNED_PRS=()
         i=0
         while [ "$i" -lt "$PR_COUNT" ]; do
             pr_branch=$(jq -r ".repos[$SELECTED_INDEX].prs[$i].branch" "$CONFIG_FILE")
@@ -1297,8 +1341,12 @@ case $WORKFLOW in
                 "$pr_body_file" \
                 "$pr_commit_msg" \
                 "$pr_title"
+            SCANNED_PRS+=("$CREATED_PR_NUMBER $pr_branch")
             i=$((i + 1))
         done
+        if [ "$ENABLE_SECURITY" = "true" ]; then
+            ensure_pr_code_scanning "${SCANNED_PRS[@]}"
+        fi
         ;;
 
     "ai_security")

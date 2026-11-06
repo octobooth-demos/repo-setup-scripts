@@ -54,7 +54,7 @@ The Demo Launcher is a Copilot extension in [`.github/extensions/demo-launcher/`
 | | Option A: user-level loader (`install.sh`) | Option B: project |
 | --- | --- | --- |
 | How | Run `bash .github/extensions/demo-launcher/install.sh` from your checkout | Add your checkout as a project (repository) in the Copilot app |
-| Where it's available | Every session, if your app build loads user-level extensions | Sessions in that project, including its worktrees |
+| Where it's available | Every session on staff app builds (unverified on regular builds) | Sessions in that project, including its worktrees |
 | Platforms | macOS and Linux | macOS, Linux, and Windows (the only option on Windows) |
 | Updating | `git pull` in the checkout, then restart the app or reload extensions | Same. Each session uses its own checkout's copy |
 | Removing | `install.sh --uninstall` (keeps run history) | Remove the project from the app |
@@ -70,7 +70,7 @@ The Demo Launcher is a Copilot extension in [`.github/extensions/demo-launcher/`
 **Limitations:**
 
 - **Open it from a chat.** Opening canvases from the app-wide canvas picker, without a session, is currently a staff-build feature. On other builds, ask Copilot in a session or chat to "open the demo launcher." Opened from the picker, the session and Fusion buttons only open the project's composer; see [Opened without a chat](../README.md#opened-without-a-chat).
-- **User-level extensions aren't confirmed on every build.** We haven't confirmed that non-staff app builds load extensions from `~/.copilot/extensions`. If the launcher doesn't show up outside the project after `install.sh` and a restart, use Option B: open it from a session in the `repo-setup-scripts` project.
+- **User-level extensions are only confirmed on staff builds.** The loader works on staff app builds; we haven't confirmed that regular (non-staff) builds load extensions from `~/.copilot/extensions`. If the launcher doesn't show up outside the project after `install.sh` and a restart, use Option B: open it from a session in the `repo-setup-scripts` project.
 - **It runs locally, as you.** The launcher runs `create-repo.sh` (or `create-repo.ps1` on Windows) from its checkout, using that checkout's `config.json` and `resources/`. It uses your stored `gh auth login` and ignores a `GH_TOKEN` or `GITHUB_TOKEN` the app injects whenever a stored login exists, so `gh`, `git`, and (for bash) `jq` must be installed and logged in.
 - **The panel is a loopback web page.** It's served on `127.0.0.1` on a port that changes every time the extension restarts. The URL also works in a browser.
 - **Run history is shared.** It's kept in `~/.copilot/extensions/demo-launcher/artifacts/runs.json` and shared by every open launcher.

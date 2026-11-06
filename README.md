@@ -138,7 +138,7 @@ Runs use your stored `gh auth login`, not any `GH_TOKEN` the app injects, so the
 | Session | Canvas available? |
 | --- | --- |
 | Any session in the `repo-setup-scripts` project, including worktrees and PR sessions | Yes. Copilot loads project extensions from `.github/extensions/`, and each session uses its own checkout's copy. |
-| Any other session (a demo repo, another project, or a chat) | Only after you [install the loader](#make-it-available-in-every-session), and only if your app build loads user-level extensions. |
+| Any other session (a demo repo, another project, or a chat) | Only after you [install the loader](#make-it-available-in-every-session), and only if your app build loads user-level extensions (confirmed on staff builds, unverified on regular builds). |
 
 On booth machines (macOS or Linux), set up both: add the repo as a project **and** run `install.sh`. The project is the guaranteed way in; the loader adds every other session. On Windows, use the project only.
 

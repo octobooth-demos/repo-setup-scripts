@@ -32,6 +32,7 @@ $aiScanApiVersion = '2026-03-10'
 # copilot-swe-agent[bot], so it's kept as a fallback.
 $copilotAutofixAssignees = @('github-agentic-autofix[bot]', 'copilot-swe-agent[bot]')
 $codeqlWaitSeconds = if ($env:CODEQL_WAIT_SECONDS) { [int]$env:CODEQL_WAIT_SECONDS } else { 900 }
+$defaultSetupWaitSeconds = if ($env:DEFAULT_SETUP_WAIT_SECONDS) { [int]$env:DEFAULT_SETUP_WAIT_SECONDS } else { 600 }
 $nonInteractive = -not [string]::IsNullOrWhiteSpace($Template)
 
 if ($Cleanup -and ($nonInteractive -or $Serve -or $NoClone)) {
@@ -177,6 +178,13 @@ function Assert-SelectedRepo {
         }
         'security_prs' {
             $missing += @(Assert-PullRequestEntries $Repo.prs 'prs' 1)
+            if ($Repo.PSObject.Properties['code_scanning_languages']) {
+                $languages = $Repo.code_scanning_languages
+                if ($languages -isnot [array] -or $languages.Count -eq 0 -or
+                    @($languages | Where-Object { $_ -isnot [string] -or [string]::IsNullOrWhiteSpace($_) }).Count -gt 0) {
+                    throw 'code_scanning_languages must be a non-empty list of CodeQL language names.'
+                }
+            }
         }
         'code_review_prs' {
             $missing += @(Assert-PullRequestEntries $Repo.prs 'prs' 1)
@@ -554,6 +562,111 @@ function Enable-AiScan {
     Write-Warning "Could not enable AI Scan for pull requests (current state: $state). An org owner must allow it under Settings -> Code security -> Global settings -> AI Scan."
 }
 
+# An org's default code security configuration attaches to a new repo a few seconds
+# after creation and can turn CodeQL default setup on. Wait (bounded) for it to
+# settle so it can't override the explicit default-setup change made next.
+function Wait-SecurityConfiguration {
+    if ($repoOwner -eq $currentUser) { return }
+    # 0 means the org has no default configuration for new repos, so nothing will attach.
+    $defaults = "$(@(Invoke-GhQuiet api "orgs/$repoOwner/code-security/configurations/defaults" `
+        --jq '[.[] | select(.default_for_new_repos != "none")] | length')[-1])".Trim()
+    if ($LASTEXITCODE -eq 0 -and $defaults -eq '0') { return }
+    Write-Host "Waiting for the org's code security configuration to attach..."
+    for ($attempt = 1; $attempt -le 20; $attempt++) {
+        $status = "$(@(Invoke-GhQuiet api "repos/$fullRepoName/code-security-configuration" --jq '.status // empty')[-1])".Trim()
+        if ($LASTEXITCODE -ne 0) { $status = '' }
+        if ($status -and $status -notin @('attaching', 'updating')) {
+            Write-Host "Org code security configuration: $status"
+            return
+        }
+        Start-Sleep -Seconds 3
+    }
+    Write-Host 'No org code security configuration attached after 60 seconds; continuing.'
+}
+
+# Set CodeQL default setup and wait (bounded) until GitHub reports it, resending the
+# change if something (such as an org configuration applied late) flips it back.
+# Configured languages only show up once default setup's first run finishes.
+function Set-DefaultSetup {
+    param([string]$State, [string[]]$Languages = @())
+
+    $patchArgs = @('-f', "state=$State")
+    if ($State -eq 'configured') {
+        $patchArgs += @('-f', 'query_suite=default')
+        foreach ($language in $Languages) { $patchArgs += @('-f', "languages[]=$language") }
+        Write-Host "Configuring CodeQL default setup for: $($Languages -join ' ') (usually 3-5 minutes)..."
+    }
+    else {
+        Write-Host "Turning CodeQL default setup off so the template's advanced workflow can upload..."
+    }
+    $patched = $false
+    $sincePatch = 0
+    $current = ''
+    $have = @()
+    $missing = @()
+    for ($waited = 0; $waited -lt $defaultSetupWaitSeconds; $waited += 5) {
+        if (-not $patched -or ($current -ne $State -and $sincePatch -ge 30)) {
+            Invoke-GhQuiet api "repos/$fullRepoName/code-scanning/default-setup" -X PATCH @patchArgs --silent | Out-Null
+            if ($LASTEXITCODE -eq 0) {
+                $patched = $true
+                $sincePatch = 0
+            }
+        }
+        if ($patched) {
+            # One field per line; avoids embedded quotes that PowerShell 5.1 mangles.
+            $fields = @(Invoke-GhQuiet api "repos/$fullRepoName/code-scanning/default-setup" --jq '.state, ((.languages // []) | join(","))')
+            if ($LASTEXITCODE -eq 0 -and $fields.Count -ge 1) {
+                $current = "$($fields[0])".Trim()
+                $have = if ($fields.Count -ge 2) { @("$($fields[1])".Trim() -split ',' | Where-Object { $_ }) } else { @() }
+            }
+            else { $current = '' }
+            if ($current -eq $State) {
+                $missing = if ($State -eq 'configured') { @($Languages | Where-Object { $have -notcontains $_ }) } else { @() }
+                if ($missing.Count -eq 0) {
+                    $suffix = if ($have.Count -gt 0) { " ($($have -join ','))" } else { '' }
+                    Write-Host "CodeQL default setup: $State$suffix"
+                    return
+                }
+            }
+        }
+        Start-Sleep -Seconds 5
+        $sincePatch += 5
+    }
+    $settingsUrl = "https://github.com/$fullRepoName/settings/security_analysis"
+    $minutes = [int]($defaultSetupWaitSeconds / 60)
+    if (-not $patched) {
+        throw "Could not change CodeQL default setup for $fullRepoName (state=$State). The token needs admin access to the repo, and an enforced org security configuration blocks this. Check $settingsUrl"
+    }
+    if ($current -ne $State) {
+        $shown = if ($current) { $current } else { 'unknown' }
+        throw "CodeQL default setup was still '$shown' (want '$State') after $minutes minutes. Check $settingsUrl"
+    }
+    $shownHave = if ($have.Count -gt 0) { $have -join ',' } else { 'none' }
+    throw "CodeQL default setup did not cover $($missing -join ' ') after $minutes minutes (has: $shownHave). Check $settingsUrl"
+}
+
+# CodeQL default setup languages: the entry's "code_scanning_languages", else the
+# repo's detected languages mapped to CodeQL names, plus GitHub Actions workflows.
+function Get-CodeScanningLanguages {
+    if ($selectedRepo.code_scanning_languages) { return @($selectedRepo.code_scanning_languages) }
+    $map = @{
+        'C' = 'c-cpp'; 'C++' = 'c-cpp'; 'C#' = 'csharp'; 'Go' = 'go'; 'Java' = 'java-kotlin'; 'Kotlin' = 'java-kotlin'
+        'JavaScript' = 'javascript-typescript'; 'TypeScript' = 'javascript-typescript'; 'Python' = 'python'
+        'Ruby' = 'ruby'; 'Rust' = 'rust'; 'Swift' = 'swift'
+    }
+    $detected = @()
+    # Language detection can lag repo creation by a few seconds.
+    for ($attempt = 1; $attempt -le 6; $attempt++) {
+        $names = @(Invoke-GhQuiet api "repos/$fullRepoName/languages" --jq 'keys[]')
+        if ($LASTEXITCODE -eq 0) {
+            $detected = @($names | ForEach-Object { $map["$_".Trim()] } | Where-Object { $_ })
+        }
+        if ($detected.Count -gt 0) { break }
+        Start-Sleep -Seconds 5
+    }
+    @(@($detected) + 'actions' | Select-Object -Unique)
+}
+
 # Open default-branch code scanning alerts as objects (empty on failure).
 function Get-OpenCodeScanningAlerts {
     $json = Invoke-GhQuiet api "repos/$fullRepoName/code-scanning/alerts?state=open&ref=refs/heads/$defaultBranch&per_page=100"
@@ -893,6 +1006,7 @@ try {
         'security_prs' {
             if ($selectedRepo.enable_security_features -eq $true) {
                 Write-Host 'Enabling security features...'
+                Wait-SecurityConfiguration
                 Invoke-Native 'gh' @('api', "repos/$fullRepoName/vulnerability-alerts", '-X', 'PUT', '--silent')
                 Invoke-Native 'gh' @('api', "repos/$fullRepoName/automated-security-fixes", '-X', 'PUT', '--silent')
                 # Private repos need Advanced Security before Code Scanning default setup.
@@ -900,10 +1014,9 @@ try {
                     'api', "repos/$fullRepoName", '-X', 'PATCH',
                     '-f', 'security_and_analysis[advanced_security][status]=enabled', '--silent'
                 )
-                Invoke-Native 'gh' @(
-                    'api', "repos/$fullRepoName/code-scanning/default-setup", '-X', 'PATCH',
-                    '-f', 'state=configured', '-f', 'query_suite=default', '--silent'
-                )
+                # Set the languages explicitly: an org configuration applied at creation
+                # can run before language detection and cover only GitHub Actions.
+                Set-DefaultSetup 'configured' @(Get-CodeScanningLanguages)
                 Write-Host 'Dependabot alerts, security updates, and Code Scanning enabled.'
                 # Default setup rejects advanced-setup SARIF uploads, which would fail a check on every PR.
                 Invoke-GhQuiet workflow disable codeql-advanced.yml -R $fullRepoName | Out-Null
@@ -953,14 +1066,17 @@ try {
         }
         'ai_security' {
             Write-Host 'Setting up AI code security demo...'
-            # The template runs CodeQL through its own advanced workflow. Default setup
-            # is deliberately not enabled: it would reject that workflow's uploads.
+            # The template runs CodeQL through its own advanced workflow, which default
+            # setup would reject. The org may turn default setup on at creation, so turn
+            # it off explicitly before anything is pushed.
             # Private repos need Advanced Security before code scanning results are accepted.
+            Wait-SecurityConfiguration
             Invoke-Native 'gh' @(
                 'api', "repos/$fullRepoName", '-X', 'PATCH',
                 '-f', 'security_and_analysis[advanced_security][status]=enabled', '--silent'
             )
             Write-Host 'Advanced Security enabled.'
+            Set-DefaultSetup 'not-configured'
             if ($selectedRepo.ai_scan -eq $true) { Enable-AiScan }
 
             $tempDirectory = Join-Path ([IO.Path]::GetTempPath()) ([IO.Path]::GetRandomFileName())

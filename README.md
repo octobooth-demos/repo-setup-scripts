@@ -58,6 +58,15 @@ Do this once per machine (macOS):
 
 Before each booth day, update the machine to the latest tested `v1` with the [booth update commands](#update-a-booth-machine) and restart the app; that updates both the launcher and the project. Only track `main` (`git -C ~/repos/repo-setup-scripts pull`) on a machine you're using to test changes before a release. Then start a chat (a blank new chat works) and ask Copilot to **"open the demo launcher"**. Opening it from a chat is the recommended booth path: the session, PR, and Fusion buttons are one click because Copilot sets up the project and session for you. Opening it from the app's canvas picker also works, but only as a fallback (see [Opened without a chat](#opened-without-a-chat)). At the end of the day, use the launcher's **Clean up** section or `bash ./create-repo.sh --cleanup` (see [Cleaning up](#cleaning-up)).
 
+### Before the booth opens
+
+Two demos take too long to create in front of visitors. On each machine, signed in as the booth account, create them ahead of time from the launcher:
+
+- **AI Security** (`ai-security`): about 20 minutes ([checklist](resources/ai-security/ANSWER_KEY.md)).
+- **Security Supply Chain (v4)** (`security-octo-supply-v4`): about 10 minutes ([checklist](resources/security-octo-supply-v4/ANSWER_KEY.md)).
+
+When they're ready, bookmark each repo and its demo PRs in the browser so you can jump straight to them. Both live in the `octobooth-demos` org, where the [nightly cleanup](#which-cleanup-covers-which-repos) deletes `demo-generated` repos once they're more than 72 hours old, so create them within 72 hours of use: the morning of, or the day before.
+
 ## Releases
 
 `main` of this repo and [machine-setup](https://github.com/octobooth-demos/machine-setup) changes often. So we test both and tag them with the same semantic version: a full tag such as `v1.0.0` for each tested release, and a moving major tag, `v1`, that always points at the latest tested `v1.x.y` (like GitHub Actions' major tags). Booth machines use `v1`, so every machine runs the same tested version and picks up tested fixes without a new tag name. The major only changes (`v2`) for breaking changes, such as new manual setup steps, changed paths, or new required `gh` scopes. If a machine isn't pinned, it tracks `main`.
@@ -105,7 +114,7 @@ Each entry in [`config.json`](config.json) is one demo. Pass its key to `--templ
 | Key | Demo | What gets created | Presenter notes |
 | --- | --- | --- | --- |
 | `securing-your-code` | Secure Code | Repo only, from `github-samples/securing-your-code` | Labs live in the repo |
-| `security-octo-supply-v4` | Security Supply Chain (v4) | Repo in the `octobooth-demos` org from the v4 OctoCAT Supply template (Express 5, React 19, Vite 8) with Dependabot, autofix, and CodeQL turned on, plus two vulnerable PRs (TypeScript and PHP) | Pinned to the org. PHP findings need AI Code Scanning ([details](#security-supply-chain-v4)) |
+| `security-octo-supply-v4` | Security Supply Chain (v4) | Repo in the `octobooth-demos` org from the v4 OctoCAT Supply template (Express 5, React 19, Vite 8) with Dependabot, autofix, and CodeQL turned on, plus two vulnerable PRs (TypeScript and PHP) | Pinned to the org. PHP findings need AI Code Scanning ([details](#security-supply-chain-v4)); [presenter notes](resources/security-octo-supply-v4/ANSWER_KEY.md). **Create it ahead:** it takes about 10 minutes to be fully ready |
 | `tailspin-toys` | Tailspin Toys | Repo, an issue assigned to Copilot coding agent, and a Codespace | Needs coding agent and Codespaces on the owner ([note](#where-repos-are-created)) |
 | `ctrl-slash` | Ctrl Slash | Repo only | |
 | `booth-bingo` | Booth Bingo (stacked PRs) | Public repo, 3 stacked PRs registered as a native stack, and GitHub Pages | [Details](#booth-bingo-stacked-prs); talk track in the template's README |
@@ -414,6 +423,14 @@ Each overlay holds the cumulative files for its layer. The booth talk track is i
 
 1. `feature-add-tos-download` (from [`resources/security-octo-supply-v4/pr-typescript`](resources/security-octo-supply-v4/pr-typescript)): a terms-of-service download with a path traversal for CodeQL and Copilot Autofix. It matches upstream's `feature-add-tos-download` branch and includes intentional code-quality issues in `userDetailsRepo.ts` for CodeQL. The two that TypeScript itself rejects carry `@ts-expect-error`, so the API still builds.
 2. `feature/supplier-notes` (from [`resources/security-octo-supply-v4/pr-php`](resources/security-octo-supply-v4/pr-php)): supplier notes in the PHP app. CodeQL doesn't analyze PHP, so these findings come from AI Code Scanning.
+
+**Create it ahead: about 10 minutes.** GitHub takes about 5 minutes to apply CodeQL default setup for JavaScript/TypeScript before the script opens the demo PRs, and the PHP PR's AI findings appear about 3–4 minutes after the script's automatic trigger commit. Create it from the launcher before the booth opens and bookmark the repo and both demo PRs (see [Before the booth opens](#before-the-booth-opens)). When it's done, everything is ready without a manual push:
+
+- Dependabot alerts, and Dependabot's security-update PRs (usually 3–9).
+- CodeQL alerts with Copilot Autofix suggestions on the TypeScript PR.
+- Findings labeled **AI** on the PHP PR.
+
+Dependabot's PRs open within about a minute, while setup is still waiting for CodeQL, so the two demo PRs get higher numbers (for example #12 and #13). Use the PR links on the launcher card or in the setup log to find them. Where to show each finding, plus a live edit that triggers a fresh AI review, is in the [presenter notes](resources/security-octo-supply-v4/ANSWER_KEY.md).
 
 Before the demo:
 

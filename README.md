@@ -51,19 +51,21 @@ Do this once per machine (macOS):
 
    Then restart the Copilot app (or reload extensions in open sessions).
 
-   [machine-setup](https://github.com/octobooth-demos/machine-setup)'s `setup.sh` (or `install-demo-launcher.sh`) does steps 2 and 3 for you, and `setup.ps1` (or `install-demo-launcher.ps1`) does them on Windows. Booth machines use these scripts, not the [URL install](#install-from-a-url), and don't install both on one machine. See [Which install to use](#which-install-to-use).
+   [machine-setup](https://github.com/octobooth-demos/machine-setup)'s `setup.sh` (or `install-demo-launcher.sh`) does steps 2 and 3 for you, and `setup.ps1` (or `install-demo-launcher.ps1`) does them on Windows. With `--ref v1` (`-Ref v1` on Windows) they put the checkout on the current release instead of `main` (see [Releases](#releases)). Booth machines use these scripts, not the [URL install](#install-from-a-url), and don't install both on one machine. See [Which install to use](#which-install-to-use).
 4. In the GitHub Copilot app, also add that **existing local folder** (`~/repos/repo-setup-scripts`) as a project. Don't clone it again. This is for quick access at the booth: pin a session in the project, or pin the canvas. The project and the loader use the same checkout.
 
    When you start the session to pin, choose **Current checkout**, not **New worktree**. A worktree session gets its own copy under `copilot-worktrees` on its own branch, so `git pull` never updates it and it keeps loading the old launcher. If you already pinned a worktree session, archive it and start a new **Current checkout** session. To check, the session's `EXTENSION_PATH` in the app logs should be under `repos/repo-setup-scripts`, not `copilot-worktrees`.
 
-Before each booth day, update the checkout and restart the app; that updates both. If the machine is pinned to a release (`v1`), re-run the two commands in [Releases](#releases) to pick up the latest tested `v1.x.y`. Otherwise, run `git -C ~/repos/repo-setup-scripts pull`. Then start a chat (a blank new chat works) and ask Copilot to **"open the demo launcher"**. Opening it from a chat is the recommended booth path: the session, PR, and Fusion buttons are one click because Copilot sets up the project and session for you. Opening it from the app's canvas picker also works, but only as a fallback (see [Opened without a chat](#opened-without-a-chat)). At the end of the day, use the launcher's **Clean up** section or `bash ./create-repo.sh --cleanup` (see [Cleaning up](#cleaning-up)).
+Before each booth day, update the machine to the latest tested `v1` with the [booth update commands](#update-a-booth-machine) and restart the app; that updates both the launcher and the project. Only track `main` (`git -C ~/repos/repo-setup-scripts pull`) on a machine you're using to test changes before a release. Then start a chat (a blank new chat works) and ask Copilot to **"open the demo launcher"**. Opening it from a chat is the recommended booth path: the session, PR, and Fusion buttons are one click because Copilot sets up the project and session for you. Opening it from the app's canvas picker also works, but only as a fallback (see [Opened without a chat](#opened-without-a-chat)). At the end of the day, use the launcher's **Clean up** section or `bash ./create-repo.sh --cleanup` (see [Cleaning up](#cleaning-up)).
 
 ## Releases
 
 `main` of this repo and [machine-setup](https://github.com/octobooth-demos/machine-setup) changes often. So we test both and tag them with the same semantic version: a full tag such as `v1.0.0` for each tested release, and a moving major tag, `v1`, that always points at the latest tested `v1.x.y` (like GitHub Actions' major tags). Booth machines use `v1`, so every machine runs the same tested version and picks up tested fixes without a new tag name. The major only changes (`v2`) for breaking changes, such as new manual setup steps, changed paths, or new required `gh` scopes. If a machine isn't pinned, it tracks `main`.
 
-- **Booth machines:** pass the major tag to machine-setup's `install-demo-launcher` or `setup` script (`--ref v1` on macOS, `-Ref v1` on Windows, or set `BOOTH_RELEASE=v1`). It checks out the tag in `~/repos/repo-setup-scripts`. See machine-setup's [Using a release](https://github.com/octobooth-demos/machine-setup/blob/main/README.md#using-a-release) (that section lands when machine-setup's release PR merges).
-- **Pin or update by hand:** `v1` moves, so fetch with `--force` to update the local tag:
+**The current release is `v1`** (`v1.0.0`; see [Releases](https://github.com/octobooth-demos/repo-setup-scripts/releases)). Booth machines use it through machine-setup.
+
+- **Booth machines:** pass the major tag to machine-setup's `install-demo-launcher` or `setup` script (`--ref v1` on macOS, `-Ref v1` on Windows, or set `BOOTH_RELEASE=v1`). It checks out the tag in `~/repos/repo-setup-scripts` and rewrites the loader. See machine-setup's [Using a release](https://github.com/octobooth-demos/machine-setup#using-a-release).
+- **Pin or update by hand** (without machine-setup): `v1` moves, so fetch with `--force` to update the local tag:
 
   ```bash
   git -C ~/repos/repo-setup-scripts fetch --tags --force
@@ -74,7 +76,27 @@ Before each booth day, update the checkout and restart the app; that updates bot
 - The loader and [`install.sh`](.github/extensions/demo-launcher/install.sh) work from a detached checkout. Switching tags updates the launcher itself, but the loader is a copy in `~/.copilot/extensions/`, so if a release changes the [loader](.github/extensions/demo-launcher-loader/extension.mjs) or `install.sh`, re-run machine-setup's `install-demo-launcher` script after switching (the release notes say so).
 - **Templates can't be pinned.** GitHub always creates repos from a template's default branch, so a tag doesn't freeze the template repos. Template changes are guarded by their PR CI and by the test run before each release.
 
-To cut a release, see [Cutting a release](docs/releasing.md).
+### Update a booth machine
+
+Before each booth day, or after a new release, put machine-setup on `v1`, then run its launcher install with the same release. On macOS:
+
+```bash
+git -C ~/repos/machine-setup fetch --tags --force
+git -C ~/repos/machine-setup checkout --detach v1
+cd ~/repos/machine-setup && bash install-demo-launcher.sh --ref v1
+```
+
+On Windows, in PowerShell:
+
+```powershell
+git -C "$HOME\repos\machine-setup" fetch --tags --force
+git -C "$HOME\repos\machine-setup" checkout --detach v1
+cd "$HOME\repos\machine-setup"; Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force; .\install-demo-launcher.ps1 -Ref v1
+```
+
+Then restart the Copilot app (on Windows, quit it from the system tray first). See machine-setup's [booth playbook](https://github.com/octobooth-demos/machine-setup/blob/main/docs/booth-playbook.md) for the full booth-day steps.
+
+To see how a change gets from a PR to booth machines, see [Making a change](docs/releasing.md#making-a-change). To cut a release, see [Cutting a release](docs/releasing.md#cutting-a-release).
 
 ## Demos
 

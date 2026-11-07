@@ -6,9 +6,8 @@ This file is for presenters only. It stays in `repo-setup-scripts` and is never 
 
 Create this demo before the booth opens, once, on one machine signed in as a booth account, then bookmark the repo in the browser. Open the same repo URL on the other booth machines and bookmark it there too; there's no need to create it on every machine. It takes about 10 minutes:
 
-1. **Dependabot** opens its security-update PRs (usually 3–9) within about a minute, while setup is still running. The setup turns on Dependabot alerts and automated security fixes as part of the supply chain story.
-2. **CodeQL default setup** takes about 5 minutes for GitHub to apply to JavaScript/TypeScript. Then the script opens the two demo PRs. Because Dependabot's PRs came first, the demo PRs get higher numbers (for example #12 and #13). Use the PR links on the launcher card or in the setup log, not "the first PRs".
-3. **AI findings** on the PHP PR appear about 3–4 minutes after the script's automatic trigger commit (`chore: trigger AI code scanning`). No manual push is needed. If there are none after about 10 minutes, push any small commit to `feature/supplier-notes`.
+1. **CodeQL default setup** takes about 5 minutes for GitHub to apply to JavaScript/TypeScript. Then the script opens the two demo PRs.
+2. **AI findings** on the PHP PR appear about 3–4 minutes after the script's automatic trigger commit (`chore: trigger AI code scanning`). No manual push is needed. If there are none after about 10 minutes, push any small commit to `feature/supplier-notes`.
 
 The nightly cleanup deletes `demo-generated` org repos once they're more than 72 hours old, so create it within 72 hours of when you'll use it (the morning of, or the day before). One repo serves the whole day.
 

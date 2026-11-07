@@ -78,7 +78,7 @@ Before each booth day, update the machine to the latest tested `v1` with the [bo
 
 ### Update a booth machine
 
-Before each booth day, or after a new release, put machine-setup on `v1`, then run its launcher install with the same release. On macOS:
+Before each booth day, or after a new release, put machine-setup on `v1`, then run its launcher install with the same release. These commands use machine-setup's checkout in `~/repos/machine-setup`, which booth machines get from machine-setup's setup. If you set the machine up with the manual [quick start](#quick-start-booth-machine) instead, clone it once first: `gh repo clone octobooth-demos/machine-setup ~/repos/machine-setup` (on Windows, `gh repo clone octobooth-demos/machine-setup "$HOME\repos\machine-setup"`). On macOS:
 
 ```bash
 git -C ~/repos/machine-setup fetch --tags --force

@@ -4,7 +4,7 @@ This file is for presenters only. It stays in `repo-setup-scripts` and is never 
 
 ## Create it ahead: about 10 minutes
 
-Create this demo before the booth opens, as the booth account, then bookmark the repo in the browser. It takes about 10 minutes:
+Create this demo before the booth opens, once, on one machine signed in as a booth account, then bookmark the repo in the browser. Open the same repo URL on the other booth machines and bookmark it there too; there's no need to create it on every machine. It takes about 10 minutes:
 
 1. **Dependabot** opens its security-update PRs (usually 3–9) within about a minute, while setup is still running. The setup turns on Dependabot alerts and automated security fixes as part of the supply chain story.
 2. **CodeQL default setup** takes about 5 minutes for GitHub to apply to JavaScript/TypeScript. Then the script opens the two demo PRs. Because Dependabot's PRs came first, the demo PRs get higher numbers (for example #12 and #13). Use the PR links on the launcher card or in the setup log, not "the first PRs".

@@ -485,7 +485,7 @@ After the run finishes, click **▶ Run with Fusion** in the launcher, or copy t
 | Label | Prompt | Pattern it usually gets |
 | --- | --- | --- |
 | Single | Add a Node.js 22 note to the README | **Single**: one model, done in about a minute |
-| Cascade | Make the orders API fail safely when the data store is down, with vitest + supertest tests | **Cascade**: a fast draft, then a quality gate accepts it or escalates |
+| Cascade | Make the orders API fail safely when the data store is down, with vitest + supertest tests that it checks by reading (no `npm install` or `npm test`, since booth machines can't reach the npm registry) | **Cascade**: a fast draft, then a quality gate accepts it or escalates |
 | Critique | Write a design proposal for order tracking that compares three data models and recommends one | **Critique**: a draft, an independent read-only review from another model family, then one revision |
 
 Run all three (each opens its own `[Fusion - <label>] …` session) and compare them. Fusion picks the pattern per request, so the labels are what each prompt is *sized* for, not a guarantee. In our testing, Critique went to reasoning-heavy tasks with little code (design and tradeoff writing), while code-writing tasks of every size above "trivial", including a full order tracking feature, went to Cascade. The [presenter notes](resources/fusion-routing/ANSWER_KEY.md) cover timings, what to show in each session, and talking points. Use a fresh repo for each visitor.

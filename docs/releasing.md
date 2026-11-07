@@ -17,7 +17,7 @@ See [Releases](../README.md#releases) for how booth machines use the tags.
    git push origin vX.Y.Z
    ```
 
-   Optionally create a GitHub Release for it (`gh release create vX.Y.Z --verify-tag --generate-notes`).
+   Optionally create a GitHub Release for it (`gh release create vX.Y.Z --verify-tag --generate-notes`). If the release changes the loader (`.github/extensions/demo-launcher-loader/`) or `install.sh`, say in the notes that booth machines must re-run `install-demo-launcher` after updating.
 3. **Move the major tag on both repos** to the new version:
 
    ```bash

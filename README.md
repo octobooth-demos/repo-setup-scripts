@@ -62,7 +62,7 @@ Before each booth day, update the checkout and restart the app; that updates bot
 
 `main` of this repo and [machine-setup](https://github.com/octobooth-demos/machine-setup) changes often. So we test both and tag them with the same semantic version: a full tag such as `v1.0.0` for each tested release, and a moving major tag, `v1`, that always points at the latest tested `v1.x.y` (like GitHub Actions' major tags). Booth machines use `v1`, so every machine runs the same tested version and picks up tested fixes without a new tag name. The major only changes (`v2`) for breaking changes, such as new manual setup steps, changed paths, or new required `gh` scopes. If a machine isn't pinned, it tracks `main`.
 
-- **Booth machines:** pass the major tag to machine-setup's `install-demo-launcher` or `setup` script (`--ref v1` on macOS, `-Ref v1` on Windows, or set `BOOTH_RELEASE=v1`). It checks out the tag in `~/repos/repo-setup-scripts`. See the [machine-setup README](https://github.com/octobooth-demos/machine-setup#readme) (its release section lands when machine-setup's release PR merges).
+- **Booth machines:** pass the major tag to machine-setup's `install-demo-launcher` or `setup` script (`--ref v1` on macOS, `-Ref v1` on Windows, or set `BOOTH_RELEASE=v1`). It checks out the tag in `~/repos/repo-setup-scripts`. See machine-setup's [Using a release](https://github.com/octobooth-demos/machine-setup/blob/main/README.md#using-a-release) (that section lands when machine-setup's release PR merges).
 - **Pin or update by hand:** `v1` moves, so fetch with `--force` to update the local tag:
 
   ```bash
@@ -71,7 +71,7 @@ Before each booth day, update the checkout and restart the app; that updates bot
   ```
 
   Then restart the Copilot app. `git pull` doesn't work on a detached checkout; to go back to `main`, run `git -C ~/repos/repo-setup-scripts checkout main && git -C ~/repos/repo-setup-scripts pull`.
-- The loader and [`install.sh`](.github/extensions/demo-launcher/install.sh) work from a detached checkout, so you don't need to reinstall after switching tags.
+- The loader and [`install.sh`](.github/extensions/demo-launcher/install.sh) work from a detached checkout. Switching tags updates the launcher itself, but the loader is a copy in `~/.copilot/extensions/`, so if a release changes the [loader](.github/extensions/demo-launcher-loader/extension.mjs) or `install.sh`, re-run machine-setup's `install-demo-launcher` script after switching (the release notes say so).
 - **Templates can't be pinned.** GitHub always creates repos from a template's default branch, so a tag doesn't freeze the template repos. Template changes are guarded by their PR CI and by the test run before each release.
 
 To cut a release, see [Cutting a release](docs/releasing.md).
@@ -232,7 +232,7 @@ How the loader works:
 - If you run the installer from a worktree, it points the loader at the **main checkout** anyway, because worktrees get deleted. If the main checkout doesn't have the extension yet, it falls back to the worktree with a warning. In that case, re-run it from the main checkout after merging.
 - In sessions inside this repo, the loader does nothing and lets that checkout's copy provide the canvas. That avoids two Demo Launchers in the session, and a branch you're working on uses its own version. Staff app builds may still list [two canvases](#two-demo-launcher-canvases) outside a session.
 
-**Update:** run `git -C ~/repos/repo-setup-scripts pull` (or update the release tag; see [Releases](#releases)), then reload extensions or restart the app. You only need to re-run `install.sh` if `install.sh` itself changes. Re-running it is always safe.
+**Update:** run `git -C ~/repos/repo-setup-scripts pull` (or update the release tag; see [Releases](#releases)), then reload extensions or restart the app. You only need to re-run `install.sh` if `install.sh` or the loader changes. Re-running it is always safe.
 
 #### Install from a URL
 

@@ -22,7 +22,7 @@ All three are in this folder. The Demo Launcher shows each with **📋 Copy** an
 
 > Single: In the README's Quick start section, add a one-line note that OctoCart needs Node.js 22 or later (it's the "engines" requirement in package.json).
 
-> Cascade: Make the orders API fail safely when the data store is unavailable. Add tests to api/test/orders.test.ts that make store methods (for example store.createOrder, store.listOrders, and store.getOrder) reject with a database-style error such as "connection to db-primary:5432 lost". Every orders endpoint must then respond 500 with the generic internal_error body, without leaking the underlying error message or stack, and a failed checkout must not change product stock or empty the user's cart. Use the existing vitest + supertest patterns in api/test, fix the code if a test fails, and make sure npm test passes.
+> Cascade: Make the orders API fail safely when the data store is unavailable. Add tests to api/test/orders.test.ts that make store methods (for example store.createOrder, store.listOrders, and store.getOrder) reject with a database-style error such as "connection to db-primary:5432 lost". Every orders endpoint must then respond 500 with the generic internal_error body, without leaking the underlying error message or stack, and a failed checkout must not change product stock or empty the user's cart. Follow the existing vitest + supertest patterns in api/test. Dependencies aren't installed and this machine can't reach the npm registry, so don't install packages or run the tests: trace each new test through the routes and error handler by hand, and fix the code wherever a test would fail.
 
 > Critique: Write docs/design/order-tracking.md: a design proposal for order tracking in OctoCart. Compare a status field, an event log, and statuses derived from timestamps; reason through correctness, race conditions, testability, and a future move to a real database for each; recommend one and justify the tradeoffs, then spell out the API, UI, test plan with corner cases, and open questions. No code changes.
 
@@ -30,6 +30,12 @@ All three are in this folder. The Demo Launcher shows each with **📋 Copy** an
 order, so if `store.createOrder` fails, stock is already gone. The "must not change product stock"
 test fails on the template as-is, so Fusion has to find and fix a real bug, not just add tests.
 That's the kind of task where a cheap first draft often works but a quality gate earns its keep.
+
+**Why the Cascade prompt says not to run the tests:** booth machines can't reach the public npm
+registry, so `npm install` (and with it vitest and `npm test`) fails there. The prompt still has
+Fusion write the tests, but asks it to trace them through the code by hand instead of installing
+anything, so the run works on a booth machine. The bug is still there to find: the stock fix only
+comes from reading `POST /api/orders` closely.
 
 **Why Critique is a design doc, not a feature build:** in our testing (policy
 `hydrafusion_v3_2026-10-27`), Fusion's router scores each prompt for reasoning, code generation,
@@ -91,15 +97,21 @@ All three run in parallel on a fresh clone with GitHub Copilot Fusion in autopil
 | Prompt | Pattern | How it played out | Time | AI credits | Result |
 |--------|---------|-------------------|------|------------|--------|
 | Single | **single** | GPT-6 Luna solved it directly | ~45 s | 0.3 | README +2 lines |
-| Cascade | **cascade** | GPT-6.1 Sol drafted the tests and the fix; the GPT-6 Luna judge **rejected** it (no proof that `npm test` passed); Claude Opus 5.5 repaired and verified | ~2.5 min | 31 | store-failure tests for all three orders endpoints + a stock/cart fix in `orders.ts`; `npm test` 87/87 |
+| Cascade | **cascade** | GPT-6.1 Sol drafted the tests and the fix; the GPT-6 Luna judge **rejected** it (no proof that `npm test` passed); Claude Opus 5.5 repaired and verified | ~2.5 min | 31 | store-failure tests for all three orders endpoints + a stock/cart fix in `orders.ts`; `npm test` 87/87 (earlier prompt, see below) |
 | Critique | **critique** | Claude Opus 5.5 drafted; a GPT-6 Luna critic reviewed it read-only; Opus revised | ~5.5 min | 84 | ~590-line `docs/design/order-tracking.md`; no code changed, `npm test` still passes |
+
+The Cascade row is from an earlier version of the prompt that ran `npm test` on a machine with npm
+registry access. The current prompt doesn't install or run anything, so expect the judge to check the
+tests and fix by reading them rather than by a test run; timings and credits may differ.
 
 The Cascade run is the best moment to narrate: show the judge's rejection and the escalation to a
 stronger model. The cost column makes the routing point on its own.
 
 ## Follow-up: build it
 
-After the Critique session, a great live follow-up is to have Fusion *implement* the design. This one
+After the Critique session, a great live follow-up is to have Fusion *implement* the design. It runs
+`npm test`, lint, and typecheck, and the tracking page needs `npm run dev`, so it only works on a machine
+that can install from the npm registry (not booth machines). This one
 routed to **Cascade** in our testing (about 8 minutes, 1,100+ lines across API and React, `npm test`
 131/131, lint and typecheck clean):
 

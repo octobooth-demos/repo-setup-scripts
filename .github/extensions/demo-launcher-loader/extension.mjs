@@ -1,8 +1,8 @@
 // Demo Launcher loader (repo-setup-scripts, .github/extensions/demo-launcher-loader/).
 // A user-level extension that loads the Demo Launcher from a local repo-setup-scripts
 // checkout, so every Copilot session can open it. Install it from its GitHub folder URL
-// with the name "demo-launcher", or run .github/extensions/demo-launcher/install.sh,
-// which writes this same file.
+// (it installs as "demo-launcher-loader"), or run .github/extensions/demo-launcher/install.sh,
+// which writes this same file as "demo-launcher". Use one, not both, or you get two canvases.
 //
 // Checkout: $DEMO_LAUNCHER_REPO, else the path install.sh baked in below, else
 // ~/repos/repo-setup-scripts (%USERPROFILE%\repos\repo-setup-scripts on Windows).

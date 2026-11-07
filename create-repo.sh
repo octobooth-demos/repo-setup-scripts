@@ -948,7 +948,7 @@ validate_selected_repo() {
             ;;
         security_prs)
             validate_pr_entries prs 1
-            if ! jq -e ".repos[$SELECTED_INDEX].codeql_workflow // \"x.yml\" | type == \"string\" and test(\"^[A-Za-z0-9._-]+\\\\.ya?ml$\")" \
+            if ! jq -e ".repos[$SELECTED_INDEX].codeql_workflow | if . == null then \"x.yml\" else . end | type == \"string\" and test(\"^[A-Za-z0-9._-]+\\\\.ya?ml$\")" \
                 "$CONFIG_FILE" > /dev/null; then
                 echo "❌ codeql_workflow must be a workflow file name in .github/workflows, such as codeql-advanced.yml"
                 exit 1

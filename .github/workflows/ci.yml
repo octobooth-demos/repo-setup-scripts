@@ -40,7 +40,7 @@ jobs:
               (.workflow != "branch_and_codespace" or (.branch_name | type == "string")) and
               (.workflow != "stacked_prs" or (.stack | type == "array" and length >= 2)) and
               (((.workflow | IN("security_prs", "code_review_prs")) | not) or (.prs | type == "array" and length > 0)) and
-              ((has("codeql_workflow") | not) or (.codeql_workflow | type == "string" and test("^[A-Za-z0-9._-]+\\.ya?ml$"))) and
+              (.codeql_workflow == null or (.codeql_workflow | type == "string" and test("^[A-Za-z0-9._-]+\\.ya?ml$"))) and
               ((has("seed_prompts") | not) or
                 ((.seed_prompts | type == "array" and length > 0) and
                  all(.seed_prompts[]; (.label | type == "string" and (label_key | length > 0)) and (.file | type == "string")) and

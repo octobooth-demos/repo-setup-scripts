@@ -27,6 +27,7 @@ Steps 5 to 7 in one block, run from clones where you can push to both repos (not
 VERSION=v1.0.1                 # the new version
 MAJOR=v1                       # its major: v1 for any v1.x.y
 BRANCH=main                    # or release/vN for a hotfix on an older major
+LATEST=true                    # false for a hotfix on an older major, so it doesn't become "Latest"
 MS=~/repos/machine-setup       # your clone of machine-setup
 RSS=~/repos/repo-setup-scripts # your clone of repo-setup-scripts
 MS_SHA=PASTE_MACHINE_SETUP_SHA     # recorded in step 4
@@ -44,8 +45,8 @@ git -C "$MS" push origin "$VERSION" &&
 git -C "$RSS" push origin "$VERSION" &&
 git -C "$MS" push origin "$MAJOR" --force &&
 git -C "$RSS" push origin "$MAJOR" --force &&
-gh release create "$VERSION" -R octobooth-demos/machine-setup --generate-notes --verify-tag &&
-gh release create "$VERSION" -R octobooth-demos/repo-setup-scripts --generate-notes --verify-tag
+gh release create "$VERSION" -R octobooth-demos/machine-setup --generate-notes --verify-tag --latest="$LATEST" &&
+gh release create "$VERSION" -R octobooth-demos/repo-setup-scripts --generate-notes --verify-tag --latest="$LATEST"
 ```
 
 The `merge-base` check stops if a commit isn't on the branch you tested. Nothing is pushed until both repos are checked and tagged locally. If a later step fails, fix it and run the remaining commands; `git tag -a` refuses to overwrite a `vX.Y.Z` tag that already exists. Never move or delete a pushed `vX.Y.Z` tag.

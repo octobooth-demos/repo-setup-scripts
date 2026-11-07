@@ -70,7 +70,7 @@ Before each booth day, update the checkout and restart the app; that updates bot
   git -C ~/repos/repo-setup-scripts checkout --detach v1
   ```
 
-  Then restart the Copilot app. `git pull` doesn't work on a detached checkout; to go back to `main`, run `git -C ~/repos/repo-setup-scripts checkout main && git -C ~/repos/repo-setup-scripts pull`.
+  Then restart the Copilot app. `git pull` doesn't work on a detached checkout; to go back to `main`, run `git -C ~/repos/repo-setup-scripts checkout main && git -C ~/repos/repo-setup-scripts pull`. If you pinned by hand, re-running machine-setup's `install-demo-launcher` or `setup` script without `--ref` / `-Ref` / `BOOTH_RELEASE` switches the checkout back to `main` and pulls untested code, so on booth machines pass the same ref every time, or set `BOOTH_RELEASE`.
 - The loader and [`install.sh`](.github/extensions/demo-launcher/install.sh) work from a detached checkout. Switching tags updates the launcher itself, but the loader is a copy in `~/.copilot/extensions/`, so if a release changes the [loader](.github/extensions/demo-launcher-loader/extension.mjs) or `install.sh`, re-run machine-setup's `install-demo-launcher` script after switching (the release notes say so).
 - **Templates can't be pinned.** GitHub always creates repos from a template's default branch, so a tag doesn't freeze the template repos. Template changes are guarded by their PR CI and by the test run before each release.
 

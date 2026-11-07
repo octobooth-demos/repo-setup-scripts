@@ -513,8 +513,9 @@ On macOS or Linux, run the same file with `pwsh -File tests/create-repo.Tests.ps
 
 ```bash
 bash -n create-repo.sh
-for f in .github/extensions/demo-launcher/*.mjs; do node --check "$f"; done
+for f in .github/extensions/demo-launcher/*.mjs .github/extensions/demo-launcher-loader/*.mjs; do node --check "$f"; done
 node --test tests/run-store.test.mjs   # run history shared across several launcher processes
+node --test tests/demo-launcher.test.mjs tests/demo-launcher-loader.test.mjs   # seed prompts and the loader
 bash -n .github/extensions/demo-launcher/install.sh
 shellcheck --severity=warning -x create-repo.sh .github/extensions/demo-launcher/install.sh
 ```

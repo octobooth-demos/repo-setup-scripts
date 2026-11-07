@@ -57,18 +57,19 @@ Booth machines use the booth account for both the Copilot app and `gh`. Never si
 
 ## Testing changes
 
-Run what CI runs ([`ci.yml`](.github/workflows/ci.yml), listed in [README: Local checks](README.md#local-checks)). None of these touch GitHub:
+Run what CI runs ([`ci.yml`](.github/workflows/ci.yml) is the source of truth; see also [README: Local checks](README.md#local-checks)). None of these touch GitHub:
 
 ```bash
 bash -n create-repo.sh && bash -n .github/extensions/demo-launcher/install.sh
 shellcheck --severity=warning -x create-repo.sh .github/extensions/demo-launcher/install.sh
+bash create-repo.sh --help > /dev/null
 for f in .github/extensions/demo-launcher/*.mjs .github/extensions/demo-launcher-loader/*.mjs; do node --check "$f"; done
 node --test tests/run-store.test.mjs tests/demo-launcher.test.mjs tests/demo-launcher-loader.test.mjs
 pwsh -NoProfile -File tests/create-repo.Tests.ps1
-pwsh -NoProfile -Command "Invoke-ScriptAnalyzer -Path ./create-repo.ps1 -Settings ./PSScriptAnalyzerSettings.psd1"
+pwsh -NoProfile -Command "if (Invoke-ScriptAnalyzer -Path ./create-repo.ps1 -Settings ./PSScriptAnalyzerSettings.psd1) { exit 1 }"
 ```
 
-CI also validates `config.json` with `jq`; copy those steps from `ci.yml` to run them locally.
+CI also parses `create-repo.ps1` with the PowerShell parser and validates `config.json` with `jq`; copy those steps from `ci.yml` to run them locally.
 
 End to end (creates a real repo in the signed-in account, or the org for org-pinned demos):
 

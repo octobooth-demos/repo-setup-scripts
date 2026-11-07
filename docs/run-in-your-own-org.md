@@ -30,61 +30,60 @@ You can try the launcher with no config changes. The templates are public, so mo
    gh repo clone <you>/repo-setup-scripts ~/repos/repo-setup-scripts
    ```
 
-3. **Install the launcher:**
-   - **macOS or Linux:** run the loader installer, so any chat (including a blank new one) can open the launcher:
+3. **Install the launcher from a URL.** In a Copilot app chat, ask:
 
-     ```bash
-     bash ~/repos/repo-setup-scripts/.github/extensions/demo-launcher/install.sh
-     ```
+   > Install the extension from https://github.com/octobooth-demos/repo-setup-scripts/tree/main/.github/extensions/demo-launcher-loader
 
-     For quick access at a booth, also add the existing `~/repos/repo-setup-scripts` folder as a project in the GitHub Copilot app (don't clone it again). Then you can pin a session in it, or pin the canvas. Start that session with **Current checkout**, not **New worktree**: a worktree session runs its own frozen copy of the launcher that `git pull` never updates.
+   For your fork, use your fork's URL. This works on Windows, macOS, and Linux with no script to run, and makes the launcher available in any chat, including a blank new one. It loads the launcher from the clone in step 2, so keep it at `~/repos/repo-setup-scripts` (`%USERPROFILE%\repos\repo-setup-scripts` on Windows) or set `DEMO_LAUNCHER_REPO`. Prefer a script? See [Option B](#option-b-install-script), but [don't use both](#dont-use-both).
 
-   - **Windows:** [install the loader from a URL](#option-c-install-the-loader-from-a-url), or add the folder as a project in the Copilot app and start sessions in it with **Current checkout**. Don't run `install.sh`; runs use `create-repo.ps1`.
-
-   See [options and limitations](#installing-the-demo-launcher-canvas-options-and-limitations) for what each one gives you.
+   Optional, for quick access: also add the existing `~/repos/repo-setup-scripts` folder as a project in the GitHub Copilot app (don't clone it again). Then you can pin a session in it, or pin the canvas. Start that session with **Current checkout**, not **New worktree**: a worktree session runs its own frozen copy of the launcher that `git pull` never updates.
 
 4. **Restart the Copilot app.** Extensions only load at startup (or when you ask Copilot to reload extensions).
-5. **Open it.** In any chat (on Windows, a session in the `repo-setup-scripts` project), ask Copilot to **"open the demo launcher."**
+5. **Open it.** In any chat, ask Copilot to **"open the demo launcher."**
 6. **Create a demo.** Pick **Booth Bingo** or **Ctrl Slash** and click **Create**. The repo is created in your logged-in account from the public template in `octobooth-demos`.
 
 With an unchanged `config.json`, these demos work in your own account: `securing-your-code`, `ctrl-slash`, `booth-bingo`, `octocart`, `tailspin-toys`, `fusion-blank`, and `fusion-routing` (subject to the [features each one needs](#reference-what-each-demo-needs)). `security-octo-supply-v4` and `ai-security` fail, because they're pinned to the `octobooth-demos` org. To fix that, [point the config at your org](#point-it-at-your-org).
 
 ## Installing the Demo Launcher canvas: options and limitations
 
-The Demo Launcher is a Copilot extension in [`.github/extensions/demo-launcher/`](../.github/extensions/demo-launcher/). There are two ways to install it, and you can use both. Option A can also be [installed from a URL](#option-c-install-the-loader-from-a-url), including on Windows.
+The Demo Launcher is a Copilot extension in [`.github/extensions/demo-launcher/`](../.github/extensions/demo-launcher/). A small user-level loader makes it available in every session. You can install the loader from a URL (recommended here) or with a script, and you can also add the repo as a project. Use **one** loader per machine.
 
-| | Option A: user-level loader (`install.sh`) | Option B: project |
-| --- | --- | --- |
-| How | Run `bash .github/extensions/demo-launcher/install.sh` from your checkout | Add your checkout as a project (repository) in the Copilot app |
-| Where it's available | Every session, including a blank new chat (confirmed on regular and staff app builds) | Sessions in that project, including its worktrees. You can pin a session or the canvas for quick access |
-| Platforms | macOS and Linux | macOS, Linux, and Windows (the only option on Windows) |
-| Updating | `git pull` in the checkout, then restart the app or reload extensions | Same. Each session uses its own checkout's copy |
-| Removing | `install.sh --uninstall` (keeps run history) | Remove the project from the app |
+| | Option A: loader from a URL (recommended) | Option B: install script | Option C: project |
+| --- | --- | --- | --- |
+| How | Ask Copilot to install the [`demo-launcher-loader`](../.github/extensions/demo-launcher-loader/) folder's URL | `install.sh` (macOS, Linux), or machine-setup's scripts | Add your checkout as a project (repository) in the Copilot app |
+| Where it's available | Every session, including a blank new chat | Every session, including a blank new chat | Sessions in that project, including its worktrees. You can pin a session or the canvas |
+| Platforms | Windows, macOS, and Linux | `install.sh`: macOS and Linux. machine-setup also has a Windows script | Windows, macOS, and Linux |
+| Updating | `git pull` in the checkout, then restart the app or reload extensions | Same | Same. Each session uses its own checkout's copy |
+| Removing | Remove `demo-launcher-loader` from the app's Extensions screen | `install.sh --uninstall` (keeps run history) | Remove the project from the app |
 
-**How the loader works.** `install.sh` writes a small `extension.mjs` to `~/.copilot/extensions/demo-launcher/` (or `$COPILOT_HOME/extensions/demo-launcher/`). It imports the launcher from your checkout by absolute path, and prefers the main checkout over a worktree, because worktrees get deleted. So:
+**Why the URL is the default outside the booth:** there's no script to run, and it works the same on every OS. Booth machines use the install scripts instead, because machine-setup clones the repo and writes the loader in one automatic step, and its `install-demo-launcher` scripts repair or update it later.
 
-- `git pull` updates the launcher. You only need to re-run `install.sh` if `install.sh` itself changes or you move the checkout.
-- If you move, rename, or delete the checkout, the loader breaks. Re-run `install.sh` from the new location.
-- In a session whose repo ships its own `.github/extensions/demo-launcher/extension.mjs` (this repo or your fork), the loader does nothing and lets that copy provide the canvas. That avoids two launchers in one session.
+**Either way, clone the repo.** The loader imports the launcher from your checkout, and the launcher runs `config.json`, `create-repo`, and `resources/` from there. It looks in `DEMO_LAUNCHER_REPO` if set, then the checkout `install.sh` ran from (script installs only), then `~/repos/repo-setup-scripts` (`%USERPROFILE%\repos\repo-setup-scripts` on Windows). If the clone is missing, the canvas opens a page that says where to clone it. `git pull` updates the launcher; you don't need to reinstall.
 
-#### Option C: install the loader from a URL
+In a session whose repo ships its own `.github/extensions/demo-launcher/extension.mjs` (this repo or your fork), the loader does nothing and lets that copy provide the canvas. That avoids two launchers in one session.
 
-The Copilot app can install an extension straight from a folder in a GitHub repo, on macOS, Linux, and Windows. [`.github/extensions/demo-launcher-loader/`](../.github/extensions/demo-launcher-loader/) is the same loader `install.sh` writes, so this gives you Option A without running bash. In a Copilot app chat, ask:
+#### Option A: install the loader from a URL
 
-> Install the extension from https://github.com/octobooth-demos/repo-setup-scripts/tree/main/.github/extensions/demo-launcher-loader with the name demo-launcher
+In a Copilot app chat, ask (for your fork, use your fork's URL):
 
-For your fork, use your fork's URL. Then restart the app. Notes:
+> Install the extension from https://github.com/octobooth-demos/repo-setup-scripts/tree/main/.github/extensions/demo-launcher-loader
 
-- **It still needs the repo cloned.** The loader imports the launcher from `~/repos/repo-setup-scripts` (`%USERPROFILE%\repos\repo-setup-scripts` on Windows), or from `DEMO_LAUNCHER_REPO` if you set it. If the clone is missing, the canvas opens a page that says where to clone it.
-- **Use the name `demo-launcher`.** That installs to the same folder as `install.sh`, so the two replace each other instead of adding a second canvas.
-- On staff builds, you may see two Demo Launchers if the repo is also added as a project, as with Option A.
+Then restart the app. It installs to `~/.copilot/extensions/demo-launcher-loader/`.
 
-**Using both.** On booth Macs, we recommend both: the loader so any chat can open the launcher, and the project so you can pin a session or the canvas. Add the **same local folder** as the project that `install.sh` points at, so one `git pull` updates both. Start the session you pin with **Current checkout**, not **New worktree**. A worktree session gets its own copy under `copilot-worktrees` on its own branch, so it keeps loading the launcher as it was when the session was created. To fix one, archive it and start a **Current checkout** session; the session's `EXTENSION_PATH` in the app logs should be under `repos/repo-setup-scripts`. On app builds that can open canvases without a session (currently staff builds), the canvas picker then lists two "Demo Launcher" entries. They run the same code, so either works. See [Two Demo Launcher canvases](../README.md#two-demo-launcher-canvases).
+#### Option B: install script
+
+If you want automation (for example, setting up several presenter machines), run `bash ~/repos/repo-setup-scripts/.github/extensions/demo-launcher/install.sh` on macOS or Linux, or use [machine-setup](#presenter-machines-and-machine-setup). The script writes the loader to `~/.copilot/extensions/demo-launcher/` (or `$COPILOT_HOME/extensions/demo-launcher/`) and bakes in your checkout's path, preferring the main checkout over a worktree because worktrees get deleted. If you move, rename, or delete the checkout, re-run it from the new location. You only need to re-run it otherwise if `install.sh` itself changes.
+
+#### Don't use both
+
+A URL install is named after its folder, `demo-launcher-loader`, even if you ask for the name `demo-launcher` (verified on Windows). So it doesn't replace the script's `demo-launcher` loader, and with both you get two "Demo Launcher" canvases labeled **Personal**. The app's Extensions screen shows the folder names. To fix it, remove one and restart the app: remove `demo-launcher-loader` from the Extensions screen (or delete `~/.copilot/extensions/demo-launcher-loader`), or run `install.sh --uninstall`.
+
+**Adding the project too.** For quick access, you can also add the **same local folder** the loader uses as a project, so one `git pull` updates both. Start the session you pin with **Current checkout**, not **New worktree**. A worktree session gets its own copy under `copilot-worktrees` on its own branch, so it keeps loading the launcher as it was when the session was created. To fix one, archive it and start a **Current checkout** session; the session's `EXTENSION_PATH` in the app logs should be under `repos/repo-setup-scripts`. The canvas list then shows two "Demo Launcher" entries, **Personal** and **repository: repo-setup-scripts**. They run the same code, so either works. See [Two Demo Launcher canvases](../README.md#two-demo-launcher-canvases).
 
 **Limitations:**
 
 - **Open it from a chat.** Opening canvases from the app-wide canvas picker, without a session, is currently a staff-build feature. On other builds, ask Copilot in a session or chat to "open the demo launcher." Opened from the picker, the session and Fusion buttons only open the project's composer; see [Opened without a chat](../README.md#opened-without-a-chat).
-- **`install.sh` is bash-only.** It runs on macOS and Linux. On Windows, [install the loader from a URL](#option-c-install-the-loader-from-a-url) or add the project and open the launcher from a session in it.
+- **`install.sh` is bash-only.** It runs on macOS and Linux. On Windows, use [Option A](#option-a-install-the-loader-from-a-url).
 - **It runs locally, as you.** The launcher runs `create-repo.sh` (or `create-repo.ps1` on Windows) from its checkout, using that checkout's `config.json` and `resources/`. It uses your stored `gh auth login` and ignores a `GH_TOKEN` or `GITHUB_TOKEN` the app injects whenever a stored login exists, so `gh`, `git`, and (for bash) `jq` must be installed and logged in.
 - **The panel is a loopback web page.** It's served on `127.0.0.1` on a port that changes every time the extension restarts. The URL also works in a browser.
 - **Run history is shared.** It's kept in `~/.copilot/extensions/demo-launcher/artifacts/runs.json` and shared by every open launcher.
@@ -217,7 +216,7 @@ Every repo the scripts create gets the `demo-generated` topic. Cleanup only dele
 
 ### Presenter machines and machine-setup
 
-On each presenter machine, clone **your fork**, run `install.sh`, and add it as a project for quick access (on Windows, only the project), as in the [Quick start](#quick-start). Run `git pull` and restart the app before each event.
+On each presenter machine, clone **your fork**, [install the loader from your fork's URL](#option-a-install-the-loader-from-a-url), and optionally add it as a project for quick access, as in the [Quick start](#quick-start). Or use install scripts for the whole setup (below), but not both. Run `git pull` and restart the app before each event.
 
 If you use [`octobooth-demos/machine-setup`](https://github.com/octobooth-demos/machine-setup) to set up machines, fork it too and change:
 

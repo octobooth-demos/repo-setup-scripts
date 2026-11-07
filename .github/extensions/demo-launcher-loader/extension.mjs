@@ -23,6 +23,8 @@ const launcherFile = join(repoRoot, LAUNCHER);
 // Loaded from a checkout (as a project extension) rather than installed: that checkout's
 // own demo-launcher folder already provides the canvas.
 function loadedFromCheckout() {
+    const [ext, extensions, github] = LOADER_DIR.split(/[\\/]/).slice(-3).reverse();
+    if (ext !== "demo-launcher-loader" || extensions !== "extensions" || github !== ".github") return false;
     return existsSync(join(LOADER_DIR, "..", "..", "..", LAUNCHER));
 }
 

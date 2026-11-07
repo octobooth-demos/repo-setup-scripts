@@ -12,7 +12,6 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const LOADER = join(ROOT, ".github", "extensions", "demo-launcher-loader", "extension.mjs");
-const INSTALL_SH = join(ROOT, ".github", "extensions", "demo-launcher", "install.sh");
 
 const STUB = `
 export const createCanvas = (spec) => spec;
@@ -146,6 +145,18 @@ test("loaded from a checkout as a project extension, it leaves the canvas to tha
     const out = runLoader(dir, join(loaderDir, "extension.mjs"));
     assert.equal(out.launcher, null);
     assert.equal(out.joined, 1);
+});
+
+test("an installed loader under a COPILOT_HOME inside a checkout still loads the configured launcher", (t) => {
+    const dir = makeTemp(t);
+    const launcher = makeCheckout(join(dir, "home", "repos", "repo-setup-scripts"));
+    const repo = join(dir, "repo");
+    makeCheckout(repo);
+    const target = join(repo, ".copilot", "extensions", "demo-launcher");
+    mkdirSync(target, { recursive: true });
+    cpSync(LOADER, join(target, "extension.mjs"));
+    const out = runLoader(dir, join(target, "extension.mjs"));
+    assert.equal(out.launcher, pathToFileURL(launcher).href);
 });
 
 test("install.sh writes the same loader with its checkout baked in", { skip: process.platform === "win32" && "install.sh is bash-only" }, (t) => {

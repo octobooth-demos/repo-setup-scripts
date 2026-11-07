@@ -450,13 +450,13 @@ function fusionTier(tier) {
 function sessionPrompt(run, kind, target, tier) {
     const { repo, clonePath, number, templateName } = safeRunFields(run, kind, target);
     const where = clonePath
-        ? `It is cloned locally at ${JSON.stringify(clonePath)} (use that path for create_project).`
-        : `It is not cloned locally; create the project from the GitHub repo ${repo}.`;
+        ? `It is cloned locally at ${JSON.stringify(clonePath)} (use add_repository with that path).`
+        : `It is not cloned locally; add it from the GitHub repo ${repo} (use add_repository with github_repo "${repo}").`;
     if (kind === "pr") {
-        return `[Demo Launcher] Open a Copilot app session for pull request #${number} in ${repo}. ${where} First add it as a project in this app (create_project) if it isn't one already, then use open_pr_session (repo_full_name "${repo}", pr_number ${number}). Don't start any work in it (omit kickoff), then navigate me to it.`;
+        return `[Demo Launcher] Open a Copilot app session for pull request #${number} in ${repo}. ${where} First add it as a project in this app if it isn't one already, then use open_pr_session (repo_full_name "${repo}", pr_number ${number}). Don't start any work in it (omit kickoff), then navigate me to it.`;
     }
     if (kind === "issue") {
-        return `[Demo Launcher] Open a Copilot app session for issue #${number} in ${repo}. ${where} First add it as a project in this app (create_project) if it isn't one already, then use open_issue_session (repo_full_name "${repo}", issue_number ${number}). Don't start any work in it (omit kickoff), then navigate me to it.`;
+        return `[Demo Launcher] Open a Copilot app session for issue #${number} in ${repo}. ${where} First add it as a project in this app if it isn't one already, then use open_issue_session (repo_full_name "${repo}", issue_number ${number}). Don't start any work in it (omit kickoff), then navigate me to it.`;
     }
     if (kind === "fusion") {
         const seed = seedPromptFor(run, target);
@@ -466,9 +466,9 @@ function sessionPrompt(run, kind, target, tier) {
         // High keeps the original wording; Max always gets a name so it stands out from High runs.
         const prefix = seed.label ? `[${t.name} - ${seed.label}] ` : t === FUSION_TIERS.max ? `[${t.name}] ` : null;
         const name = prefix ? ` Set the session name to ${JSON.stringify(prefix)} followed by a 2-4 word summary of the prompt, so the sessions are easy to compare.` : "";
-        return `[Demo Launcher] Run the ${which} with ${t.picker} in ${repo}. ${where} Add it as a project in this app (create_project) if it isn't one already, then call create_session with that project_id, detached: true, and exactly this kickoff object (don't change the prompt text): ${JSON.stringify(kickoff)}.${name} Then navigate me to that session. Don't do any of the work yourself.`;
+        return `[Demo Launcher] Run the ${which} with ${t.picker} in ${repo}. ${where} Add it as a project in this app if it isn't one already, then call create_session with that project_id, detached: true, and exactly this kickoff object (don't change the prompt text): ${JSON.stringify(kickoff)}.${name} Then navigate me to that session. Don't do any of the work yourself.`;
     }
-    return `[Demo Launcher] I just created the demo repo ${repo} (${JSON.stringify(templateName)}). ${where} Add it as a project in this app (create_project) if it isn't one already, create a new idle session in it (create_session with that project_id, no kickoff, detached: true), then navigate me to that session.`;
+    return `[Demo Launcher] I just created the demo repo ${repo} (${JSON.stringify(templateName)}). ${where} Add it as a project in this app if it isn't one already, create a new idle session in it (create_session with that project_id, no kickoff, detached: true), then navigate me to that session.`;
 }
 
 // Opened from the app-wide canvas picker (no chat), the canvas is hosted by a hidden

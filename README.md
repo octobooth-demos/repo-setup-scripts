@@ -524,3 +524,5 @@ Invoke-ScriptAnalyzer -Path .\create-repo.ps1 -Settings .\PSScriptAnalyzerSettin
 ```
 
 The [CI workflow](.github/workflows/ci.yml) runs these checks on every pull request and push to `main` (the run-store tests on Linux, macOS, and Windows), and also validates `config.json` (required fields, workflow names, and that every referenced resource file and directory exists). CI never creates repos or uses secrets.
+
+Before changing this repo, read [AGENTS.md](AGENTS.md): the change rules (script parity, Windows PowerShell 5.1, intentional vulnerabilities to leave alone) and release rules for maintainers and coding agents.

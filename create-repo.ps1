@@ -182,6 +182,10 @@ function Assert-SelectedRepo {
         }
         'security_prs' {
             $missing += @(Assert-PullRequestEntries $Repo.prs 'prs' 1)
+            if ($Repo.PSObject.Properties['codeql_workflow'] -and $null -ne $Repo.codeql_workflow -and
+                ($Repo.codeql_workflow -isnot [string] -or $Repo.codeql_workflow -notmatch '^[A-Za-z0-9._-]+\.ya?ml$')) {
+                throw 'codeql_workflow must be a workflow file name in .github/workflows, such as codeql-advanced.yml.'
+            }
             if ($Repo.PSObject.Properties['code_scanning_languages']) {
                 $languages = $Repo.code_scanning_languages
                 if ($languages -isnot [array] -or $languages.Count -eq 0 -or
@@ -700,6 +704,22 @@ function Wait-PullRequestCodeScanning {
     }
 }
 
+# PRs opened seconds after "gh workflow disable" can still run the template's
+# advanced CodeQL workflow, which fails because default setup rejects its uploads.
+# Delete it from the default branch before any PR branch is created, so no PR has it.
+# Run from the temp clone.
+function Remove-AdvancedCodeQLWorkflow {
+    param([string]$WorkflowFile)
+
+    $path = ".github/workflows/$WorkflowFile"
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return }
+    Write-Host "Removing $path from $defaultBranch (CodeQL default setup replaces it)..."
+    Invoke-Native 'git' @('rm', '--quiet', '--', $path) | Out-Host
+    Invoke-Native 'git' @('commit', '-m', "chore: remove $WorkflowFile (CodeQL default setup is on)", '--quiet') | Out-Host
+    Invoke-GitPush @('origin', $defaultBranch, '--quiet')
+    Write-Host "Removed $path."
+}
+
 # AI Scan reviews a PR on pushes after it's opened, not on the "opened" event, so
 # push an empty commit to each PR flagged "trigger_ai_scan" to start the review.
 # Run from the temp clone. $PullRequests holds objects with Number and Branch.
@@ -1095,12 +1115,14 @@ try {
                 Set-DefaultSetup 'configured' @(Get-CodeScanningLanguages)
                 Write-Host 'Dependabot alerts, security updates, and Code Scanning enabled.'
                 # Default setup rejects advanced-setup SARIF uploads, which would fail a check on every PR.
-                Invoke-GhQuiet workflow disable codeql-advanced.yml -R $fullRepoName | Out-Null
+                # Disabling takes a while to apply, so the workflow is also deleted below before any PR branch exists.
+                $codeqlWorkflow = if ($selectedRepo.codeql_workflow) { $selectedRepo.codeql_workflow } else { 'codeql-advanced.yml' }
+                Invoke-GhQuiet workflow disable $codeqlWorkflow -R $fullRepoName | Out-Null
                 if ($LASTEXITCODE -eq 0) {
-                    Write-Host 'Disabled codeql-advanced.yml (default setup is on).'
+                    Write-Host "Disabled $codeqlWorkflow (default setup is on)."
                 }
                 else {
-                    Write-Host 'codeql-advanced.yml not found or already disabled.'
+                    Write-Host "$codeqlWorkflow not found or already disabled."
                 }
             }
             if ($selectedRepo.ai_scan -eq $true) { Enable-AiScan }
@@ -1111,6 +1133,7 @@ try {
             Invoke-Native 'gh' @('repo', 'clone', $fullRepoName, $tempClonePath, '--', '--quiet')
             Set-Location -LiteralPath $tempClonePath
             Set-GitIdentity
+            if ($selectedRepo.enable_security_features -eq $true) { Remove-AdvancedCodeQLWorkflow $codeqlWorkflow }
             $scannedPrs = @()
             $aiTriggerPrs = @()
             foreach ($pr in $selectedRepo.prs) {

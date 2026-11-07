@@ -644,6 +644,20 @@ ensure_pr_code_scanning() {
     done
 }
 
+# PRs opened seconds after "gh workflow disable" can still run the template's
+# advanced CodeQL workflow, which fails because default setup rejects its uploads.
+# Delete it from the default branch before any PR branch is created, so no PR has it.
+# Run from the temp clone. Usage: remove_advanced_codeql_workflow <file name>
+remove_advanced_codeql_workflow() {
+    local path=".github/workflows/$1"
+    [ -f "$path" ] || return 0
+    echo "🧹 Removing $path from $DEFAULT_BRANCH (CodeQL default setup replaces it)..."
+    git rm --quiet -- "$path"
+    git commit -m "chore: remove $1 (CodeQL default setup is on)" --quiet
+    git_push origin "$DEFAULT_BRANCH" --quiet
+    echo "✅ Removed $path"
+}
+
 # AI Scan reviews a PR on pushes after it's opened, not on the "opened" event, so
 # push an empty commit to each PR flagged "trigger_ai_scan" to start the review.
 # Run from the temp clone. Usage: trigger_ai_scan "<number> <branch>"...
@@ -934,6 +948,11 @@ validate_selected_repo() {
             ;;
         security_prs)
             validate_pr_entries prs 1
+            if ! jq -e ".repos[$SELECTED_INDEX].codeql_workflow // \"x.yml\" | type == \"string\" and test(\"^[A-Za-z0-9._-]+\\\\.ya?ml$\")" \
+                "$CONFIG_FILE" > /dev/null; then
+                echo "❌ codeql_workflow must be a workflow file name in .github/workflows, such as codeql-advanced.yml"
+                exit 1
+            fi
             if ! jq -e ".repos[$SELECTED_INDEX].code_scanning_languages // [\"x\"]
                 | type == \"array\" and length > 0 and all(.[]; type == \"string\" and length > 0)" \
                 "$CONFIG_FILE" > /dev/null; then
@@ -1356,10 +1375,13 @@ case $WORKFLOW in
             set_default_setup configured "${CODE_SCANNING_LANGUAGES[@]}"
             echo "✅ Dependabot alerts, security updates, and Code Scanning enabled"
             # Default setup rejects advanced-setup SARIF uploads, which would fail a check on every PR.
-            if gh workflow disable codeql-advanced.yml -R "$FULL_REPO_NAME" >/dev/null 2>&1; then
-                echo "✅ Disabled codeql-advanced.yml (default setup is on)"
+            # Disabling takes a while to apply, so the workflow is also deleted below before any PR branch exists.
+            CODEQL_WORKFLOW=$(repo_cfg '.codeql_workflow')
+            [ -z "$CODEQL_WORKFLOW" ] && CODEQL_WORKFLOW="codeql-advanced.yml"
+            if gh workflow disable "$CODEQL_WORKFLOW" -R "$FULL_REPO_NAME" >/dev/null 2>&1; then
+                echo "✅ Disabled $CODEQL_WORKFLOW (default setup is on)"
             else
-                echo "ℹ️  codeql-advanced.yml not found or already disabled"
+                echo "ℹ️  $CODEQL_WORKFLOW not found or already disabled"
             fi
         fi
 
@@ -1368,6 +1390,9 @@ case $WORKFLOW in
         fi
 
         clone_to_temp
+        if [ "$ENABLE_SECURITY" = "true" ]; then
+            remove_advanced_codeql_workflow "$CODEQL_WORKFLOW"
+        fi
 
         PR_COUNT=$(jq ".repos[$SELECTED_INDEX].prs | length" "$CONFIG_FILE")
         SCANNED_PRS=()

@@ -47,7 +47,7 @@
         }
       ],
       "summary_lines": [
-        "Security features: Enabled (CodeQL default setup; codeql-advanced.yml disabled)",
+        "Security features: Enabled (CodeQL default setup; codeql-advanced.yml removed)",
         "PRs: TypeScript + PHP demo PRs created",
         "PHP findings: AI Code Scanning triggered (needs it on for the org); expect them in a few minutes, or push another small commit to the PHP PR if none after ~10 minutes"
       ]

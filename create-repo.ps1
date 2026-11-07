@@ -84,6 +84,9 @@ function Assert-PullRequestEntries {
                 $missing += "$Field[$index].$name"
             }
         }
+        if ($pr.PSObject.Properties['trigger_ai_scan'] -and $pr.trigger_ai_scan -isnot [bool]) {
+            throw "$Field[$index].trigger_ai_scan must be true or false."
+        }
         if ($pr.resource_dir) {
             $resourcePath = Join-Path $scriptDirectory $pr.resource_dir
             if (-not (Test-Path -LiteralPath $resourcePath -PathType Container)) {
@@ -697,6 +700,21 @@ function Wait-PullRequestCodeScanning {
     }
 }
 
+# AI Scan reviews a PR on pushes after it's opened, not on the "opened" event, so
+# push an empty commit to each PR flagged "trigger_ai_scan" to start the review.
+# Run from the temp clone. $PullRequests holds objects with Number and Branch.
+function Invoke-AiScanTrigger {
+    param([object[]]$PullRequests)
+
+    foreach ($pr in $PullRequests) {
+        Write-Host "Pushing a commit to PR #$($pr.Number) to trigger AI code scanning..."
+        Invoke-Native 'git' @('checkout', '--quiet', $pr.Branch) | Out-Host
+        Invoke-Native 'git' @('commit', '--allow-empty', '-m', 'chore: trigger AI code scanning', '--quiet') | Out-Host
+        Invoke-GitPush @('origin', $pr.Branch, '--quiet')
+    }
+    Write-Host 'AI code scanning triggered; findings usually appear within 10 minutes.'
+}
+
 # CodeQL default setup languages: the entry's "code_scanning_languages", else the
 # repo's detected languages mapped to CodeQL names, plus GitHub Actions workflows.
 function Get-CodeScanningLanguages {
@@ -1085,6 +1103,7 @@ try {
                     Write-Host 'codeql-advanced.yml not found or already disabled.'
                 }
             }
+            if ($selectedRepo.ai_scan -eq $true) { Enable-AiScan }
             $tempDirectory = Join-Path ([IO.Path]::GetTempPath()) ([IO.Path]::GetRandomFileName())
             New-Item -ItemType Directory -Path $tempDirectory | Out-Null
             Set-Location -LiteralPath $tempDirectory
@@ -1093,13 +1112,18 @@ try {
             Set-Location -LiteralPath $tempClonePath
             Set-GitIdentity
             $scannedPrs = @()
+            $aiTriggerPrs = @()
             foreach ($pr in $selectedRepo.prs) {
                 $created = New-ResourcePullRequest $pr
                 $scannedPrs += [pscustomobject]@{ Number = $created.Number; Branch = $pr.branch }
+                if ($pr.trigger_ai_scan -eq $true) {
+                    $aiTriggerPrs += [pscustomobject]@{ Number = $created.Number; Branch = $pr.branch }
+                }
             }
             if ($selectedRepo.enable_security_features -eq $true) {
                 Wait-PullRequestCodeScanning $scannedPrs
             }
+            if ($aiTriggerPrs.Count -gt 0) { Invoke-AiScanTrigger $aiTriggerPrs }
         }
         'code_review_prs' {
             Write-Host 'Setting up Copilot Code Review demo with PRs...'

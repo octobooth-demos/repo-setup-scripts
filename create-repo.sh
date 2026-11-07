@@ -357,6 +357,11 @@ validate_pr_entries() {
         [ -z "$body" ] && missing+=("${field}[$i].body_file")
         [ -z "$commit" ] && missing+=("${field}[$i].commit_message")
         [ -z "$title" ] && missing+=("${field}[$i].title")
+        if ! jq -e ".repos[$SELECTED_INDEX].${field}[$i] | (.trigger_ai_scan // false) | type == \"boolean\"" \
+            "$CONFIG_FILE" > /dev/null; then
+            echo "❌ ${field}[$i].trigger_ai_scan must be true or false"
+            exit 1
+        fi
         if [ -n "$resource_dir" ] && [ ! -d "$SCRIPT_DIR/$resource_dir" ]; then
             echo "❌ ${field}[$i].resource_dir not found: $SCRIPT_DIR/$resource_dir"
             exit 1
@@ -637,6 +642,20 @@ ensure_pr_code_scanning() {
     for entry in "${pending[@]}"; do
         echo "⚠️  CodeQL never started on PR #${entry%% *}. Push a commit to ${entry#* } to trigger a scan."
     done
+}
+
+# AI Scan reviews a PR on pushes after it's opened, not on the "opened" event, so
+# push an empty commit to each PR flagged "trigger_ai_scan" to start the review.
+# Run from the temp clone. Usage: trigger_ai_scan "<number> <branch>"...
+trigger_ai_scan() {
+    local entry
+    for entry in "$@"; do
+        echo "🤖 Pushing a commit to PR #${entry%% *} to trigger AI code scanning..."
+        git checkout --quiet "${entry#* }"
+        git commit --allow-empty -m "chore: trigger AI code scanning" --quiet
+        git_push origin "${entry#* }" --quiet
+    done
+    echo "✅ AI code scanning triggered; findings usually appear within 10 minutes"
 }
 
 # AI Scan only reviews PRs opened while code scanning is on, which for advanced
@@ -1344,10 +1363,15 @@ case $WORKFLOW in
             fi
         fi
 
+        if [ "$(repo_cfg '.ai_scan')" = "true" ]; then
+            enable_ai_scan
+        fi
+
         clone_to_temp
 
         PR_COUNT=$(jq ".repos[$SELECTED_INDEX].prs | length" "$CONFIG_FILE")
         SCANNED_PRS=()
+        AI_SCAN_PRS=()
         i=0
         while [ "$i" -lt "$PR_COUNT" ]; do
             pr_branch=$(jq -r ".repos[$SELECTED_INDEX].prs[$i].branch" "$CONFIG_FILE")
@@ -1363,10 +1387,16 @@ case $WORKFLOW in
                 "$pr_commit_msg" \
                 "$pr_title"
             SCANNED_PRS+=("$CREATED_PR_NUMBER $pr_branch")
+            if [ "$(jq -r ".repos[$SELECTED_INDEX].prs[$i].trigger_ai_scan // false" "$CONFIG_FILE")" = "true" ]; then
+                AI_SCAN_PRS+=("$CREATED_PR_NUMBER $pr_branch")
+            fi
             i=$((i + 1))
         done
         if [ "$ENABLE_SECURITY" = "true" ]; then
             ensure_pr_code_scanning "${SCANNED_PRS[@]}"
+        fi
+        if [ "${#AI_SCAN_PRS[@]}" -gt 0 ]; then
+            trigger_ai_scan "${AI_SCAN_PRS[@]}"
         fi
         ;;
 

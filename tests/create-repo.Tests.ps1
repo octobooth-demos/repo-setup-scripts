@@ -208,7 +208,7 @@ function git {
         $testState.ForcePushed.Add($arguments[3])
         return
     }
-    if ($arguments[0] -eq 'commit' -and $arguments -contains '--amend') { return }
+    if ($arguments[0] -eq 'commit' -and ($arguments -contains '--amend' -or $arguments -contains '--allow-empty')) { return }
     if (($arguments -join ' ') -like '*credential fill') {
         if (-not $testState.GitCredentialUser) { $global:LASTEXITCODE = 1; return }
         return @('protocol=https', 'host=github.com', 'username=x-access-token', 'password=git-helper-token')
@@ -307,7 +307,8 @@ try {
     foreach ($scenario in @(
         'repo-only', 'security-prs', 'security-prs-v4', 'security-prs-detect-languages', 'security-prs-languages-lag',
         'security-prs-setup-timeout', 'security-prs-setup-patch-failure', 'security-prs-bad-languages',
-        'security-prs-missed-scan', 'security-prs-scan-never', 'security-prs-config-stuck', 'security-prs-languages-failure', 'issue-codespace', 'branch-codespace',
+        'security-prs-missed-scan', 'security-prs-scan-never', 'security-prs-config-stuck', 'security-prs-languages-failure',
+        'security-prs-no-ai-trigger', 'security-prs-bad-ai-trigger', 'issue-codespace', 'branch-codespace',
         'login', 'invalid-selection', 'no-machine', 'nested-body',
         'missing-template', 'missing-body', 'empty-prs', 'unknown-workflow',
         'outside-body', 'invalid-json', 'missing-org', 'empty-repos',
@@ -391,6 +392,12 @@ try {
             }
             'security-prs-setup-timeout' { $selection = '2'; $testState.SetupLag = 100000; $expectedFailure = 'did not cover javascript-typescript after 10 minutes (has: actions)' }
             'security-prs-setup-patch-failure' { $selection = '2'; $testState.SetupPatchFailure = $true; $expectedFailure = 'Could not change CodeQL default setup' }
+            'security-prs-no-ai-trigger' {
+                $selection = '2'
+                $config.repos[1].prs[1].PSObject.Properties.Remove('trigger_ai_scan')
+                $config.repos[1].PSObject.Properties.Remove('ai_scan')
+            }
+            'security-prs-bad-ai-trigger' { $selection = '2'; $config.repos[1].prs[1].trigger_ai_scan = 'yes'; $expectedFailure = 'trigger_ai_scan must be true or false' }
             'security-prs-bad-languages' { $selection = '2'; $config.repos[1].code_scanning_languages = @(); $expectedFailure = 'code_scanning_languages must be' }
             'issue-codespace' { $selection = '3' }
             'branch-codespace' { $selection = $branchSelection }
@@ -746,6 +753,25 @@ try {
                 Assert (($testState.ForcePushed -join ',') -eq $wantPushes) "Force-pushed '$($testState.ForcePushed -join ',')' (want '$wantPushes')."
                 $amends = @(Find-Calls 'git' 'commit --amend --no-edit')
                 Assert ($amends.Count -eq $testState.ForcePushed.Count) 'Every retrigger push should recommit the PR commit first.'
+                # Only the PHP PR sets "trigger_ai_scan", so it alone gets an extra (non-force) push.
+                $wantTrigger = $scenario -ne 'security-prs-no-ai-trigger'
+                $emptyCommits = @(Find-Calls 'git' 'commit --allow-empty -m chore: trigger AI code scanning')
+                Assert ($emptyCommits.Count -eq ([int]$wantTrigger)) "Made $($emptyCommits.Count) AI Scan trigger commits (want $([int]$wantTrigger))."
+                $triggerPushes = @(Find-Calls 'git' 'push origin ')
+                Assert ($triggerPushes.Count -eq ([int]$wantTrigger)) "Pushed $($triggerPushes.Count) AI Scan trigger commits (want $([int]$wantTrigger))."
+                if ($wantTrigger) {
+                    Assert ($triggerPushes[0].Arguments[2] -eq 'feature/supplier-notes') "AI Scan trigger pushed '$($triggerPushes[0].Arguments[2])'."
+                    $commitAt = $testState.Calls.IndexOf($emptyCommits[0])
+                    $checkout = @(Find-Calls 'git' 'checkout --quiet feature/supplier-notes')
+                    Assert ($checkout.Count -ge 1 -and $testState.Calls.IndexOf($checkout[-1]) -lt $commitAt) 'AI Scan trigger commit was not made on the PHP branch.'
+                    Assert ($commitAt -lt $testState.Calls.IndexOf($triggerPushes[0])) 'Pushed before making the AI Scan trigger commit.'
+                    Assert ($testState.Calls.IndexOf($scanPolls[-1]) -lt $commitAt) 'Triggered AI Scan before checking CodeQL on the PRs.'
+                }
+                $aiScanPatch = @(Find-Calls 'gh' "api --method PATCH repos/$($create.Arguments[2])/code-scanning/ai-scan")
+                Assert ($aiScanPatch.Count -eq ([int]$wantTrigger)) "Changed the AI Scan setting $($aiScanPatch.Count) times (want $([int]$wantTrigger))."
+                if ($wantTrigger) {
+                    Assert ($testState.Calls.IndexOf($aiScanPatch[0]) -lt $testState.Calls.IndexOf((Find-Calls 'gh' 'pr create')[0])) 'Enabled AI Scan after opening the PRs.'
+                }
                 $disable = @(Find-Calls 'gh' 'workflow disable codeql-advanced.yml')
                 Assert ($disable.Count -eq 1 -and $disable[0].Arguments -contains $create.Arguments[2]) 'codeql-advanced.yml was not disabled.'
                 $firstPr = $testState.Calls.IndexOf((Find-Calls 'gh' 'pr create')[0])

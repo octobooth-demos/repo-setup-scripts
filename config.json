@@ -28,6 +28,7 @@
       "workflow": "security_prs",
       "enable_security_features": true,
       "code_scanning_languages": ["javascript-typescript", "actions"],
+      "ai_scan": true,
       "prs": [
         {
           "branch": "feature-add-tos-download",
@@ -41,13 +42,14 @@
           "resource_dir": "resources/security-octo-supply-v4/pr-php",
           "commit_message": "feat: add supplier notes feature for internal communication",
           "title": "Demo: Preventing Vulnerabilities in PHP",
-          "body_file": "resources/security-octo-supply-v4/pr-php/pr-body.md"
+          "body_file": "resources/security-octo-supply-v4/pr-php/pr-body.md",
+          "trigger_ai_scan": true
         }
       ],
       "summary_lines": [
         "Security features: Enabled (CodeQL default setup; codeql-advanced.yml disabled)",
         "PRs: TypeScript + PHP demo PRs created",
-        "PHP findings need AI Code Scanning enabled for the org; push an edit to the PHP PR to trigger it"
+        "PHP findings: AI Code Scanning triggered (needs it on for the org); expect them in a few minutes, or push another small commit to the PHP PR if none after ~10 minutes"
       ]
     },
     {

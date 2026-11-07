@@ -53,7 +53,8 @@ jobs:
         run: |
           jq -e '
             all(.repos[] | (.prs // [])[], (.stack // [])[];
-              all(.branch, .resource_dir, .body_file, .commit_message, .title; type == "string"))
+              all(.branch, .resource_dir, .body_file, .commit_message, .title; type == "string") and
+              ((.trigger_ai_scan // false) | type == "boolean"))
           ' config.json > /dev/null
       - name: Check referenced files exist
         run: |

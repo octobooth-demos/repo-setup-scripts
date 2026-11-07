@@ -39,7 +39,7 @@ You can try the launcher with no config changes. The templates are public, so mo
 
      For quick access at a booth, also add the existing `~/repos/repo-setup-scripts` folder as a project in the GitHub Copilot app (don't clone it again). Then you can pin a session in it, or pin the canvas. Start that session with **Current checkout**, not **New worktree**: a worktree session runs its own frozen copy of the launcher that `git pull` never updates.
 
-   - **Windows:** add the folder as a project in the Copilot app, and start sessions in it with **Current checkout**. Don't run `install.sh`; runs use `create-repo.ps1`.
+   - **Windows:** [install the loader from a URL](#option-c-install-the-loader-from-a-url), or add the folder as a project in the Copilot app and start sessions in it with **Current checkout**. Don't run `install.sh`; runs use `create-repo.ps1`.
 
    See [options and limitations](#installing-the-demo-launcher-canvas-options-and-limitations) for what each one gives you.
 
@@ -51,7 +51,7 @@ With an unchanged `config.json`, these demos work in your own account: `securing
 
 ## Installing the Demo Launcher canvas: options and limitations
 
-The Demo Launcher is a Copilot extension in [`.github/extensions/demo-launcher/`](../.github/extensions/demo-launcher/). There are two ways to install it, and you can use both.
+The Demo Launcher is a Copilot extension in [`.github/extensions/demo-launcher/`](../.github/extensions/demo-launcher/). There are two ways to install it, and you can use both. Option A can also be [installed from a URL](#option-c-install-the-loader-from-a-url), including on Windows.
 
 | | Option A: user-level loader (`install.sh`) | Option B: project |
 | --- | --- | --- |
@@ -67,12 +67,24 @@ The Demo Launcher is a Copilot extension in [`.github/extensions/demo-launcher/`
 - If you move, rename, or delete the checkout, the loader breaks. Re-run `install.sh` from the new location.
 - In a session whose repo ships its own `.github/extensions/demo-launcher/extension.mjs` (this repo or your fork), the loader does nothing and lets that copy provide the canvas. That avoids two launchers in one session.
 
+#### Option C: install the loader from a URL
+
+The Copilot app can install an extension straight from a folder in a GitHub repo, on macOS, Linux, and Windows. [`.github/extensions/demo-launcher-loader/`](../.github/extensions/demo-launcher-loader/) is the same loader `install.sh` writes, so this gives you Option A without running bash. In a Copilot app chat, ask:
+
+> Install the extension from https://github.com/octobooth-demos/repo-setup-scripts/tree/main/.github/extensions/demo-launcher-loader with the name demo-launcher
+
+For your fork, use your fork's URL. Then restart the app. Notes:
+
+- **It still needs the repo cloned.** The loader imports the launcher from `~/repos/repo-setup-scripts` (`%USERPROFILE%\repos\repo-setup-scripts` on Windows), or from `DEMO_LAUNCHER_REPO` if you set it. If the clone is missing, the canvas opens a page that says where to clone it.
+- **Use the name `demo-launcher`.** That installs to the same folder as `install.sh`, so the two replace each other instead of adding a second canvas.
+- On staff builds, you may see two Demo Launchers if the repo is also added as a project, as with Option A.
+
 **Using both.** On booth Macs, we recommend both: the loader so any chat can open the launcher, and the project so you can pin a session or the canvas. Add the **same local folder** as the project that `install.sh` points at, so one `git pull` updates both. Start the session you pin with **Current checkout**, not **New worktree**. A worktree session gets its own copy under `copilot-worktrees` on its own branch, so it keeps loading the launcher as it was when the session was created. To fix one, archive it and start a **Current checkout** session; the session's `EXTENSION_PATH` in the app logs should be under `repos/repo-setup-scripts`. On app builds that can open canvases without a session (currently staff builds), the canvas picker then lists two "Demo Launcher" entries. They run the same code, so either works. See [Two Demo Launcher canvases](../README.md#two-demo-launcher-canvases).
 
 **Limitations:**
 
 - **Open it from a chat.** Opening canvases from the app-wide canvas picker, without a session, is currently a staff-build feature. On other builds, ask Copilot in a session or chat to "open the demo launcher." Opened from the picker, the session and Fusion buttons only open the project's composer; see [Opened without a chat](../README.md#opened-without-a-chat).
-- **The loader is bash-only.** `install.sh` runs on macOS and Linux. On Windows, add the project and open the launcher from a session in it.
+- **`install.sh` is bash-only.** It runs on macOS and Linux. On Windows, [install the loader from a URL](#option-c-install-the-loader-from-a-url) or add the project and open the launcher from a session in it.
 - **It runs locally, as you.** The launcher runs `create-repo.sh` (or `create-repo.ps1` on Windows) from its checkout, using that checkout's `config.json` and `resources/`. It uses your stored `gh auth login` and ignores a `GH_TOKEN` or `GITHUB_TOKEN` the app injects whenever a stored login exists, so `gh`, `git`, and (for bash) `jq` must be installed and logged in.
 - **The panel is a loopback web page.** It's served on `127.0.0.1` on a port that changes every time the extension restarts. The URL also works in a browser.
 - **Run history is shared.** It's kept in `~/.copilot/extensions/demo-launcher/artifacts/runs.json` and shared by every open launcher.

@@ -513,8 +513,9 @@ On macOS or Linux, run the same file with `pwsh -File tests/create-repo.Tests.ps
 
 ```bash
 bash -n create-repo.sh
-for f in .github/extensions/demo-launcher/*.mjs; do node --check "$f"; done
+for f in .github/extensions/demo-launcher/*.mjs .github/extensions/demo-launcher-loader/*.mjs; do node --check "$f"; done
 node --test tests/run-store.test.mjs   # run history shared across several launcher processes
+node --test tests/demo-launcher.test.mjs tests/demo-launcher-loader.test.mjs   # seed prompts and the loader
 bash -n .github/extensions/demo-launcher/install.sh
 shellcheck --severity=warning -x create-repo.sh .github/extensions/demo-launcher/install.sh
 ```
@@ -524,3 +525,5 @@ Invoke-ScriptAnalyzer -Path .\create-repo.ps1 -Settings .\PSScriptAnalyzerSettin
 ```
 
 The [CI workflow](.github/workflows/ci.yml) runs these checks on every pull request and push to `main` (the run-store tests on Linux, macOS, and Windows), and also validates `config.json` (required fields, workflow names, and that every referenced resource file and directory exists). CI never creates repos or uses secrets.
+
+Before changing this repo, read [AGENTS.md](AGENTS.md): the change rules (script parity, Windows PowerShell 5.1, intentional vulnerabilities to leave alone) and release rules for maintainers and coding agents.

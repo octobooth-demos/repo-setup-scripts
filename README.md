@@ -65,7 +65,7 @@ Two demos take too long to create in front of visitors. On each machine, signed 
 - **AI Security** (`ai-security`): about 20 minutes ([checklist](resources/ai-security/ANSWER_KEY.md)).
 - **Security Supply Chain (v4)** (`security-octo-supply-v4`): about 10 minutes ([checklist](resources/security-octo-supply-v4/ANSWER_KEY.md)).
 
-When they're ready, bookmark each repo and its demo PRs in the browser so you can jump straight to them. Both live in the `octobooth-demos` org, where the [nightly cleanup](#which-cleanup-covers-which-repos) deletes `demo-generated` repos once they're more than 72 hours old, so create them within 72 hours of use: the morning of, or the day before.
+When they're ready, bookmark each demo repo in the browser so you can jump straight to it. Both live in the `octobooth-demos` org, where the [nightly cleanup](#which-cleanup-covers-which-repos) deletes `demo-generated` repos once they're more than 72 hours old, so create them within 72 hours of use: the morning of, or the day before.
 
 ## Releases
 
@@ -424,7 +424,7 @@ Each overlay holds the cumulative files for its layer. The booth talk track is i
 1. `feature-add-tos-download` (from [`resources/security-octo-supply-v4/pr-typescript`](resources/security-octo-supply-v4/pr-typescript)): a terms-of-service download with a path traversal for CodeQL and Copilot Autofix. It matches upstream's `feature-add-tos-download` branch and includes intentional code-quality issues in `userDetailsRepo.ts` for CodeQL. The two that TypeScript itself rejects carry `@ts-expect-error`, so the API still builds.
 2. `feature/supplier-notes` (from [`resources/security-octo-supply-v4/pr-php`](resources/security-octo-supply-v4/pr-php)): supplier notes in the PHP app. CodeQL doesn't analyze PHP, so these findings come from AI Code Scanning.
 
-**Create it ahead: about 10 minutes.** GitHub takes about 5 minutes to apply CodeQL default setup for JavaScript/TypeScript before the script opens the demo PRs, and the PHP PR's AI findings appear about 3–4 minutes after the script's automatic trigger commit. Create it from the launcher before the booth opens and bookmark the repo and both demo PRs (see [Before the booth opens](#before-the-booth-opens)). When it's done, everything is ready without a manual push:
+**Create it ahead: about 10 minutes.** GitHub takes about 5 minutes to apply CodeQL default setup for JavaScript/TypeScript before the script opens the demo PRs, and the PHP PR's AI findings appear about 3–4 minutes after the script's automatic trigger commit. Create it from the launcher before the booth opens and bookmark the repo (see [Before the booth opens](#before-the-booth-opens)). When it's done, everything is ready without a manual push:
 
 - Dependabot alerts, and Dependabot's security-update PRs (usually 3–9).
 - CodeQL alerts with Copilot Autofix suggestions on the TypeScript PR.

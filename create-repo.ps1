@@ -84,7 +84,7 @@ function Assert-PullRequestEntries {
                 $missing += "$Field[$index].$name"
             }
         }
-        if ($pr.PSObject.Properties['trigger_ai_scan'] -and $pr.trigger_ai_scan -isnot [bool]) {
+        if ($null -ne $pr.trigger_ai_scan -and $pr.trigger_ai_scan -isnot [bool]) {
             throw "$Field[$index].trigger_ai_scan must be true or false."
         }
         if ($pr.resource_dir) {

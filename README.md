@@ -8,6 +8,8 @@ There are three ways to create a demo, and all of them run the same scripts and 
 - **[`create-repo.sh` / `create-repo.ps1`](#bash)**: the scripts the launcher runs, used interactively or [non-interactively](#non-interactive-mode).
 - **[ChatOps](#chatops)**: `/new-demo <key>` comments or the Actions tab. These create demos in the `octobooth-demos` org without a booth machine.
 
+Not at an `octobooth-demos` booth? See [Run the Demo Launcher in your own org](docs/run-in-your-own-org.md) to install the launcher and point it at your own org or account.
+
 ## Quick start (booth machine)
 
 Do this once per machine (macOS):
@@ -40,17 +42,19 @@ Do this once per machine (macOS):
    gh repo clone octobooth-demos/repo-setup-scripts ~/repos/repo-setup-scripts
    ```
 
-3. In the GitHub Copilot app, add that **existing local folder** (`~/repos/repo-setup-scripts`) as a project. Don't clone it again. Sessions in this project can always open the Demo Launcher.
-4. Also install the loader so other sessions can open it too (see [details](#make-it-available-in-every-session)):
+3. Install the loader so every session, including a blank new chat, can open the Demo Launcher (see [details](#make-it-available-in-every-session)):
 
    ```bash
    cd ~/repos/repo-setup-scripts
    bash .github/extensions/demo-launcher/install.sh
    ```
 
-   Then restart the Copilot app (or reload extensions in open sessions). The project and the loader now use the same checkout.
+   Then restart the Copilot app (or reload extensions in open sessions).
+4. In the GitHub Copilot app, also add that **existing local folder** (`~/repos/repo-setup-scripts`) as a project. Don't clone it again. This is for quick access at the booth: pin a session in the project, or pin the canvas. The project and the loader use the same checkout.
 
-Before each booth day, run `git -C ~/repos/repo-setup-scripts pull` and restart the app; that updates both. Then start a chat (a blank new chat works) and ask Copilot to **"open the demo launcher"**. Opening it from a chat is the recommended booth path: the session, PR, and Fusion buttons are one click because Copilot sets up the project and session for you. Opening it from the app's canvas picker also works, but only as a fallback (see [Opened without a chat](#opened-without-a-chat)). If a session outside the project can't find it, open it from a session in the `repo-setup-scripts` project instead. At the end of the day, use the launcher's **Clean up** section or `bash ./create-repo.sh --cleanup` (see [Cleaning up](#cleaning-up)).
+   When you start the session to pin, choose **Current checkout**, not **New worktree**. A worktree session gets its own copy under `copilot-worktrees` on its own branch, so `git pull` never updates it and it keeps loading the old launcher. If you already pinned a worktree session, archive it and start a new **Current checkout** session. To check, the session's `EXTENSION_PATH` in the app logs should be under `repos/repo-setup-scripts`, not `copilot-worktrees`.
+
+Before each booth day, run `git -C ~/repos/repo-setup-scripts pull` and restart the app; that updates both. Then start a chat (a blank new chat works) and ask Copilot to **"open the demo launcher"**. Opening it from a chat is the recommended booth path: the session, PR, and Fusion buttons are one click because Copilot sets up the project and session for you. Opening it from the app's canvas picker also works, but only as a fallback (see [Opened without a chat](#opened-without-a-chat)). At the end of the day, use the launcher's **Clean up** section or `bash ./create-repo.sh --cleanup` (see [Cleaning up](#cleaning-up)).
 
 ## Demos
 
@@ -112,6 +116,8 @@ Every repository the scripts create gets the `demo-generated` topic, which is wh
 
 **Recommended: open it from a chat.** Then the follow-up buttons are one click, and Copilot adds the project and opens the session, PR, or Fusion run for you. Opening the launcher from the app's canvas picker (no chat) is a fallback with more manual steps; see [Opened without a chat](#opened-without-a-chat). This stays the guidance until standalone canvases ship to non-staff builds with the app access they need to create sessions themselves.
 
+To install it outside `octobooth-demos`, see [Run the Demo Launcher in your own org](docs/run-in-your-own-org.md), including [install options and limitations](docs/run-in-your-own-org.md#installing-the-demo-launcher-canvas-options-and-limitations).
+
 ### What it does
 
 - **Create demos in the background.** It lists every template in `config.json` and runs `create-repo.sh --template <key>` (or `create-repo.ps1 -Template <key>` on Windows) for the one you pick. Optional settings: owner, **Skip local clone** (`--no-clone`), and **Let script open browser tabs**. You can start several runs at once, and each gets its own repo, clone, and card, so every visitor can have their own copy.
@@ -134,9 +140,9 @@ Runs use your stored `gh auth login`, not any `GH_TOKEN` the app injects, so the
 | Session | Canvas available? |
 | --- | --- |
 | Any session in the `repo-setup-scripts` project, including worktrees and PR sessions | Yes. Copilot loads project extensions from `.github/extensions/`, and each session uses its own checkout's copy. |
-| Any other session (a demo repo, another project, or a chat) | Only after you [install the loader](#make-it-available-in-every-session), and only if your app build loads user-level extensions. |
+| Any other session (a demo repo, another project, or a chat) | Yes, after you [install the loader](#make-it-available-in-every-session) (macOS and Linux). Confirmed on regular and staff app builds, including a blank new chat. |
 
-On booth machines (macOS or Linux), set up both: add the repo as a project **and** run `install.sh`. The project is the guaranteed way in; the loader adds every other session. On Windows, use the project only.
+On booth machines (macOS or Linux), set up both: run `install.sh` so any chat can open the launcher, **and** add the repo as a project so you can pin a session in it, or pin the canvas, for quick access. On Windows, use the project only.
 
 #### Two Demo Launcher canvases
 
@@ -173,7 +179,7 @@ Then restart the Copilot app, or ask Copilot to reload extensions in sessions th
 
 How the loader works:
 
-- The installer writes a small user-level extension (a loader) to `~/.copilot/extensions/demo-launcher/extension.mjs`, or to `$COPILOT_HOME/extensions/demo-launcher/` if `COPILOT_HOME` is set. App builds that support user-level extensions load them in every session.
+- The installer writes a small user-level extension (a loader) to `~/.copilot/extensions/demo-launcher/extension.mjs`, or to `$COPILOT_HOME/extensions/demo-launcher/` if `COPILOT_HOME` is set. The app loads it in every session, including a blank new chat, on regular and staff builds.
 - The loader imports `extension.mjs` straight from your checkout. **`git pull` updates the launcher**; you don't need to reinstall. Demos still run `create-repo` and `config.json` from that checkout.
 - If you run the installer from a worktree, it points the loader at the **main checkout** anyway, because worktrees get deleted. If the main checkout doesn't have the extension yet, it falls back to the worktree with a warning. In that case, re-run it from the main checkout after merging.
 - In sessions inside this repo, the loader does nothing and lets that checkout's copy provide the canvas. That avoids two Demo Launchers in the session, and a branch you're working on uses its own version. Staff app builds may still list [two canvases](#two-demo-launcher-canvases) outside a session.
@@ -189,8 +195,8 @@ How the loader works:
 | Symptom | Fix |
 | --- | --- |
 | The app shows two "Demo Launcher" canvases | Expected on staff builds with both the project and loader set up. Either one works. See [Two Demo Launcher canvases](#two-demo-launcher-canvases). |
-| Copilot can't find the Demo Launcher outside this project | Run `install.sh`, then restart the app or reload extensions. Check that `~/.copilot/extensions/demo-launcher/extension.mjs` exists and that the path it imports exists. If it still doesn't appear, your app build may not load user-level extensions; open it from a session in the `repo-setup-scripts` project. |
-| The panel shows old behavior | Run `git pull` in the main checkout and reload extensions. Sessions inside this project use their own checkout, so update that branch. |
+| Copilot can't find the Demo Launcher outside this project | Run `install.sh`, then restart the app or reload extensions. Check that `~/.copilot/extensions/demo-launcher/extension.mjs` exists and that the path it imports exists. If it still doesn't appear, open it from a session in the `repo-setup-scripts` project while you check the loader. |
+| The panel shows old behavior | Run `git pull` in the main checkout and reload extensions. Sessions inside this project use their own checkout, so update that branch. A pinned **New worktree** session never picks up `git pull`; archive it and start a **Current checkout** session instead. |
 | A run fails with an auth or scope error, or cleanup asks for `delete_repo` | Run `gh auth status` in a terminal, then `gh auth refresh -h github.com -s codespace,delete_repo`. |
 | A run fails at **Creating PR** or a push, or stops with "git would push as 'X', but gh is logged in as 'Y'" | git and `gh` are signed in as different accounts (often the Copilot app's account vs. the booth login). The Demo Launcher handles this itself; update to the latest version. For terminal runs started from the app, check `gh auth status` and the account selected in the app. |
 | The demo was created in the wrong account | Repos go to the [logged-in account](#where-repos-are-created) unless you set **Owner**. Check `gh auth status`. |
@@ -231,7 +237,7 @@ By default, repos are created in **the account that is logged in** (`gh api user
 3. The logged-in account.
 4. The top-level `org` (only when there is no user account, such as a GitHub App token in Actions).
 
-The script prints `Target owner:` before creating anything. Templates in `octobooth-demos` are internal, so the booth account must be an org member to use them.
+The script prints `Target owner:` before creating anything. The templates in `octobooth-demos` are public, so any account can create repos from them.
 
 > [!NOTE]
 > `tailspin-toys` assigns an issue to `@copilot` and starts a Codespace. In a personal account those need Copilot coding agent and Codespaces access on that account. If they are not available, run it with `--owner octobooth-demos`.
@@ -306,7 +312,7 @@ Each `repos[]` entry needs `key`, `display_name`, `template` (except for the `bl
 | `blank` | Optional `seed_prompt_file` | Creates an empty repo with only a README (`gh repo create --add-readme`, no template). `seed_prompt_file` is a prompt in this repo that the Demo Launcher shows with Copy and Run with Fusion buttons. |
 | `issue_and_codespace` | `issue` | Creates an issue and a Codespace. |
 | `security_prs` | `prs[]`; optional `code_scanning_languages` | Enables security features (Dependabot alerts, automated security fixes, CodeQL default setup), disables the template's `codeql-advanced.yml` workflow if it has one, and opens one PR per entry against the default branch. Default setup is configured for `code_scanning_languages` (CodeQL names such as `javascript-typescript` and `actions`), or for the repo's detected languages plus `actions`, and the script waits (up to 10 minutes; override with `DEFAULT_SETUP_WAIT_SECONDS`) until it covers them before opening PRs. Default setup can miss PRs opened right after it's configured, so the script then checks that CodeQL started on each PR and, if it didn't, recommits that PR's commit and force-pushes it to trigger a scan (up to 3 times, about 90 seconds apart; override with `PR_SCAN_WAIT_SECONDS`). |
-| `branch_and_codespace` | `branch` | Creates a branch and a Codespace on it. |
+| `branch_and_codespace` | `branch_name` | Creates a branch and a Codespace on it. |
 | `code_review_prs` | `prs[]` | Opens one PR per entry against the default branch and requests a Copilot Code Review on each, except entries with `"request_review": false`, which are left for the presenter to request live. No security features are enabled. |
 | `stacked_prs` | `stack[]` | Opens a chain of dependent PRs and registers them as a native [stacked PR](https://docs.github.com/en/pull-requests/reference/stacked-pull-requests-apis-and-webhooks). |
 | `ai_security` | `prs[]` and/or `autofix`; optional `ai_scan`, `seed`, `codeql_workflow` | Enables Advanced Security, and AI Scan when `"ai_scan": true`. With `autofix`, it commits `seed.resource_dir` to the default branch (or dispatches `codeql_workflow`, default `codeql-advanced.yml`), waits for CodeQL alerts, and assigns the `autofix.preassign_rule` alert to Copilot. Then it opens one PR per `prs[]` entry; when `ai_scan` is on, it first makes sure code scanning has an analysis. It turns CodeQL default setup off (and waits until it's off) before pushing anything, because default setup rejects the advanced workflow's uploads. |

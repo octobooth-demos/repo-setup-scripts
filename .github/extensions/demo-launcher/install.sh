@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Make the Demo Launcher canvas available in every Copilot session, not just this repo's.
-# Writes a small loader to $COPILOT_HOME/extensions/demo-launcher/extension.mjs that imports
+# Copies the loader (../demo-launcher-loader/extension.mjs) to
+# $COPILOT_HOME/extensions/demo-launcher/extension.mjs with this checkout baked in. It imports
 # the extension from this checkout, so `git pull` keeps it up to date.
 #
 #   bash .github/extensions/demo-launcher/install.sh            # install / update
@@ -31,29 +32,24 @@ if common_dir=$(git -C "$EXT_DIR" rev-parse --path-format=absolute --git-common-
     fi
 fi
 
+LOADER_SRC="$EXT_DIR/../demo-launcher-loader/extension.mjs"
+if [ ! -f "$LOADER_SRC" ]; then
+    echo "❌ Missing $LOADER_SRC; update this checkout (git pull) and try again." >&2
+    exit 1
+fi
+REPO_ROOT="$(cd "$SOURCE_DIR/../../.." && pwd)"
+
+# Same loader as a URL install, with this checkout baked in (DEMO_LAUNCHER_REPO still wins).
+repo_js="${REPO_ROOT//\\/\\\\}"
+repo_js="${repo_js//\"/\\\"}"
 mkdir -p "$TARGET_DIR"
-LOADER_TARGET="${SOURCE_DIR//\"/\\\"}/extension.mjs"
-cat > "$LOADER" <<LOADER_EOF
-// Installed by repo-setup-scripts (.github/extensions/demo-launcher/install.sh).
-// Loads the Demo Launcher from your checkout so every Copilot session can open it.
-import { existsSync } from "node:fs";
-import { dirname, join } from "node:path";
-
-// In a repo that ships its own copy (repo-setup-scripts), let that one provide the canvas.
-function sessionRepoHasOwnCopy() {
-    for (let dir = process.cwd(); ; dir = dirname(dir)) {
-        if (existsSync(join(dir, ".github", "extensions", "demo-launcher", "extension.mjs"))) return true;
-        if (existsSync(join(dir, ".git")) || dirname(dir) === dir) return false;
-    }
-}
-
-if (sessionRepoHasOwnCopy()) {
-    const { joinSession } = await import("@github/copilot-sdk/extension");
-    await joinSession({});
-} else {
-    await import("$LOADER_TARGET");
-}
-LOADER_EOF
+tmp="$LOADER.tmp.$$"
+REPO_JS="$repo_js" awk '
+    /^const INSTALLED_REPO = "";/ { print "const INSTALLED_REPO = \"" ENVIRON["REPO_JS"] "\"; // Set by install.sh."; done = 1; next }
+    { print }
+    END { if (!done) exit 1 }
+' "$LOADER_SRC" > "$tmp" || { rm -f "$tmp"; echo "❌ Couldn't find the INSTALLED_REPO line in $LOADER_SRC." >&2; exit 1; }
+mv "$tmp" "$LOADER"
 
 echo "✅ Installed Demo Launcher for all sessions → $SOURCE_DIR"
 echo "   Restart open sessions (or reload extensions) to pick it up."

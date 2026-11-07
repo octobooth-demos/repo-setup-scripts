@@ -108,7 +108,7 @@ jobs:
       - uses: actions/checkout@v7
       - name: Parse Demo Launcher modules
         run: |
-          for file in .github/extensions/demo-launcher/*.mjs; do
+          for file in .github/extensions/demo-launcher/*.mjs .github/extensions/demo-launcher-loader/*.mjs; do
             node --check "$file"
           done
 
@@ -131,6 +131,9 @@ jobs:
       - name: Run seed prompt tests
         # Loads the extension with a stub Copilot SDK and a temp COPILOT_HOME; nothing touches GitHub.
         run: node --test tests/demo-launcher.test.mjs
+      - name: Run loader tests
+        # Copies the loader to temp extension folders with a stub Copilot SDK; install.sh is skipped on Windows.
+        run: node --test tests/demo-launcher-loader.test.mjs
 
   lint-powershell:
     name: Lint PowerShell

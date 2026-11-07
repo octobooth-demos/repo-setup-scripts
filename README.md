@@ -179,16 +179,24 @@ Then restart the Copilot app, or ask Copilot to reload extensions in sessions th
 
 How the loader works:
 
-- The installer writes a small user-level extension (a loader) to `~/.copilot/extensions/demo-launcher/extension.mjs`, or to `$COPILOT_HOME/extensions/demo-launcher/` if `COPILOT_HOME` is set. The app loads it in every session, including a blank new chat, on regular and staff builds.
+- The installer copies the loader in [`demo-launcher-loader/`](.github/extensions/demo-launcher-loader/) `~/.copilot/extensions/demo-launcher/extension.mjs` (or `$COPILOT_HOME/extensions/demo-launcher/` if `COPILOT_HOME` is set), with your checkout's path filled in. The app loads it in every session, including a blank new chat, on regular and staff builds.
 - The loader imports `extension.mjs` straight from your checkout. **`git pull` updates the launcher**; you don't need to reinstall. Demos still run `create-repo` and `config.json` from that checkout.
 - If you run the installer from a worktree, it points the loader at the **main checkout** anyway, because worktrees get deleted. If the main checkout doesn't have the extension yet, it falls back to the worktree with a warning. In that case, re-run it from the main checkout after merging.
 - In sessions inside this repo, the loader does nothing and lets that checkout's copy provide the canvas. That avoids two Demo Launchers in the session, and a branch you're working on uses its own version. Staff app builds may still list [two canvases](#two-demo-launcher-canvases) outside a session.
 
 **Update:** run `git -C ~/repos/repo-setup-scripts pull`, then reload extensions or restart the app. You only need to re-run `install.sh` if `install.sh` itself changes. Re-running it is always safe.
 
+#### Install from a URL
+
+Instead of running `install.sh`, you can install the same loader from its folder in this repo. This also works on Windows. You still need the repo cloned: the loader looks for `~/repos/repo-setup-scripts` (`%USERPROFILE%\repos\repo-setup-scripts` on Windows), or the folder in `DEMO_LAUNCHER_REPO` if you set it. In a Copilot app chat, ask:
+
+> Install the extension from https://github.com/octobooth-demos/repo-setup-scripts/tree/main/.github/extensions/demo-launcher-loader with the name demo-launcher
+
+Use the name `demo-launcher` so it replaces the `install.sh` loader (same folder) instead of adding a second canvas. Then restart the app. If the clone is missing, the canvas opens a page that says where to clone it. Staff builds may list [two Demo Launchers](#two-demo-launcher-canvases) if the repo is also added as a project. See the [loader README](.github/extensions/demo-launcher-loader/README.md) for details.
+
 **Uninstall:** run `bash .github/extensions/demo-launcher/install.sh --uninstall`. This removes the loader and keeps your run history in `artifacts/`.
 
-**Windows:** `install.sh` is for macOS and Linux. On Windows, add `repo-setup-scripts` as a project in the Copilot app and open the canvas from sessions in that project; don't also install a loader. Runs there use `create-repo.ps1`.
+**Windows:** `install.sh` is for macOS and Linux. On Windows, [install the loader from a URL](#install-from-a-url), or add `repo-setup-scripts` as a project in the Copilot app and open the canvas from sessions in that project. Runs there use `create-repo.ps1`.
 
 ### Troubleshooting
 
@@ -224,6 +232,7 @@ For example: "launch octocart in the demo launcher and tell me when Copilot has 
 | [`ui.html`](.github/extensions/demo-launcher/ui.html) | The panel UI |
 | [`cleanup.mjs`](.github/extensions/demo-launcher/cleanup.mjs) | The Clean up section (preview and delete through `create-repo --cleanup`) |
 | [`run-store.mjs`](.github/extensions/demo-launcher/run-store.mjs) | Run history in `runs.json`, shared safely by every launcher process (locked read-merge-write, atomic replace, file watching) |
+| [`../demo-launcher-loader/extension.mjs`](.github/extensions/demo-launcher-loader/extension.mjs) | The user-level loader that `install.sh` writes and that [Install from a URL](#install-from-a-url) installs |
 | [`install.sh`](.github/extensions/demo-launcher/install.sh) | Installs or uninstalls the user-level loader |
 
 If you change what the scripts print (repo, clone, `PR #N created: <url>`, Copilot review lines, and so on), update `parseLine` in `extension.mjs` to match.

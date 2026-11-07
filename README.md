@@ -56,25 +56,25 @@ Do this once per machine (macOS):
 
    When you start the session to pin, choose **Current checkout**, not **New worktree**. A worktree session gets its own copy under `copilot-worktrees` on its own branch, so `git pull` never updates it and it keeps loading the old launcher. If you already pinned a worktree session, archive it and start a new **Current checkout** session. To check, the session's `EXTENSION_PATH` in the app logs should be under `repos/repo-setup-scripts`, not `copilot-worktrees`.
 
-Before each booth day, update the checkout and restart the app; that updates both. If the event has a release tag (it's in the event's IRL issue), check out that tag (see [Event releases](#event-releases)). Otherwise, run `git -C ~/repos/repo-setup-scripts pull`. Then start a chat (a blank new chat works) and ask Copilot to **"open the demo launcher"**. Opening it from a chat is the recommended booth path: the session, PR, and Fusion buttons are one click because Copilot sets up the project and session for you. Opening it from the app's canvas picker also works, but only as a fallback (see [Opened without a chat](#opened-without-a-chat)). At the end of the day, use the launcher's **Clean up** section or `bash ./create-repo.sh --cleanup` (see [Cleaning up](#cleaning-up)).
+Before each booth day, update the checkout and restart the app; that updates both. If the machine is pinned to a release (`v1`), re-run the two commands in [Releases](#releases) to pick up the latest tested `v1.x.y`. Otherwise, run `git -C ~/repos/repo-setup-scripts pull`. Then start a chat (a blank new chat works) and ask Copilot to **"open the demo launcher"**. Opening it from a chat is the recommended booth path: the session, PR, and Fusion buttons are one click because Copilot sets up the project and session for you. Opening it from the app's canvas picker also works, but only as a fallback (see [Opened without a chat](#opened-without-a-chat)). At the end of the day, use the launcher's **Clean up** section or `bash ./create-repo.sh --cleanup` (see [Cleaning up](#cleaning-up)).
 
-## Event releases
+## Releases
 
-`main` of this repo and [machine-setup](https://github.com/octobooth-demos/machine-setup) changes often. Before an event, we test both and tag them with the same event release tag, `booth-YYYY.MM.N` (for example `booth-2026.11.1`), so every booth machine runs the same tested version. The event's IRL issue records the tag. If there's no tag, booth machines track `main`.
+`main` of this repo and [machine-setup](https://github.com/octobooth-demos/machine-setup) changes often. So we test both and tag them with the same semantic version: a full tag such as `v1.0.0` for each tested release, and a moving major tag, `v1`, that always points at the latest tested `v1.x.y` (like GitHub Actions' major tags). Booth machines use `v1`, so every machine runs the same tested version and picks up tested fixes without a new tag name. The major only changes (`v2`) for breaking changes, such as new manual setup steps, changed paths, or new required `gh` scopes. If a machine isn't pinned, it tracks `main`.
 
-- **Booth machines:** pass the tag to machine-setup's `install-demo-launcher` or `setup` script (`--ref` on macOS, `-Ref` on Windows, or set `BOOTH_RELEASE`). It checks out the tag in `~/repos/repo-setup-scripts`. See machine-setup's [Using an event release](https://github.com/octobooth-demos/machine-setup/blob/main/README.md#using-an-event-release) (that section lands when machine-setup's event release PR merges).
-- **Pin by hand:**
+- **Booth machines:** pass the major tag to machine-setup's `install-demo-launcher` or `setup` script (`--ref v1` on macOS, `-Ref v1` on Windows, or set `BOOTH_RELEASE=v1`). It checks out the tag in `~/repos/repo-setup-scripts`. See the [machine-setup README](https://github.com/octobooth-demos/machine-setup#readme) (its release section lands when machine-setup's release PR merges).
+- **Pin or update by hand:** `v1` moves, so fetch with `--force` to update the local tag:
 
   ```bash
-  git -C ~/repos/repo-setup-scripts fetch --tags
-  git -C ~/repos/repo-setup-scripts checkout --detach booth-YYYY.MM.N
+  git -C ~/repos/repo-setup-scripts fetch --tags --force
+  git -C ~/repos/repo-setup-scripts checkout --detach v1
   ```
 
   Then restart the Copilot app. `git pull` doesn't work on a detached checkout; to go back to `main`, run `git -C ~/repos/repo-setup-scripts checkout main && git -C ~/repos/repo-setup-scripts pull`.
 - The loader and [`install.sh`](.github/extensions/demo-launcher/install.sh) work from a detached checkout, so you don't need to reinstall after switching tags.
-- **Templates can't be pinned.** GitHub always creates repos from a template's default branch, so a tag doesn't freeze the template repos. Template changes are guarded by their PR CI and by the test run before the event.
+- **Templates can't be pinned.** GitHub always creates repos from a template's default branch, so a tag doesn't freeze the template repos. Template changes are guarded by their PR CI and by the test run before each release.
 
-To cut a release, see [Cutting an event release](docs/releasing.md).
+To cut a release, see [Cutting a release](docs/releasing.md).
 
 ## Demos
 
@@ -232,7 +232,7 @@ How the loader works:
 - If you run the installer from a worktree, it points the loader at the **main checkout** anyway, because worktrees get deleted. If the main checkout doesn't have the extension yet, it falls back to the worktree with a warning. In that case, re-run it from the main checkout after merging.
 - In sessions inside this repo, the loader does nothing and lets that checkout's copy provide the canvas. That avoids two Demo Launchers in the session, and a branch you're working on uses its own version. Staff app builds may still list [two canvases](#two-demo-launcher-canvases) outside a session.
 
-**Update:** run `git -C ~/repos/repo-setup-scripts pull` (or check out the event's tag; see [Event releases](#event-releases)), then reload extensions or restart the app. You only need to re-run `install.sh` if `install.sh` itself changes. Re-running it is always safe.
+**Update:** run `git -C ~/repos/repo-setup-scripts pull` (or update the release tag; see [Releases](#releases)), then reload extensions or restart the app. You only need to re-run `install.sh` if `install.sh` itself changes. Re-running it is always safe.
 
 #### Install from a URL
 
@@ -252,7 +252,7 @@ Then restart the app. If the clone is missing, the canvas opens a page that says
 | --- | --- |
 | The app shows two or three "Demo Launcher" canvases | Check their labels. One **Personal** and one **repository: repo-setup-scripts** is expected; either works. Two **Personal** means both the script and a URL install; [remove one](#dont-install-both). See [Two Demo Launcher canvases](#two-demo-launcher-canvases). |
 | Copilot can't find the Demo Launcher outside this project | Run the install script (or [install from a URL](#install-from-a-url) outside the booth), then restart the app or reload extensions. Check that the loader exists (`~/.copilot/extensions/demo-launcher/extension.mjs` for a script install, `~/.copilot/extensions/demo-launcher-loader/extension.mjs` for a URL install) and that your clone is where the loader looks for it (see [How it finds the checkout](.github/extensions/demo-launcher-loader/README.md#how-it-finds-the-checkout)). If it still doesn't appear, open it from a session in the `repo-setup-scripts` project while you check the loader. |
-| The panel shows old behavior | Run `git pull` in the main checkout (or check out the event's tag; see [Event releases](#event-releases)) and reload extensions. `git status` shows `HEAD detached at booth-…` when the checkout is pinned to a tag. Sessions inside this project use their own checkout, so update that branch. A pinned **New worktree** session never picks up `git pull`; archive it and start a **Current checkout** session instead. |
+| The panel shows old behavior | Run `git pull` in the main checkout (or update the release tag; see [Releases](#releases)) and reload extensions. `git status` shows `HEAD detached at v1` when the checkout is pinned to a release. Sessions inside this project use their own checkout, so update that branch. A pinned **New worktree** session never picks up `git pull`; archive it and start a **Current checkout** session instead. |
 | A run fails with an auth or scope error, or cleanup asks for `delete_repo` | Run `gh auth status` in a terminal, then `gh auth refresh -h github.com -s codespace,delete_repo`. |
 | A run fails at **Creating PR** or a push, or stops with "git would push as 'X', but gh is logged in as 'Y'" | git and `gh` are signed in as different accounts (often the Copilot app's account vs. the booth login). The Demo Launcher handles this itself; update to the latest version. For terminal runs started from the app, check `gh auth status` and the account selected in the app. |
 | The demo was created in the wrong account | Repos go to the [logged-in account](#where-repos-are-created) unless you set **Owner**. Check `gh auth status`. |
@@ -348,7 +348,7 @@ Deleting repos needs the `delete_repo` scope. The scripts request it when they l
 # Start of the day, once per machine
 gh auth refresh -h github.com -s delete_repo
 
-# Each demo (skip the pull if the machine is pinned to an event release tag)
+# Each demo (skip the pull if the machine is pinned to a release tag)
 git pull
 bash ./create-repo.sh --template booth-bingo
 

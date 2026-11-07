@@ -357,6 +357,11 @@ validate_pr_entries() {
         [ -z "$body" ] && missing+=("${field}[$i].body_file")
         [ -z "$commit" ] && missing+=("${field}[$i].commit_message")
         [ -z "$title" ] && missing+=("${field}[$i].title")
+        if ! jq -e ".repos[$SELECTED_INDEX].${field}[$i] | (.trigger_ai_scan // false) | type == \"boolean\"" \
+            "$CONFIG_FILE" > /dev/null; then
+            echo "❌ ${field}[$i].trigger_ai_scan must be true or false"
+            exit 1
+        fi
         if [ -n "$resource_dir" ] && [ ! -d "$SCRIPT_DIR/$resource_dir" ]; then
             echo "❌ ${field}[$i].resource_dir not found: $SCRIPT_DIR/$resource_dir"
             exit 1
@@ -639,6 +644,37 @@ ensure_pr_code_scanning() {
     done
 }
 
+# PRs opened seconds after "gh workflow disable" can still run the template's
+# advanced CodeQL workflow, which fails because default setup rejects its uploads.
+# Delete it from the default branch before any PR branch is created, so no PR has it.
+# Run from the temp clone. Usage: remove_advanced_codeql_workflow <file name>
+remove_advanced_codeql_workflow() {
+    local path=".github/workflows/$1"
+    [ -f "$path" ] || return 0
+    echo "🧹 Removing $path from $DEFAULT_BRANCH (CodeQL default setup replaces it)..."
+    git rm --quiet -- "$path"
+    git commit -m "chore: remove $1 (CodeQL default setup is on)" --quiet
+    git_push origin "$DEFAULT_BRANCH" --quiet
+    if [ "$NO_CLONE" = false ]; then
+        git -C "$CLONE_PATH" pull --quiet origin "$DEFAULT_BRANCH"
+    fi
+    echo "✅ Removed $path"
+}
+
+# AI Scan reviews a PR on pushes after it's opened, not on the "opened" event, so
+# push an empty commit to each PR flagged "trigger_ai_scan" to start the review.
+# Run from the temp clone. Usage: trigger_ai_scan "<number> <branch>"...
+trigger_ai_scan() {
+    local entry
+    for entry in "$@"; do
+        echo "🤖 Pushing a commit to PR #${entry%% *} to trigger AI code scanning..."
+        git checkout --quiet "${entry#* }"
+        git commit --allow-empty -m "chore: trigger AI code scanning" --quiet
+        git_push origin "${entry#* }" --quiet
+    done
+    echo "✅ AI code scanning triggered; findings usually appear within 10 minutes"
+}
+
 # AI Scan only reviews PRs opened while code scanning is on, which for advanced
 # setup means after the first analysis upload (the template's CodeQL run on its
 # initial commit). Wait (bounded) for it; only warns on timeout.
@@ -915,6 +951,11 @@ validate_selected_repo() {
             ;;
         security_prs)
             validate_pr_entries prs 1
+            if ! jq -e ".repos[$SELECTED_INDEX].codeql_workflow | if . == null then \"x.yml\" else . end | type == \"string\" and test(\"^[A-Za-z0-9._-]+\\\\.ya?ml$\")" \
+                "$CONFIG_FILE" > /dev/null; then
+                echo "❌ codeql_workflow must be a workflow file name in .github/workflows, such as codeql-advanced.yml"
+                exit 1
+            fi
             if ! jq -e ".repos[$SELECTED_INDEX].code_scanning_languages // [\"x\"]
                 | type == \"array\" and length > 0 and all(.[]; type == \"string\" and length > 0)" \
                 "$CONFIG_FILE" > /dev/null; then
@@ -1337,17 +1378,28 @@ case $WORKFLOW in
             set_default_setup configured "${CODE_SCANNING_LANGUAGES[@]}"
             echo "✅ Dependabot alerts, security updates, and Code Scanning enabled"
             # Default setup rejects advanced-setup SARIF uploads, which would fail a check on every PR.
-            if gh workflow disable codeql-advanced.yml -R "$FULL_REPO_NAME" >/dev/null 2>&1; then
-                echo "✅ Disabled codeql-advanced.yml (default setup is on)"
+            # Disabling takes a while to apply, so the workflow is also deleted below before any PR branch exists.
+            CODEQL_WORKFLOW=$(repo_cfg '.codeql_workflow')
+            [ -z "$CODEQL_WORKFLOW" ] && CODEQL_WORKFLOW="codeql-advanced.yml"
+            if gh workflow disable "$CODEQL_WORKFLOW" -R "$FULL_REPO_NAME" >/dev/null 2>&1; then
+                echo "✅ Disabled $CODEQL_WORKFLOW (default setup is on)"
             else
-                echo "ℹ️  codeql-advanced.yml not found or already disabled"
+                echo "ℹ️  $CODEQL_WORKFLOW not found or already disabled"
             fi
         fi
 
+        if [ "$(repo_cfg '.ai_scan')" = "true" ]; then
+            enable_ai_scan
+        fi
+
         clone_to_temp
+        if [ "$ENABLE_SECURITY" = "true" ]; then
+            remove_advanced_codeql_workflow "$CODEQL_WORKFLOW"
+        fi
 
         PR_COUNT=$(jq ".repos[$SELECTED_INDEX].prs | length" "$CONFIG_FILE")
         SCANNED_PRS=()
+        AI_SCAN_PRS=()
         i=0
         while [ "$i" -lt "$PR_COUNT" ]; do
             pr_branch=$(jq -r ".repos[$SELECTED_INDEX].prs[$i].branch" "$CONFIG_FILE")
@@ -1363,10 +1415,16 @@ case $WORKFLOW in
                 "$pr_commit_msg" \
                 "$pr_title"
             SCANNED_PRS+=("$CREATED_PR_NUMBER $pr_branch")
+            if [ "$(jq -r ".repos[$SELECTED_INDEX].prs[$i].trigger_ai_scan // false" "$CONFIG_FILE")" = "true" ]; then
+                AI_SCAN_PRS+=("$CREATED_PR_NUMBER $pr_branch")
+            fi
             i=$((i + 1))
         done
         if [ "$ENABLE_SECURITY" = "true" ]; then
             ensure_pr_code_scanning "${SCANNED_PRS[@]}"
+        fi
+        if [ "${#AI_SCAN_PRS[@]}" -gt 0 ]; then
+            trigger_ai_scan "${AI_SCAN_PRS[@]}"
         fi
         ;;
 

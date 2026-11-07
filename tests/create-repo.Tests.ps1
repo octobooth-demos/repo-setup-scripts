@@ -15,7 +15,7 @@ $testState = [pscustomobject]@{
     StalePushRun = $false; GitCredentialUser = $null
     SetupState = 'configured'; SetupLanguages = @('actions'); SetupPending = $null; SetupLag = 0
     SetupRevertOnce = $false; SetupPatchFailure = $false; ConfigStatusPolls = 0
-    PrBranches = @{}; PrScans = 'start'; ForcePushed = $null; LanguagesFailure = $false
+    PrBranches = @{}; PrScans = 'start'; ForcePushed = $null; LanguagesFailure = $false; AdvancedWorkflow = 'codeql-advanced.yml'
 }
 Remove-Item Env:DEMO_NO_BROWSER -ErrorAction SilentlyContinue
 # Behave the same locally and in CI: the script skips browsers under Actions and
@@ -190,6 +190,10 @@ function gh {
         $clonePath = $arguments[3]
         New-Item -ItemType Directory -Path (Join-Path $clonePath 'api/src') -Force | Out-Null
         Set-Content -LiteralPath (Join-Path $clonePath 'api/src/existing.txt') -Value 'preserve me'
+        if ($testState.AdvancedWorkflow) {
+            New-Item -ItemType Directory -Path (Join-Path $clonePath '.github/workflows') -Force | Out-Null
+            Set-Content -LiteralPath (Join-Path $clonePath ".github/workflows/$($testState.AdvancedWorkflow)") -Value 'name: CodeQL Advanced'
+        }
         if ($clonePath.StartsWith($homeRepos)) {
             Set-Content -LiteralPath (Join-Path $clonePath 'package.json') -Value '{"scripts":{"start":"x","layer":"y"}}'
         }
@@ -208,7 +212,11 @@ function git {
         $testState.ForcePushed.Add($arguments[3])
         return
     }
-    if ($arguments[0] -eq 'commit' -and $arguments -contains '--amend') { return }
+    if ($arguments[0] -eq 'commit' -and ($arguments -contains '--amend' -or $arguments -contains '--allow-empty')) { return }
+    if ($arguments[0] -eq 'commit' -and "$($arguments[2])" -like 'chore: remove *') {
+        Assert (-not (Test-Path -LiteralPath './api/src/routes/legal.ts') -and -not (Test-Path -LiteralPath './php')) 'Removed the advanced CodeQL workflow after copying PR resources.'
+        return
+    }
     if (($arguments -join ' ') -like '*credential fill') {
         if (-not $testState.GitCredentialUser) { $global:LASTEXITCODE = 1; return }
         return @('protocol=https', 'host=github.com', 'username=x-access-token', 'password=git-helper-token')
@@ -307,7 +315,9 @@ try {
     foreach ($scenario in @(
         'repo-only', 'security-prs', 'security-prs-v4', 'security-prs-detect-languages', 'security-prs-languages-lag',
         'security-prs-setup-timeout', 'security-prs-setup-patch-failure', 'security-prs-bad-languages',
-        'security-prs-missed-scan', 'security-prs-scan-never', 'security-prs-config-stuck', 'security-prs-languages-failure', 'issue-codespace', 'branch-codespace',
+        'security-prs-missed-scan', 'security-prs-scan-never', 'security-prs-config-stuck', 'security-prs-languages-failure',
+        'security-prs-no-ai-trigger', 'security-prs-bad-ai-trigger',
+        'security-prs-no-advanced-workflow', 'security-prs-custom-workflow', 'security-prs-bad-workflow', 'issue-codespace', 'branch-codespace',
         'login', 'invalid-selection', 'no-machine', 'nested-body',
         'missing-template', 'missing-body', 'empty-prs', 'unknown-workflow',
         'outside-body', 'invalid-json', 'missing-org', 'empty-repos',
@@ -360,6 +370,7 @@ try {
         $testState.PrBranches = @{}
         $testState.PrScans = 'start'
         $testState.LanguagesFailure = $false
+        $testState.AdvancedWorkflow = 'codeql-advanced.yml'
         $testState.ForcePushed = New-Object 'System.Collections.Generic.List[string]'
         $testState.Opened = New-Object 'System.Collections.Generic.List[string]'
         $testState.NpmCalls = New-Object 'System.Collections.Generic.List[object]'
@@ -391,6 +402,23 @@ try {
             }
             'security-prs-setup-timeout' { $selection = '2'; $testState.SetupLag = 100000; $expectedFailure = 'did not cover javascript-typescript after 10 minutes (has: actions)' }
             'security-prs-setup-patch-failure' { $selection = '2'; $testState.SetupPatchFailure = $true; $expectedFailure = 'Could not change CodeQL default setup' }
+            'security-prs-no-ai-trigger' {
+                $selection = '2'
+                $config.repos[1].prs[1].PSObject.Properties.Remove('trigger_ai_scan')
+                $config.repos[1].PSObject.Properties.Remove('ai_scan')
+            }
+            'security-prs-no-advanced-workflow' { $selection = '2'; $testState.AdvancedWorkflow = $null }
+            'security-prs-custom-workflow' {
+                $selection = '2'
+                $testState.AdvancedWorkflow = 'codeql.yml'
+                $config.repos[1] | Add-Member -NotePropertyName codeql_workflow -NotePropertyValue 'codeql.yml'
+            }
+            'security-prs-bad-workflow' {
+                $selection = '2'
+                $config.repos[1] | Add-Member -NotePropertyName codeql_workflow -NotePropertyValue '../codeql.yml'
+                $expectedFailure = 'codeql_workflow must be'
+            }
+            'security-prs-bad-ai-trigger' { $selection = '2'; $config.repos[1].prs[1].trigger_ai_scan = 'yes'; $expectedFailure = 'trigger_ai_scan must be true or false' }
             'security-prs-bad-languages' { $selection = '2'; $config.repos[1].code_scanning_languages = @(); $expectedFailure = 'code_scanning_languages must be' }
             'issue-codespace' { $selection = '3' }
             'branch-codespace' { $selection = $branchSelection }
@@ -746,10 +774,49 @@ try {
                 Assert (($testState.ForcePushed -join ',') -eq $wantPushes) "Force-pushed '$($testState.ForcePushed -join ',')' (want '$wantPushes')."
                 $amends = @(Find-Calls 'git' 'commit --amend --no-edit')
                 Assert ($amends.Count -eq $testState.ForcePushed.Count) 'Every retrigger push should recommit the PR commit first.'
-                $disable = @(Find-Calls 'gh' 'workflow disable codeql-advanced.yml')
-                Assert ($disable.Count -eq 1 -and $disable[0].Arguments -contains $create.Arguments[2]) 'codeql-advanced.yml was not disabled.'
+                # Only the PHP PR sets "trigger_ai_scan", so it alone gets an extra (non-force) push.
+                $wantTrigger = $scenario -ne 'security-prs-no-ai-trigger'
+                $emptyCommits = @(Find-Calls 'git' 'commit --allow-empty -m chore: trigger AI code scanning')
+                Assert ($emptyCommits.Count -eq ([int]$wantTrigger)) "Made $($emptyCommits.Count) AI Scan trigger commits (want $([int]$wantTrigger))."
+                $triggerPushes = @((Find-Calls 'git' 'push origin ').Where({ $_.Arguments[2] -ne 'trunk' }))
+                Assert ($triggerPushes.Count -eq ([int]$wantTrigger)) "Pushed $($triggerPushes.Count) AI Scan trigger commits (want $([int]$wantTrigger))."
+                if ($wantTrigger) {
+                    Assert ($triggerPushes[0].Arguments[2] -eq 'feature/supplier-notes') "AI Scan trigger pushed '$($triggerPushes[0].Arguments[2])'."
+                    $commitAt = $testState.Calls.IndexOf($emptyCommits[0])
+                    $checkout = @(Find-Calls 'git' 'checkout --quiet feature/supplier-notes')
+                    Assert ($checkout.Count -ge 1 -and $testState.Calls.IndexOf($checkout[-1]) -lt $commitAt) 'AI Scan trigger commit was not made on the PHP branch.'
+                    Assert ($commitAt -lt $testState.Calls.IndexOf($triggerPushes[0])) 'Pushed before making the AI Scan trigger commit.'
+                    Assert ($testState.Calls.IndexOf($scanPolls[-1]) -lt $commitAt) 'Triggered AI Scan before checking CodeQL on the PRs.'
+                }
+                $aiScanPatch = @(Find-Calls 'gh' "api --method PATCH repos/$($create.Arguments[2])/code-scanning/ai-scan")
+                Assert ($aiScanPatch.Count -eq ([int]$wantTrigger)) "Changed the AI Scan setting $($aiScanPatch.Count) times (want $([int]$wantTrigger))."
+                if ($wantTrigger) {
+                    Assert ($testState.Calls.IndexOf($aiScanPatch[0]) -lt $testState.Calls.IndexOf((Find-Calls 'gh' 'pr create')[0])) 'Enabled AI Scan after opening the PRs.'
+                }
+                $workflowFile = if ($scenario -eq 'security-prs-custom-workflow') { 'codeql.yml' } else { 'codeql-advanced.yml' }
+                $disable = @(Find-Calls 'gh' "workflow disable $workflowFile")
+                Assert ($disable.Count -eq 1 -and $disable[0].Arguments -contains $create.Arguments[2]) "$workflowFile was not disabled."
                 $firstPr = $testState.Calls.IndexOf((Find-Calls 'gh' 'pr create')[0])
-                Assert ($testState.Calls.IndexOf($disable[0]) -lt $firstPr) 'codeql-advanced.yml was disabled after PRs were opened.'
+                Assert ($testState.Calls.IndexOf($disable[0]) -lt $firstPr) "$workflowFile was disabled after PRs were opened."
+                # The workflow is also deleted from the default branch before any PR branch exists.
+                $wantRemoval = [int]($null -ne $testState.AdvancedWorkflow)
+                $removals = @(Find-Calls 'git' "rm --quiet -- .github/workflows/$workflowFile")
+                $removalCommits = @(Find-Calls 'git' "commit -m chore: remove $workflowFile (CodeQL default setup is on)")
+                $mainPushes = @(Find-Calls 'git' 'push origin trunk')
+                Assert ($removals.Count -eq $wantRemoval -and $removalCommits.Count -eq $wantRemoval -and $mainPushes.Count -eq $wantRemoval) "Removed the advanced workflow $($removals.Count)/$($removalCommits.Count)/$($mainPushes.Count) times (want $wantRemoval)."
+                if ($wantRemoval) {
+                    $firstBranch = $testState.Calls.IndexOf((Find-Calls 'git' 'checkout --quiet -b')[0])
+                    Assert ($testState.Calls.IndexOf($removals[0]) -lt $testState.Calls.IndexOf($removalCommits[0]) -and
+                        $testState.Calls.IndexOf($removalCommits[0]) -lt $testState.Calls.IndexOf($mainPushes[0]) -and
+                        $testState.Calls.IndexOf($mainPushes[0]) -lt $firstBranch) 'Did not delete the advanced workflow from the default branch before creating PR branches.'
+                }
+                # The local clone (skipped with -NoClone) is updated so its default branch doesn't keep the deleted workflow.
+                $clonePulls = @((Find-Calls 'git' '-C').Where({ ($_.Arguments -join ' ').Contains('pull --quiet origin trunk') }))
+                $wantClonePull = [int]($wantRemoval -and $scenario -ne 'security-prs-v4')
+                Assert ($clonePulls.Count -eq $wantClonePull) "Updated the local clone $($clonePulls.Count) times (want $wantClonePull)."
+                if ($wantClonePull) {
+                    Assert ($clonePulls[0].Arguments[1].StartsWith($homeRepos) -and $testState.Calls.IndexOf($clonePulls[0]) -gt $testState.Calls.IndexOf($mainPushes[0])) 'Updated the wrong clone, or before pushing the removal.'
+                }
                 foreach ($prCall in (Find-Calls 'gh' 'pr create')) {
                     Assert ($prCall.Arguments -contains 'trunk') 'PR did not use the default branch.'
                 }

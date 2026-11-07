@@ -4,7 +4,7 @@ A small user-level Copilot extension that loads the [Demo Launcher](../demo-laun
 
 ## Which install to use
 
-- **Booth machines:** use the install scripts, not this URL. machine-setup's `setup.sh` / `install-demo-launcher.sh` (macOS and Linux, which run `install.sh`) and `setup.ps1` / `install-demo-launcher.ps1` (Windows) clone or update `~/repos/repo-setup-scripts` and write the loader in one step during machine setup. Re-running them repairs or updates it.
+- **Booth machines:** use the install scripts, not this URL. machine-setup's `setup.sh` / `install-demo-launcher.sh` (macOS and Linux, which run `install.sh`) and `setup.ps1` / `install-demo-launcher.ps1` (Windows) clone `~/repos/repo-setup-scripts` and write the loader in one step during machine setup. To repair or update it later, re-run `install-demo-launcher.sh` / `install-demo-launcher.ps1` (re-running the full `setup` script skips an existing loader).
 - **Everyone else:** install from the URL below. No script to run, and it works on Windows, macOS, and Linux.
 
 Use one or the other on a machine, [not both](#dont-install-both).
@@ -33,7 +33,7 @@ To remove it, remove `demo-launcher-loader` from the app's Extensions screen.
 
 A URL install is named after this folder, `demo-launcher-loader`, even if you ask for the name `demo-launcher` (verified on Windows). The scripts install to `demo-launcher`. So a URL install doesn't replace the script's loader, and with both you get two "Demo Launcher" canvases labeled **Personal**. The app's Extensions screen shows the folder names.
 
-To fix it, remove one and restart the app. On booth machines, keep the script's: remove `demo-launcher-loader` from the Extensions screen (or delete `~/.copilot/extensions/demo-launcher-loader`), then re-run the install script.
+To fix it, remove one and restart the app. On booth machines, keep the script's: remove `demo-launcher-loader` from the Extensions screen (or delete `~/.copilot/extensions/demo-launcher-loader`), then re-run `install-demo-launcher.sh` / `install-demo-launcher.ps1`.
 
 A **repository: repo-setup-scripts** "Demo Launcher" is fine; that's the project's copy if you added the repo as a project. See [Two Demo Launcher canvases](../../../README.md#two-demo-launcher-canvases).
 

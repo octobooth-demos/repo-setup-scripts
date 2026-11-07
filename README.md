@@ -185,7 +185,7 @@ A small user-level loader makes the launcher available in every session. There a
 
 | Where | Install with | Why |
 | --- | --- | --- |
-| **Booth machines** | The install scripts: machine-setup's `setup.sh` / `install-demo-launcher.sh` (macOS and Linux, which run this repo's [`install.sh`](.github/extensions/demo-launcher/install.sh)), or `setup.ps1` / `install-demo-launcher.ps1` (Windows) | One automatic step during machine setup. They clone or update `~/repos/repo-setup-scripts` and write the loader, with that checkout's path baked in. Re-running them repairs or updates it. |
+| **Booth machines** | The install scripts: machine-setup's `setup.sh` / `install-demo-launcher.sh` (macOS and Linux, which run this repo's [`install.sh`](.github/extensions/demo-launcher/install.sh)), or `setup.ps1` / `install-demo-launcher.ps1` (Windows) | One automatic step during machine setup: `setup` clones `~/repos/repo-setup-scripts` and writes the loader, with that checkout's path baked in. To repair or update it later, re-run `install-demo-launcher.sh` / `install-demo-launcher.ps1` (re-running the full `setup` script skips an existing loader). |
 | **Everywhere else** | [Install from a URL](#install-from-a-url), after cloning this repo | No script to run, and it works on Windows, macOS, and Linux. Easiest if you aren't using machine-setup. |
 
 Either way you need the clone: the launcher runs `config.json`, `create-repo`, and `resources/` from `~/repos/repo-setup-scripts`.
@@ -194,7 +194,7 @@ Either way you need the clone: the launcher runs `config.json`, `create-repo`, a
 
 A URL install is named after its folder, `demo-launcher-loader`, even if you ask for the name `demo-launcher` (verified on Windows). So it doesn't replace the script's `demo-launcher` loader. With both, the canvas list shows two **Personal** "Demo Launcher" entries. (The app's Extensions screen shows the folder names; the canvas list shows "Demo Launcher" for both.)
 
-To fix it, remove one and restart the app. On booth machines, keep the script's: remove `demo-launcher-loader` from the app's Extensions screen (or delete `~/.copilot/extensions/demo-launcher-loader`), then re-run the install script.
+To fix it, remove one and restart the app. On booth machines, keep the script's: remove `demo-launcher-loader` from the app's Extensions screen (or delete `~/.copilot/extensions/demo-launcher-loader`), then re-run `install-demo-launcher.sh` / `install-demo-launcher.ps1`.
 
 #### Run the install script
 

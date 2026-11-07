@@ -56,7 +56,7 @@ The Demo Launcher is a Copilot extension in [`.github/extensions/demo-launcher/`
 | Updating | `git pull` in the checkout, then restart the app or reload extensions | Same | Same. Each session uses its own checkout's copy |
 | Removing | Remove `demo-launcher-loader` from the app's Extensions screen | `install.sh --uninstall` (keeps run history) | Remove the project from the app |
 
-**Why the URL is the default outside the booth:** there's no script to run, and it works the same on every OS. Booth machines use the install scripts instead, because machine-setup clones or updates the repo and writes the loader in one automatic step, and re-running it repairs the install.
+**Why the URL is the default outside the booth:** there's no script to run, and it works the same on every OS. Booth machines use the install scripts instead, because machine-setup clones the repo and writes the loader in one automatic step, and its `install-demo-launcher` scripts repair or update it later.
 
 **Either way, clone the repo.** The loader imports the launcher from your checkout, and the launcher runs `config.json`, `create-repo`, and `resources/` from there. It looks in `DEMO_LAUNCHER_REPO` if set, then the checkout `install.sh` ran from (script installs only), then `~/repos/repo-setup-scripts` (`%USERPROFILE%\repos\repo-setup-scripts` on Windows). If the clone is missing, the canvas opens a page that says where to clone it. `git pull` updates the launcher; you don't need to reinstall.
 

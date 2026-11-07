@@ -21,7 +21,7 @@
       "owner": "org",
       "display_name": "Security Supply Chain (v4)",
       "description_short": "Security demo on the v4 OctoCAT Supply template: Copilot Autofix (TypeScript) + AI code scanning (PHP)",
-      "workflow_hint": "Creates repo + two demo PRs",
+      "workflow_hint": "Takes ~10 min (CodeQL setup, then AI findings on the PHP PR). Create it before the booth opens",
       "template": "security-octo-supply-v4",
       "repo_base_name": "security-octo-supply-v4",
       "repo_description": "Security supply chain demo (v4)",
@@ -49,7 +49,9 @@
       "summary_lines": [
         "Security features: Enabled (CodeQL default setup; codeql-advanced.yml removed)",
         "PRs: TypeScript + PHP demo PRs created",
-        "PHP findings: AI Code Scanning triggered (needs it on for the org); expect them in a few minutes, or push another small commit to the PHP PR if none after ~10 minutes"
+        "PHP findings: AI Code Scanning triggered (needs it on for the org); expect them in a few minutes, or push another small commit to the PHP PR if none after ~10 minutes",
+        "Dependabot: its fix PRs open first, so the demo PRs have higher numbers; use the PR links above",
+        "Presenter notes: resources/security-octo-supply-v4/ANSWER_KEY.md in repo-setup-scripts"
       ]
     },
     {

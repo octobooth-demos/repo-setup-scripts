@@ -655,6 +655,9 @@ remove_advanced_codeql_workflow() {
     git rm --quiet -- "$path"
     git commit -m "chore: remove $1 (CodeQL default setup is on)" --quiet
     git_push origin "$DEFAULT_BRANCH" --quiet
+    if [ "$NO_CLONE" = false ]; then
+        git -C "$CLONE_PATH" pull --quiet origin "$DEFAULT_BRANCH"
+    fi
     echo "✅ Removed $path"
 }
 

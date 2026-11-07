@@ -717,6 +717,9 @@ function Remove-AdvancedCodeQLWorkflow {
     Invoke-Native 'git' @('rm', '--quiet', '--', $path) | Out-Host
     Invoke-Native 'git' @('commit', '-m', "chore: remove $WorkflowFile (CodeQL default setup is on)", '--quiet') | Out-Host
     Invoke-GitPush @('origin', $defaultBranch, '--quiet')
+    if (-not $NoClone) {
+        Invoke-Native 'git' @('-C', $clonePath, 'pull', '--quiet', 'origin', $defaultBranch) | Out-Host
+    }
     Write-Host "Removed $path."
 }
 

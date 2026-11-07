@@ -810,6 +810,13 @@ try {
                         $testState.Calls.IndexOf($removalCommits[0]) -lt $testState.Calls.IndexOf($mainPushes[0]) -and
                         $testState.Calls.IndexOf($mainPushes[0]) -lt $firstBranch) 'Did not delete the advanced workflow from the default branch before creating PR branches.'
                 }
+                # The local clone (skipped with -NoClone) is updated so its default branch doesn't keep the deleted workflow.
+                $clonePulls = @((Find-Calls 'git' '-C').Where({ ($_.Arguments -join ' ').Contains('pull --quiet origin trunk') }))
+                $wantClonePull = [int]($wantRemoval -and $scenario -ne 'security-prs-v4')
+                Assert ($clonePulls.Count -eq $wantClonePull) "Updated the local clone $($clonePulls.Count) times (want $wantClonePull)."
+                if ($wantClonePull) {
+                    Assert ($clonePulls[0].Arguments[1].StartsWith($homeRepos) -and $testState.Calls.IndexOf($clonePulls[0]) -gt $testState.Calls.IndexOf($mainPushes[0])) 'Updated the wrong clone, or before pushing the removal.'
+                }
                 foreach ($prCall in (Find-Calls 'gh' 'pr create')) {
                     Assert ($prCall.Arguments -contains 'trunk') 'PR did not use the default branch.'
                 }

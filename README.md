@@ -426,11 +426,11 @@ Each overlay holds the cumulative files for its layer. The booth talk track is i
 
 **Create it ahead: about 10 minutes.** GitHub takes about 5 minutes to apply CodeQL default setup for JavaScript/TypeScript before the script opens the demo PRs, and the PHP PR's AI findings appear about 3–4 minutes after the script's automatic trigger commit. Create it once from the launcher before the booth opens, then bookmark the same repo on every booth machine (see [Before the booth opens](#before-the-booth-opens)). When it's done, everything is ready without a manual push:
 
-- Dependabot alerts, and Dependabot's security-update PRs (usually 3–9).
+- Dependabot alerts and Dependabot's security-update PRs.
 - CodeQL alerts with Copilot Autofix suggestions on the TypeScript PR.
 - Findings labeled **AI** on the PHP PR.
 
-Dependabot's PRs open within about a minute, while setup is still waiting for CodeQL, so the two demo PRs get higher numbers (for example #12 and #13). Use the PR links on the launcher card or in the setup log to find them. Where to show each finding, plus a live edit that triggers a fresh AI review, is in the [presenter notes](resources/security-octo-supply-v4/ANSWER_KEY.md).
+Where to show each finding, plus a live edit that triggers a fresh AI review, is in the [presenter notes](resources/security-octo-supply-v4/ANSWER_KEY.md).
 
 Before the demo:
 
